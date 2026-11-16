@@ -519,6 +519,20 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
   // A weapon order names a room on their ship, which may share an id with one of ours.
   const queuedFor = (key, id) => sim.state.commands.some((c) => c[key] === id && (key === 'slot') === c.type.startsWith('weapon.'));
 
+  /** What the room panel says about a broken system, or null if it is whole (D-118). */
+  function repairNote(roomId, sys) {
+    const system = sim.state.systems[sys];
+    if (!system.damage || system.lost) return null;
+    const broken = `${system.damage} of ${system.level} ${system.level === 1 ? 'bar' : 'bars'} broken`;
+    const here = Object.values(sim.state.crew).filter((m) => m.alive && m.owner === 'player' && m.room === roomId && !m.path.length);
+    const fixer = here.find((m) => m.task === 'repair');
+    if (fixer) return { busy: true, text: `${broken}. ${fixer.name} is repairing it: ${Math.floor((system.repair ?? 0) * 100)}% of the next bar.` };
+    if (here.length) return { busy: true, text: `${broken}. ${here[0].name} will repair it once the room is safe.` };
+    const coming = Object.values(sim.state.crew).find((m) => m.alive && m.owner === 'player' && m.goal === roomId);
+    if (coming) return { busy: true, text: `${broken}. ${coming.name} is on the way to repair it.` };
+    return { busy: false, text: `${broken}. Anyone standing in this room repairs it, about 8 s a bar.` };
+  }
+
   // ---------- the status panel ----------
 
   function select(next) {
@@ -1164,6 +1178,21 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
       const lights = button('btn-lights', 'Lights off', () => order({ type: 'room.lights', room: room.id, on: !sim.state.rooms[room.id].lightsOn }));
       const note = el('span', { class: 'status__note' });
       const controls = [lights];
+      // A broken system is fixed by whoever stands in its room (D-118). This sends the nearest free hand.
+      let repair = null;
+      if (sys && !sim.state.systems[sys].absent) {
+        repair = button('btn-repair', 'Send to repair', () => {
+          const crew = pickHand(sim, room.id);
+          if (!crew) {
+            refusal = { text: 'Nobody aboard can get there.', until: performance.now() + 2600 };
+            audio?.play('deny');
+            return;
+          }
+          order({ type: 'crew.move', crew, room: room.id, ship: 'us' });
+        });
+        repair.hidden = true;
+        controls.push(repair);
+      }
       let jettison = null;
       if (room.jettison) {
         // Two presses: the first arms it for a few seconds, the second cuts the room loose.
@@ -1198,7 +1227,7 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
         el('div', { class: 'status__stats' }, Object.values(stats).map((s) => s.node)),
         el('div', { class: 'status__controls' }, controls),
       );
-      panel = { kind: 'room', id: room.id, sys, stats, lights, jettison, armedUntil: 0, note };
+      panel = { kind: 'room', id: room.id, sys, stats, lights, repair, jettison, armedUntil: 0, note };
     } else {
       const door = layout.door(selected.id);
       const stats = { state: stat('State'), opening: stat('Opening') };
@@ -1396,6 +1425,13 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
         panel.jettison.classList.toggle('is-armed', armed && !r.jettisoned);
       }
       let note = refusalText() || (r.live ? '' : `No eyes in here. This is what it looked like ${seconds(r.age)} ago.`);
+      const fixing = panel.repair ? repairNote(panel.id, panel.sys) : null;
+      if (panel.repair) {
+        panel.repair.hidden = !fixing || r.jettisoned;
+        panel.repair.disabled = Boolean(fixing?.busy);
+        setText(panel.repair, fixing?.busy ? 'Repairing' : 'Send to repair');
+      }
+      if (fixing && !refusalText() && r.live) note = fixing.text;
       if (r.jettisoned) note = 'This section was cut loose. It is gone.';
       else if (queuedFor('room', panel.id)) note = 'Order queued';
       else if (armed) note = 'Everything inside will be lost. Press again to confirm.';
