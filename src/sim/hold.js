@@ -6,10 +6,8 @@
 // Kinds:
 //   ammo     an ordnance crate: `rounds` for the slug thrower and the lance
 //   cargo    a company manifest crate, sealed until someone opens it
-//   salvage  something taken off another ship (a surrender, for now)
+//   salvage  something taken off a wreck or handed over by another ship
 // Crates start where the ship file puts them (`crates` in content/ships/).
-// Both ships keep theirs the same way, so the enemy captain sends its own
-// people for rounds with the same orders the player gives.
 //
 // Every crate order is a job for one crew member of ours aboard our own ship:
 //   crate.open      walk to it and break the seal
@@ -164,7 +162,7 @@ export function pickHand(ship, roomId) {
   const helm = ship.layout.rooms.find((room) => room.kind === 'helm')?.id;
   let best = null;
   for (const member of Object.values(ship.state.crew)) {
-    if (!member.alive || !isHome(ship, member) || member.board || member.task === 'crossing') continue;
+    if (!member.alive || !isHome(ship, member)) continue;
     const route = findRoute(ship, member.room, roomId, member);
     if (!route) continue;
     const key = [member.job ? 1 : 0, member.room === helm && !member.path.length ? 1 : 0, route.length, member.index];
@@ -185,7 +183,6 @@ function hand(ship, cmd) {
   if (!member) return `no crew member "${cmd.crew}"`;
   if (!member.alive) return `${member.name} is dead`;
   if (!isHome(ship, member)) return `${member.name} is not aboard`;
-  if (member.board || member.task === 'crossing') return `${member.name} is on the way to the other ship`;
   return member;
 }
 
@@ -418,9 +415,9 @@ function stepJob(ship, member, seconds) {
 export function stepHold(ship, seconds) {
   for (const member of Object.values(ship.state.crew)) {
     // A boarding party's crates are boarders.js's to carry (H.2).
-    if (member.carry && (!member.alive || (!isHome(ship, member) && !member.party) || member.board)) letGo(ship, member);
+    if (member.carry && (!member.alive || (!isHome(ship, member) && !member.party))) letGo(ship, member);
     if (member.party) continue;
-    if (!member.alive || !member.job || member.board) continue;
+    if (!member.alive || !member.job) continue;
     if (ship.state.tick - member.job.since > JOB_SECONDS * 20) {
       // Too long: whatever is in the way, they give it up and step back to their spot in the room they are in.
       giveUp(ship, member, 'slow');

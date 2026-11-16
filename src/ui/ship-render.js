@@ -1,9 +1,8 @@
 // Draws a ship. Ours is seen side-on, as stacked decks (D-071): back walls,
 // pipes, deck plates, a deck lift under every hatch, the lift shaft, crawlway
-// hatches and the old company's stencils. The enemy is drawn as a sensor
-// return (D-073): room outlines in phosphor green, nothing else, and only the
-// rooms our sensors have resolved; the rest is static (D-074). A room of our
-// own that Margo cannot see into is drawn as she last saw it, behind static.
+// hatches and the old company's stencils. A room that Margo cannot see into is
+// drawn as she last saw it, behind static (D-074). Other ships are never drawn
+// here: they are returns on the scope (H.1, H.3).
 // All art is
 // drawn in code. The parts that never change are drawn once to an offscreen
 // canvas; lighting, doors, hazards, the lift cars and crew go on top every frame.
@@ -35,7 +34,6 @@ const C = {
   deck: '#46505c',
   rail: '#8a929e',
   hazard: '#c9a227',
-  phosphor: '#7fe39a',
   shield: '#7fd4ff',
   doorLeaf: '#8d6a34',
   doorLocked: '#b3372f',
@@ -80,8 +78,8 @@ const AIRLOCK_THICKNESS = 0.42;
 const TAP_MIN = 44;
 const CREW_COLOURS = ['#5ec8ff', '#ffd166', '#ef7bbf', '#8be28b', '#c9a0ff', '#ff9f5e', '#7fe3d0', '#e6e6e6'];
 
-/** A renderer for `layout`. `sensor` draws it as a sensor return (the enemy). */
-export function createShipRenderer(layout, { sensor = false } = {}) {
+/** A renderer for `layout`, our own ship. */
+export function createShipRenderer(layout) {
   let cache = null; // { canvas, key }
   let liftCar = null; // where the lift car was last drawn, in tiles: the top of the car
   let staticFrames = null; // a few tiles of screen static, made once
@@ -97,10 +95,10 @@ export function createShipRenderer(layout, { sensor = false } = {}) {
         for (let y = 0; y < 64; y += 2) {
           for (let x = 0; x < 64; x += 2) {
             const v = rng.next();
-            // Our own schematic keeps its rooms readable under the snow; an unresolved return is mostly snow.
-            const floor = sensor ? 0.45 : 0.72;
+            // The schematic keeps its rooms readable under the snow.
+            const floor = 0.72;
             if (v < floor) continue;
-            t.fillStyle = sensor ? `rgba(127, 227, 154, ${(v - floor) * 0.9})` : `rgba(233, 220, 195, ${(v - floor) * 2.4})`;
+            t.fillStyle = `rgba(233, 220, 195, ${(v - floor) * 2.4})`;
             t.fillRect(x, y, 2, 2);
           }
         }
@@ -197,7 +195,7 @@ export function createShipRenderer(layout, { sensor = false } = {}) {
    */
   function fit(area) {
     const { bounds } = layout;
-    const extra = sensor ? 0 : 1.6; // room for engine nozzles: on the left, on the right of a ship facing left, or underneath one whose bow points up
+    const extra = 1.6; // room for engine nozzles: on the left, on the right of a ship facing left, or underneath one whose bow points up
     const up = layout.facing === 'up';
     const w = bounds.w + (up ? 0 : extra);
     const h = bounds.h + (up ? extra : 0);
@@ -243,19 +241,12 @@ export function createShipRenderer(layout, { sensor = false } = {}) {
   }
 
   /** Everything tappable, in CSS pixels. Crew sit above doors, doors above rooms. */
-  function targets(view, crew = {}, { foe = false, crates = null } = {}) {
+  function targets(view, crew = {}, { crates = null } = {}) {
     const out = [];
     for (const member of Object.values(crew)) {
       // The whole body is the target, never narrower than a fingertip (brief §4).
       const box = bodyBox(view, member);
       out.push({ id: member.id, kind: 'crew', ...box, cx: box.x + box.w / 2, cy: box.y + box.h / 2, priority: 3 });
-    }
-    if (foe) {
-      // The other ship: its rooms, to aim at, send boarders to or look at, and any of ours aboard.
-      for (const room of layout.rooms) {
-        out.push({ id: room.id, kind: 'foe', x: view.ox + room.x * view.scale, y: view.oy + room.y * view.scale, w: room.w * view.scale, h: room.h * view.scale, priority: 1 });
-      }
-      return out;
     }
     for (const room of layout.rooms) {
       out.push({ id: room.id, kind: 'room', x: view.ox + room.x * view.scale, y: view.oy + room.y * view.scale, w: room.w * view.scale, h: room.h * view.scale, priority: 1 });
@@ -291,7 +282,7 @@ export function createShipRenderer(layout, { sensor = false } = {}) {
     const { bounds } = layout;
 
     // Engine nozzles, behind the hull.
-    const engines = sensor ? null : layout.roomOfSystem('engines');
+    const engines = layout.roomOfSystem('engines');
     if (engines && layout.facing === 'up') {
       const base = bounds.y + bounds.h;
       for (const cx of [engines.x + 1, engines.x + engines.w - 1]) {
@@ -320,11 +311,11 @@ export function createShipRenderer(layout, { sensor = false } = {}) {
       for (const cy of pairs) {
         const glow = ctx.createLinearGradient(edge - dir * 1.5, 0, edge, 0);
         glow.addColorStop(0, 'rgba(255, 138, 43, 0)');
-        glow.addColorStop(1, sensor ? 'rgba(127, 227, 154, 0.35)' : 'rgba(255, 138, 43, 0.5)');
+        glow.addColorStop(1, 'rgba(255, 138, 43, 0.5)');
         ctx.fillStyle = glow;
         ctx.fillRect(Math.min(edge, edge - dir * 1.5), cy - 0.6, 1.5, 1.2);
-        ctx.fillStyle = sensor ? '#06100a' : '#10141a';
-        ctx.strokeStyle = sensor ? C.phosphor : C.hullEdge;
+        ctx.fillStyle = '#10141a';
+        ctx.strokeStyle = C.hullEdge;
         ctx.lineWidth = 2 * px;
         ctx.beginPath();
         ctx.moveTo(edge + dir * 0.1, cy - 0.75);
@@ -337,47 +328,30 @@ export function createShipRenderer(layout, { sensor = false } = {}) {
       }
     }
 
-    if (sensor) {
-      hullPath(ctx);
-      ctx.fillStyle = 'rgba(4, 16, 9, 0.9)';
-      ctx.fill();
-      ctx.strokeStyle = C.phosphor;
-      ctx.lineWidth = 2 * px;
-      ctx.setLineDash([0.4, 0.25]);
-      ctx.stroke();
-      ctx.setLineDash([]);
-    } else {
-      // Hull
-      const steel = ctx.createLinearGradient(0, bounds.y, 0, bounds.y + bounds.h);
-      steel.addColorStop(0, C.hullTop);
-      steel.addColorStop(1, C.hullBottom);
-      hullPath(ctx);
-      ctx.fillStyle = steel;
-      ctx.fill();
-      ctx.save();
-      hullPath(ctx);
-      ctx.clip();
-      ctx.strokeStyle = 'rgba(0, 0, 0, 0.28)';
-      ctx.lineWidth = px;
-      ctx.beginPath();
-      for (let x = Math.ceil(bounds.x); x < bounds.x + bounds.w; x += 2) {
-        ctx.moveTo(x + 0.5, bounds.y);
-        ctx.lineTo(x + 0.5, bounds.y + bounds.h);
-      }
-      ctx.stroke();
-      ctx.restore();
-      hullPath(ctx);
-      ctx.strokeStyle = C.hullEdge;
-      ctx.lineWidth = 2 * px;
-      ctx.lineJoin = 'round';
-      ctx.stroke();
+    // Hull
+    const steel = ctx.createLinearGradient(0, bounds.y, 0, bounds.y + bounds.h);
+    steel.addColorStop(0, C.hullTop);
+    steel.addColorStop(1, C.hullBottom);
+    hullPath(ctx);
+    ctx.fillStyle = steel;
+    ctx.fill();
+    ctx.save();
+    hullPath(ctx);
+    ctx.clip();
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.28)';
+    ctx.lineWidth = px;
+    ctx.beginPath();
+    for (let x = Math.ceil(bounds.x); x < bounds.x + bounds.w; x += 2) {
+      ctx.moveTo(x + 0.5, bounds.y);
+      ctx.lineTo(x + 0.5, bounds.y + bounds.h);
     }
-
-    if (sensor) {
-      // Only the outline of the return is fixed: its rooms are drawn live, as the scan makes them out.
-      ctx.restore();
-      return;
-    }
+    ctx.stroke();
+    ctx.restore();
+    hullPath(ctx);
+    ctx.strokeStyle = C.hullEdge;
+    ctx.lineWidth = 2 * px;
+    ctx.lineJoin = 'round';
+    ctx.stroke();
 
     // Rooms, seen side-on: the back wall, pipes under the ceiling, a deck plate underfoot.
     for (const room of layout.rooms) {
@@ -487,62 +461,8 @@ export function createShipRenderer(layout, { sensor = false } = {}) {
       const text = room.name.toUpperCase();
       const maxWidth = room.w * s - 12;
       if (ctx.measureText(text).width > maxWidth && (room.kind === 'corridor' || room.kind === 'lift')) continue;
-      ctx.fillText(text, view.ox + room.x * s + 7, view.oy + room.y * s + (sensor ? 5 : 0.5 * s), maxWidth);
+      ctx.fillText(text, view.ox + room.x * s + 7, view.oy + room.y * s + 0.5 * s, maxWidth);
     }
-  }
-
-  /**
-   * A room on the sensor return (D-074). Until the scan resolves it, it is a
-   * smear of static that thickens; then a phosphor outline with its name.
-   * Returns true once it is resolved, so its hazards can be drawn over it.
-   */
-  function drawSensorRoom(ctx, view, room, known, time, still) {
-    const s = view.scale;
-    const x = view.ox + room.x * s;
-    const y = view.oy + room.y * s;
-    const w = room.w * s;
-    const h = room.h * s;
-    const resolve = known ? known.resolve : 1;
-    if (resolve < 1) {
-      ctx.save();
-      ctx.globalAlpha = 0.25 + 0.6 * resolve;
-      ctx.fillStyle = staticPattern(ctx, time, still);
-      ctx.fillRect(x + 3, y + 3, w - 6, h - 6);
-      ctx.restore();
-      if (resolve > 0.4) {
-        ctx.strokeStyle = `rgba(127, 227, 154, ${(resolve - 0.4) * 0.8})`;
-        ctx.lineWidth = 1;
-        ctx.setLineDash([3, 5]);
-        ctx.strokeRect(x + 1.5, y + 1.5, w - 3, h - 3);
-        ctx.setLineDash([]);
-      }
-      return false;
-    }
-    ctx.fillStyle = 'rgba(20, 60, 36, 0.55)';
-    ctx.fillRect(x, y, w, h);
-    ctx.strokeStyle = 'rgba(120, 230, 150, 0.16)';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    for (let gx = 1; gx < room.w; gx++) {
-      ctx.moveTo(x + gx * s, y);
-      ctx.lineTo(x + gx * s, y + h);
-    }
-    for (let gy = 1; gy < room.h; gy++) {
-      ctx.moveTo(x, y + gy * s);
-      ctx.lineTo(x + w, y + gy * s);
-    }
-    ctx.stroke();
-    ctx.strokeStyle = C.phosphor;
-    ctx.lineWidth = 2;
-    ctx.strokeRect(x, y, w, h);
-    ctx.font = `700 ${Math.max(9, Math.min(13, s * 0.36))}px ${MONO}`;
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'top';
-    ctx.fillStyle = 'rgba(150, 230, 170, 0.75)';
-    ctx.fillText(room.name.toUpperCase(), x + 7, y + 5, w - 12);
-    ctx.textAlign = 'start';
-    ctx.textBaseline = 'alphabetic';
-    return true;
   }
 
   /** Static over a room nobody can see into, and how long ago it was last seen. What is drawn under it is a memory. */
@@ -552,27 +472,25 @@ export function createShipRenderer(layout, { sensor = false } = {}) {
     const y = view.oy + room.y * s;
     const w = room.w * s;
     const h = room.h * s;
-    ctx.fillStyle = sensor ? 'rgba(2, 10, 6, 0.45)' : 'rgba(40, 46, 58, 0.22)';
+    ctx.fillStyle = 'rgba(40, 46, 58, 0.22)';
     ctx.fillRect(x, y, w, h);
     ctx.save();
-    ctx.globalAlpha = sensor ? 0.5 : 0.3;
+    ctx.globalAlpha = 0.3;
     ctx.fillStyle = staticPattern(ctx, time, still);
     ctx.fillRect(x, y, w, h);
     ctx.restore();
-    if (!sensor) {
-      // The schematic still knows the room is there: its outline and name stay on top of the snow.
-      ctx.strokeStyle = 'rgba(233, 220, 195, 0.3)';
-      ctx.lineWidth = 1;
-      ctx.setLineDash([6, 4]);
-      ctx.strokeRect(x + 2.5, y + 2.5, w - 5, h - 5);
-      ctx.setLineDash([]);
-      const name = room.name.toUpperCase();
-      ctx.font = `700 ${Math.max(9, Math.min(13, s * 0.36))}px ${MONO}`;
-      ctx.textAlign = 'left';
-      ctx.textBaseline = 'top';
-      ctx.fillStyle = 'rgba(233, 220, 195, 0.7)';
-      if (ctx.measureText(name).width <= w - 12 || (room.kind !== 'corridor' && room.kind !== 'lift')) ctx.fillText(name, x + 7, y + 0.5 * s, w - 12);
-    }
+    // The schematic still knows the room is there: its outline and name stay on top of the snow.
+    ctx.strokeStyle = 'rgba(233, 220, 195, 0.3)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([6, 4]);
+    ctx.strokeRect(x + 2.5, y + 2.5, w - 5, h - 5);
+    ctx.setLineDash([]);
+    const name = room.name.toUpperCase();
+    ctx.font = `700 ${Math.max(9, Math.min(13, s * 0.36))}px ${MONO}`;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.fillStyle = 'rgba(233, 220, 195, 0.7)';
+    if (ctx.measureText(name).width <= w - 12 || (room.kind !== 'corridor' && room.kind !== 'lift')) ctx.fillText(name, x + 7, y + 0.5 * s, w - 12);
     if (w < 64) return; // a lift shaft has no room for words
     const text = `${label} ${clock(age)}`;
     ctx.font = `700 ${Math.max(9, Math.min(11, s * 0.3))}px ${MONO}`;
@@ -581,7 +499,7 @@ export function createShipRenderer(layout, { sensor = false } = {}) {
     const tw = Math.min(w - 8, ctx.measureText(text).width + 8);
     ctx.fillStyle = 'rgba(5, 7, 11, 0.85)';
     ctx.fillRect(x + 4, y + h - 19, tw, 15);
-    ctx.fillStyle = sensor ? C.phosphor : C.paper;
+    ctx.fillStyle = C.paper;
     ctx.fillText(text, x + 8, y + h - 5, w - 16);
     ctx.textAlign = 'start';
     ctx.textBaseline = 'alphabetic';
@@ -736,7 +654,7 @@ export function createShipRenderer(layout, { sensor = false } = {}) {
 
   /** Every crate aboard: on the floor where it sits, or in the arms of whoever carries it. */
   function drawCrates(ctx, view, state, alpha, chosen) {
-    if (sensor || !state.crates) return;
+    if (!state.crates) return;
     ctx.save();
     ctx.translate(view.ox, view.oy);
     ctx.scale(view.scale, view.scale);
@@ -804,10 +722,8 @@ export function createShipRenderer(layout, { sensor = false } = {}) {
       return;
     }
 
-    // Lamp light: a warm pool, strongest in the middle. A sensor return shows no lamps.
-    if (sensor) {
-      // nothing: hazards only
-    } else if (r.light > 0) {
+    // Lamp light: a warm pool, strongest in the middle.
+    if (r.light > 0) {
       const pool = ctx.createRadialGradient(x + w / 2, y + h / 2, 0, x + w / 2, y + h / 2, Math.max(w, h) * 0.7);
       pool.addColorStop(0, `rgba(255, 190, 110, ${0.2 * r.light})`);
       pool.addColorStop(1, 'rgba(255, 150, 60, 0)');
@@ -815,7 +731,7 @@ export function createShipRenderer(layout, { sensor = false } = {}) {
       ctx.fillRect(x, y, w, h);
     }
     // Darkness where the lamps are off.
-    if (r.light < 1 && !sensor) {
+    if (r.light < 1) {
       ctx.fillStyle = `rgba(3, 5, 9, ${0.82 * (1 - r.light)})`;
       ctx.fillRect(x, y, w, h);
     }
@@ -1315,13 +1231,11 @@ export function createShipRenderer(layout, { sensor = false } = {}) {
   }
 
   /** A weapon on its hardpoint: a turret, a ring that fills as it charges, and its number. */
-  function drawHardpoint(ctx, view, index, slot, fraction, chosen) {
+  function drawHardpoint(ctx, view, index, slot, fraction) {
     const at = hardpointAt(view, index);
     const r = Math.max(7, view.scale * 0.34);
-    const aim = layout.enemy ? Math.PI : 0; // the two ships face each other across the screen
     ctx.save();
     ctx.translate(at.x, at.y);
-    ctx.rotate(aim);
     ctx.fillStyle = '#10141a';
     ctx.strokeStyle = slot.powered ? C.amber : C.hullEdge;
     ctx.lineWidth = 2;
@@ -1342,13 +1256,6 @@ export function createShipRenderer(layout, { sensor = false } = {}) {
       ctx.lineWidth = 3;
       ctx.stroke();
     }
-    if (chosen) {
-      ctx.beginPath();
-      ctx.arc(at.x, at.y, r + 5, 0, Math.PI * 2);
-      ctx.strokeStyle = C.paper;
-      ctx.lineWidth = 2;
-      ctx.stroke();
-    }
     ctx.fillStyle = slot.powered ? C.amber : '#8b93a1';
     ctx.font = `700 ${Math.max(9, r * 1.1)}px ${MONO}`;
     ctx.textAlign = 'center';
@@ -1356,48 +1263,6 @@ export function createShipRenderer(layout, { sensor = false } = {}) {
     ctx.fillText(String(index + 1), at.x, at.y + 1);
     ctx.textAlign = 'start';
     ctx.textBaseline = 'alphabetic';
-  }
-
-  /** Aiming marks on rooms of this ship: corner brackets and the numbers of the weapons pointed there. */
-  function drawReticles(ctx, view, aimed, inviting) {
-    const s = view.scale;
-    if (inviting) {
-      // A weapon is waiting for a target: every room says "tap me".
-      ctx.strokeStyle = 'rgba(233, 220, 195, 0.55)';
-      ctx.lineWidth = 1.5;
-      ctx.setLineDash([5, 5]);
-      for (const room of layout.rooms) ctx.strokeRect(view.ox + room.x * s + 4, view.oy + room.y * s + 4, room.w * s - 8, room.h * s - 8);
-      ctx.setLineDash([]);
-    }
-    for (const [roomId, slots] of aimed) {
-      const room = layout.room(roomId);
-      if (!room) continue;
-      const x = view.ox + room.x * s + 5;
-      const y = view.oy + room.y * s + 5;
-      const w = room.w * s - 10;
-      const h = room.h * s - 10;
-      const arm = Math.min(w, h) * 0.28;
-      ctx.strokeStyle = C.alarm;
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      for (const [cx, cy, dx, dy] of [[x, y, 1, 1], [x + w, y, -1, 1], [x, y + h, 1, -1], [x + w, y + h, -1, -1]]) {
-        ctx.moveTo(cx + dx * arm, cy);
-        ctx.lineTo(cx, cy);
-        ctx.lineTo(cx, cy + dy * arm);
-      }
-      ctx.stroke();
-      const label = slots.map((slot) => slot + 1).join(' ');
-      ctx.font = `700 12px ${MONO}`;
-      const tw = ctx.measureText(label).width + 10;
-      ctx.fillStyle = C.alarm;
-      ctx.fillRect(x + w / 2 - tw / 2, y + h - 17, tw, 17);
-      ctx.fillStyle = '#fff';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(label, x + w / 2, y + h - 8);
-      ctx.textAlign = 'start';
-      ctx.textBaseline = 'alphabetic';
-    }
   }
 
   /** A ship whose hull has given out: dark, and labelled so. */
@@ -1422,42 +1287,31 @@ export function createShipRenderer(layout, { sensor = false } = {}) {
   /**
    * What is known, not what is so (senses.js):
    *   rooms      our own rooms as Margo knows them: { id: roomView }. A room with live: false is drawn from memory, behind static
-   *   contact    for a sensor return: { id: contactView }. A room is static until its scan resolves it
-   * Without them the ship is drawn exactly as it is.
-   * Extra, for fights:
-   *   clear      false to draw over what is already on the canvas (the second ship)
+   * Without it the ship is drawn exactly as it is.
+   *   clear      false to draw over what is already on the canvas
    *   charges    each weapon's charge, 0 to 1, by slot
-   *   chosenWeapon  the slot picked for aiming, or null
-   *   aimed      Map of room id -> [weapon slots of the other ship pointed at it]
-   *   inviting   true while the other ship is choosing a room of this one to aim at
-   * Crew are drawn by whose they are: the enemy's in alarm red with an initial,
-   * wherever they stand. Anyone in the docking tube is drawn faded.
+   * Crew are drawn by whose they are: boarders in alarm red with an initial,
+   * and only where we can see.
    */
-  function draw(ctx, { view, width, height, dpr, state, time, alpha = 1, selected, selectedCrew = null, selectedCrate = null, showCrawlways = false, reduceFlicker = false, clear = true, charges = [], chosenWeapon = null, aimed = null, inviting = false, rooms = null, contact = null }) {
+  function draw(ctx, { view, width, height, dpr, state, time, alpha = 1, selected, selectedCrew = null, selectedCrate = null, showCrawlways = false, reduceFlicker = false, clear = true, charges = [], rooms = null }) {
     if (clear) ctx.clearRect(0, 0, width, height);
     ctx.drawImage(staticLayer(view, width, height, dpr), 0, 0, width, height);
     const s = view.scale;
 
-    /** Rooms whose people cannot be seen: unresolved or stale on a sensor return, unwatched aboard our own ship. */
+    /** Rooms whose people cannot be seen: nobody aboard can watch them. */
     const unseen = new Set();
     for (const room of layout.rooms) {
-      const known = sensor ? (contact?.[room.id] ?? null) : (rooms?.[room.id] ?? null);
-      if (sensor && !drawSensorRoom(ctx, view, room, known, time, reduceFlicker)) {
-        unseen.add(room.id);
-        continue;
-      }
+      const known = rooms?.[room.id] ?? null;
       drawRoomLive(ctx, view, room, known ?? state.rooms[room.id], time, reduceFlicker);
       if (known && !known.live) {
         unseen.add(room.id);
-        drawFog(ctx, view, room, known.age, time, reduceFlicker, sensor ? 'LAST SCAN' : 'NO EYES');
+        drawFog(ctx, view, room, known.age, time, reduceFlicker, 'NO EYES');
       }
     }
-    if (!sensor && state.systems) for (const room of layout.rooms) if (room.system) drawSystemDamage(ctx, view, room, state);
+    if (state.systems) for (const room of layout.rooms) if (room.system) drawSystemDamage(ctx, view, room, state);
     drawLift(ctx, view, state, alpha);
-    if (!sensor) drawDeckLifts(ctx, view, state, alpha, time);
-    // A sensor return does not show their doors until the rooms either side are made out.
+    drawDeckLifts(ctx, view, state, alpha, time);
     for (const door of layout.doors) {
-      if (sensor && contact && [door.a, door.b].some((id) => id !== 'space' && (contact[id]?.resolve ?? 1) < 1)) continue;
       drawDoor(ctx, view, door, state.doors[door.id], state.doors[door.id].openness);
     }
 
@@ -1469,22 +1323,18 @@ export function createShipRenderer(layout, { sensor = false } = {}) {
     drawCrates(ctx, view, state, alpha, selectedCrate);
     for (const member of crew) {
       if (!member.alive) continue;
-      if (member.task === 'crossing') ctx.globalAlpha = 0.45;
       drawCrew(ctx, view, member, alpha, member.id === selectedCrew, time);
-      ctx.globalAlpha = 1;
     }
 
-    state.weapons.forEach((slot, index) => drawHardpoint(ctx, view, index, slot, charges[index] ?? 0, chosenWeapon === index));
+    state.weapons.forEach((slot, index) => drawHardpoint(ctx, view, index, slot, charges[index] ?? 0));
     drawShield(ctx, view, state.shield, time, reduceFlicker);
-    if (aimed) drawReticles(ctx, view, aimed, inviting);
     if (state.hull.points === 0) drawWreck(ctx, view);
 
     if (selected) {
       ctx.strokeStyle = C.paper;
       ctx.lineWidth = 2.5;
-      if (selected.kind === 'room' || selected.kind === 'foe') {
+      if (selected.kind === 'room') {
         const room = layout.room(selected.id);
-        if (sensor && contact && (contact[selected.id]?.resolve ?? 1) < 1) ctx.setLineDash([4, 5]);
         ctx.strokeRect(view.ox + room.x * s - 1, view.oy + room.y * s - 1, room.w * s + 2, room.h * s + 2);
       } else {
         const rect = doorRect(layout.door(selected.id));

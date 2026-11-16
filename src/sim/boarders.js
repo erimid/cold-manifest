@@ -128,9 +128,10 @@ function words(sim, text) {
 
 /**
  * Clamp on: a party is at our airlock with `def`'s goal. Returns the boarding, or null if one is already on
- * or there is no airlock to dock at. `contact` is the scope contact it came from, if any.
+ * or there is no airlock to dock at. `contact` is the scope contact it came from, if any; `size` is how many
+ * of the party got here, when some of their pods were shot down (H.3).
  */
-export function startBoarding(sim, def, { contact = null, at = null } = {}) {
+export function startBoarding(sim, def, { contact = null, at = null, size = null } = {}) {
   if (sim.state.boarding || !def?.party) return null;
   const locks = airlockRooms(sim);
   if (!locks.length) return null;
@@ -143,6 +144,7 @@ export function startBoarding(sim, def, { contact = null, at = null } = {}) {
     name: def.name,
     wants: def.wants,
     contact,
+    size: Math.max(1, Math.min(def.party.size, size ?? def.party.size)), // how many come through the lock
     phase: 'demand',
     dock: at && locks.includes(at) ? at : rng.pick(locks),
     since: sim.state.tick,
@@ -176,7 +178,7 @@ function comeAboard(sim) {
   const { party } = def;
   boarding.phase = 'aboard';
   boarding.deadline = sim.state.tick + Math.round(party.stay * TICKS);
-  for (let n = 0; n < party.size; n++) {
+  for (let n = 0; n < boarding.size; n++) {
     const id = `b${boarding.id}-${n + 1}`;
     const name = party.names?.[n] ?? `${def.name} crew ${n + 1}`;
     const member = newCrewMember(sim.layout, { id, name, skills: party.skills ?? {} }, boarding.dock, 10 + n, 'enemy');
@@ -189,7 +191,7 @@ function comeAboard(sim) {
     sim.state.crew[id] = member;
     boarding.party.push(id);
   }
-  sim.events.emit('boarding.aboard', { boarding: boarding.id, encounter: def.id, name: def.name, wants: def.wants, room: boarding.dock, size: party.size, tick: sim.state.tick });
+  sim.events.emit('boarding.aboard', { boarding: boarding.id, encounter: def.id, name: def.name, wants: def.wants, room: boarding.dock, size: boarding.size, tick: sim.state.tick });
   // The S2.4 news, so the auto-pause and Margo hear it the way they always have.
   sim.events.emit('enemy.crew.boarded', { crew: boarding.party[0], onto: 'player', room: boarding.dock, tick: sim.state.tick });
 }

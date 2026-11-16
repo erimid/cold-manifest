@@ -33,8 +33,10 @@ export const TRUST = Object.freeze({
   heardArgument: 1, // standing down when she argued
   heardRefusal: 3, // standing down when she refused
   deathAfterOverride: -8, // someone she warned about died of it
-  fightWon: 2,
+  slipped: 2, // a ship that was after us went away without getting what it came for
 });
+/** Ways an encounter ends that count as getting away with it (encounters.js ENDINGS): the ship was after us and left with nothing. */
+const SLIPPED = new Set(['quiet', 'outrun', 'decoy', 'bluff', 'deterred']);
 /** How many orders she will flatly refuse in one run (brief §9: "a few"). After that she only argues. */
 export const REFUSALS_PER_RUN = 3;
 /** How long a held order waits for the captain before it lapses. */
@@ -150,7 +152,7 @@ export function stepJudgement(sim) {
 
 /** What happens elsewhere that moves her trust. Called once when the sim is created. */
 export function attachJudgement(sim) {
-  sim.events.on('fight.won', () => changeTrust(sim, TRUST.fightWon, 'fight'));
+  sim.events.on('encounter.ended', (event) => SLIPPED.has(event.outcome) && changeTrust(sim, TRUST.slipped, 'slipped'));
   sim.events.on('crew.died', (event) => {
     const { overrides } = sim.state.ai;
     const at = overrides.findIndex((entry) => entry.crew.includes(event.crew) && sim.state.tick - entry.tick < BLAME_SECONDS * TICKS);

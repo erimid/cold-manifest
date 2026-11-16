@@ -82,6 +82,7 @@ export const ENDINGS = Object.freeze({
 
 /** Has the run been lost to the sim? 'destroyed', 'crew-dead' or null. */
 export function lostEnding(sim) {
+  if (sim.state.hull.points === 0) return 'destroyed';
   const crew = ourCrew(sim);
   if (crew.length && crew.every(({ member }) => !member.alive)) return 'crew-dead';
   return null;

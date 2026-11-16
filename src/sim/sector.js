@@ -6,25 +6,24 @@
 // checkpoints) in columns, joined by lanes. Every lane costs fuel, one or two
 // for a long one, and every jump counts against the contract's deadline.
 //
-// A jump is the same act whether we are running from a fight or not
-// (D-087): plot a course down a lane, let the sensors take a fix with someone
-// at the helm, then jump. Out of a fight the fix builds while the ship goes
-// about its business, so a fire or a hull breach still has to be dealt with
-// while she works it out. In a fight, a course plotted before we escape is
-// where the escape takes us.
+// A jump (D-087): plot a course down a lane, let the sensors take a fix with
+// someone at the helm, then jump. The fix builds while the ship goes about
+// its business, so a fire or a hull breach still has to be dealt with while
+// she works it out. Nobody jumps with a ship alongside or clamped on.
 //
 // Some contracts are followed (the pursuit hook). A ship sets out from the
 // origin a couple of jumps behind us and closes one lane a jump, by the
 // shortest way. Going straight keeps the gap; every detour gives it a lane.
-// If it reaches the point we are at, a fight starts. Margo only sees it
+// If it reaches the point we are at, it turns up on the scope already closing
+// (H.3: it used to start a duel; H.6 makes it a contact on the lanes). Margo only sees it
 // within a couple of lanes, and only with the sensors running: otherwise the
 // chart shows where it was last seen.
 //
 // Everything here is generated from the 'map' RNG stream and kept in
 // `sim.state.run`, so a run replays from its seed and saves with the rest.
 
-import { endFight, startFight, whyNoJump, stepFix } from './combat.js';
-import { heldAlongside } from './encounters.js';
+import { whyNoJump, stepFix } from './combat.js';
+import { heldAlongside, spawnContact } from './encounters.js';
 
 /** What a point on the chart can be, as the chart labels it. */
 export const NODE_KINDS = Object.freeze({
@@ -281,7 +280,6 @@ export function newRunState(def, rng, { pursuit, slack: spare } = {}) {
     plot: null, // the point we have plotted a course to, one lane away
     late: false, // past the deadline
     delivered: false, // reached the delivery port
-    escape: null, // a course to take once an escape from a fight is settled (stepSector)
     rule: { ...def.pursuit }, // how a pursuer of this sector behaves, kept so the debug panel can call one up
     pursuit: followed ? newPursuit(def.pursuit, map.start) : null,
   };
@@ -289,14 +287,14 @@ export function newRunState(def, rng, { pursuit, slack: spare } = {}) {
 
 export function newPursuit(rule, at) {
   return {
-    ship: rule.ship,
+    encounter: rule.encounter, // the kind of contact it is, from content/encounters/
     at,
     wait: rule.lead, // jumps of ours before it moves again
     lead: rule.lead,
     sight: rule.sight, // lanes away Margo can see it, with the sensors running
     seen: false, // seen on our last jump
     lastSeen: null, // { node, jump }
-    caught: 0, // fights it has forced
+    caught: 0, // times it has caught up with us
     done: false, // beaten off for good
   };
 }
@@ -314,12 +312,11 @@ export function whyNoPlot(sim, to) {
   return null;
 }
 
-/** Why we cannot make the plotted jump right now, or null. Out of a fight only: in one, ship.jump escapes. */
+/** Why we cannot make the plotted jump right now, or null. */
 export function whyNoCourseJump(sim) {
   const run = sim.state.run;
   if (!run) return 'there is no chart for this run';
   if (!run.plot) return 'no course is plotted';
-  if (sim.state.fight && !sim.state.fight.over) return 'in a fight a jump is an escape: use the fight controls';
   const lane = laneBetween(run.map, run.at, run.plot);
   if (run.fuel < lane.fuel) return `that lane takes ${lane.fuel} fuel and we have ${run.fuel}`;
   if (heldAlongside(sim)) return 'a ship is alongside: she cannot jump with it this close';
@@ -328,7 +325,7 @@ export function whyNoCourseJump(sim) {
 }
 
 /** Cross the lane to `to`: fuel, the jump count, the deadline, the pursuit, and arriving. */
-function travel(sim, to, how, newShipState) {
+function travel(sim, to, how) {
   const run = sim.state.run;
   const { tick } = sim.state;
   const lane = laneBetween(run.map, run.at, to);
@@ -352,11 +349,11 @@ function travel(sim, to, how, newShipState) {
   sim.events.emit('sector.arrived', { node: to, kind: node.kind, name: node.name, hazard: node.hazard ?? null, tick });
   const cheapest = Math.min(...run.map.lanes.filter((l) => l.a === to || l.b === to).map((l) => l.fuel));
   if (!run.delivered && run.fuel < cheapest) sim.events.emit('fuel.out', { node: to, fuel: run.fuel, tick });
-  stepPursuit(sim, newShipState);
+  stepPursuit(sim);
 }
 
 /** The pursuer's move after each of our jumps: wait, or close one lane; then whether Margo sees it, and whether it has us. */
-function stepPursuit(sim, newShipState) {
+function stepPursuit(sim) {
   const run = sim.state.run;
   const chase = run.pursuit;
   if (!chase || chase.done || run.delivered) return; // at the drop the cargo is signed for, and nobody is owed a chase
@@ -368,55 +365,50 @@ function stepPursuit(sim, newShipState) {
   chase.seen = lanes <= chase.sight && sim.state.systems.sensors.power > 0;
   if (chase.seen) {
     chase.lastSeen = { node: chase.at, jump: run.jumps };
-    if (!wasSeen) sim.events.emit('pursuit.sighted', { node: chase.at, lanes, ship: chase.ship, tick });
+    if (!wasSeen) sim.events.emit('pursuit.sighted', { node: chase.at, lanes, encounter: chase.encounter, tick });
   }
-  if (chase.at === run.at) caught(sim, newShipState);
+  if (chase.at === run.at) caught(sim);
 }
 
-/** The pursuer is alongside: a fight, with the ship that has followed us. */
-function caught(sim, newShipState) {
+/** The pursuer has us: it turns up on the scope close by, already sure of us and closing. */
+function caught(sim) {
   const run = sim.state.run;
   const chase = run.pursuit;
   chase.caught += 1;
   chase.lastSeen = { node: chase.at, jump: run.jumps };
-  if (sim.state.fight) endFight(sim);
-  startFight(sim, chase.ship, newShipState);
-  sim.state.fight.pursuer = true;
-  sim.events.emit('pursuit.caught', { node: run.at, ship: chase.ship, tick: sim.state.tick });
+  const def = sim.encounters.byId.get(chase.encounter);
+  if (def) {
+    const contact = spawnContact(sim, def, { range: PURSUER_RANGE, bearing: sim.rng.stream('encounters').range(0, 360), state: 'closing' });
+    contact.pursuer = true;
+  }
+  sim.events.emit('pursuit.caught', { node: run.at, encounter: chase.encounter, tick: sim.state.tick });
 }
 
-/** A fight is decided: an escape takes the plotted course, and a pursuer beaten off for now falls back. */
+/** How far out a pursuer that has caught up with us turns up, in scope units. */
+const PURSUER_RANGE = 40;
+
+/** A pursuer's encounter ends: driven off by the gun, it gives up for good; any other way, it picks the trail up again. */
 export function attachSector(sim) {
-  sim.events.on('fight.over', (event) => {
+  sim.events.on('encounter.ended', (event) => {
     const run = sim.state.run;
-    if (!run) return;
-    if (event.outcome === 'escaped' && run.plot && !whyNoPlot(sim, run.plot)) run.escape = run.plot;
-    if (sim.state.fight?.pursuer && run.pursuit) {
-      if (['destroyed', 'crew-dead', 'surrendered'].includes(event.outcome)) {
-        run.pursuit.done = true;
-        sim.events.emit('pursuit.ended', { outcome: event.outcome, tick: sim.state.tick });
-      } else run.pursuit.wait = run.pursuit.lead; // it lost us here; it will pick the trail up again
-    }
+    if (!event.pursuer || !run?.pursuit || run.pursuit.done) return;
+    if (event.outcome === 'deterred') {
+      run.pursuit.done = true;
+      sim.events.emit('pursuit.ended', { outcome: event.outcome, tick: sim.state.tick });
+    } else run.pursuit.wait = run.pursuit.lead;
   });
 }
 
-/** Each tick: settle an escape down the plotted lane, and work the fix for a plotted course out of a fight. */
-export function stepSector(sim, dt, newShipState) {
+/** Each tick: work the fix for a plotted course. */
+export function stepSector(sim, dt) {
   const run = sim.state.run;
   if (!run) return;
-  if (run.escape) {
-    const to = run.escape;
-    run.escape = null;
-    if (sim.state.fight) endFight(sim);
-    travel(sim, to, 'escape', newShipState);
-    return;
-  }
-  if (run.plot && !sim.state.fight) stepFix(sim, dt, { ready: 'course.ready', lost: 'course.lost' });
+  if (run.plot) stepFix(sim, dt, { ready: 'course.ready', lost: 'course.lost' });
 }
 
-export function sectorCommands(newShipState) {
+export function sectorCommands() {
   return {
-    // Plot a course down one lane (to: a point id), or clear it (to: null). Works in a fight too: it is where an escape goes.
+    // Plot a course down one lane (to: a point id), or clear it (to: null).
     'course.plot': {
       check: (sim, cmd) => whyNoPlot(sim, cmd.to),
       apply(sim, cmd) {
@@ -425,12 +417,11 @@ export function sectorCommands(newShipState) {
         sim.events.emit('course.plotted', { to: cmd.to, from: run.at, tick: sim.state.tick });
       },
     },
-    // Jump down the plotted lane once the sensors have a fix (out of a fight; in one, ship.jump is an escape).
+    // Jump down the plotted lane once the sensors have a fix.
     'course.jump': {
       check: (sim) => whyNoCourseJump(sim),
       apply(sim) {
-        if (sim.state.fight) endFight(sim); // a decided fight left on the screen
-        travel(sim, sim.state.run.plot, 'jump', newShipState);
+        travel(sim, sim.state.run.plot, 'jump');
       },
     },
     // Debug panel only: fuel, the sensor fix, and the pursuer (on from the origin, off, or alongside now).
@@ -440,7 +431,6 @@ export function sectorCommands(newShipState) {
         if (!run) return 'there is no chart for this run';
         if (cmd.fuel !== undefined && !(Number.isInteger(cmd.fuel) && cmd.fuel >= 0 && cmd.fuel <= run.fuelMax)) return `fuel must be a whole number from 0 to ${run.fuelMax}`;
         if (cmd.pursuit !== undefined && !['on', 'off', 'catch'].includes(cmd.pursuit)) return 'pursuit must be on, off or catch';
-        if (cmd.pursuit === 'catch' && sim.state.fight && !sim.state.fight.over) return 'already in a fight';
         if (cmd.fix !== undefined && cmd.fix !== true) return 'fix can only be true';
         return cmd.fuel === undefined && cmd.pursuit === undefined && cmd.fix === undefined ? 'needs fuel, pursuit or fix' : null;
       },
@@ -452,7 +442,7 @@ export function sectorCommands(newShipState) {
         if (cmd.pursuit === 'on') run.pursuit = newPursuit(run.rule, run.map.start);
         if (cmd.pursuit === 'catch') {
           run.pursuit = { ...(run.pursuit ?? newPursuit(run.rule, run.at)), at: run.at, wait: 0, done: false };
-          caught(sim, newShipState);
+          caught(sim);
         }
       },
     },

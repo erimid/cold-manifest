@@ -126,7 +126,7 @@ export function stepNerve(ship, seconds) {
   if ((ship.side ?? 'player') !== 'player') return;
   const crew = Object.values(ship.state.crew);
   for (const member of crew) {
-    if (!member.alive || member.owner !== 'player' || member.task === 'crossing') continue;
+    if (!member.alive || member.owner !== 'player') continue;
     const r = ship.state.rooms[member.room];
     if (!isDark(r)) {
       member.dread = Math.max(0, member.dread - seconds / DREAD.calm);

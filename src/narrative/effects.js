@@ -10,13 +10,11 @@
 //   crew   "all" (everyone of ours aboard), "random" (one of them)
 //   room   "random" (any room still attached), or { "of": "$scout" }: the room they are in
 //
-// Three effects are hooks for later stages. `fight` starts a real fight now.
-// `scene` and `threat` only leave a note in the run (run.scenes, run.threat) and
+// Two effects are hooks for later stages. `scene` and `threat` only leave a note in the run (run.scenes, run.threat) and
 // announce themselves on the bus; Stage 4 and Stage 6 pick them up.
 
 import { harmCrew } from '../sim/atmosphere.js';
 import { startBoarding } from '../sim/boarders.js';
-import { startFight } from '../sim/combat.js';
 import { spawnContact } from '../sim/encounters.js';
 import { changeReputation, contractActive, contractOf, failContract, FAILURES, loadCargo, seizeCargo } from '../sim/contracts.js';
 import { CRATE_KINDS, addCrate } from '../sim/hold.js';
@@ -195,15 +193,6 @@ export const EFFECTS = Object.freeze({
       sim.state.intel.push({ text: fillText(a.text, ctx), from: 'event', tick: sim.state.tick });
     },
   },
-  // A ship comes alongside and the fight is on (combat.js). Does nothing if we are already in one.
-  fight: {
-    args: { ship: typed('ship') },
-    run(sim, a, ctx) {
-      if (sim.state.fight && !sim.state.fight.over) return;
-      if (sim.state.fight) ctx.endFight(sim);
-      startFight(sim, a.ship, ctx.newShipState);
-    },
-  },
   // A ship is already alongside and its party comes to our lock (H.2, boarders.js): an inspection at a
   // checkpoint, say. Does nothing if a party is already docked.
   board: {
@@ -292,7 +281,7 @@ export const EFFECTS = Object.freeze({
   },
 });
 
-/** Carry out a list of effects, in order. `ctx` is { sim, vars, newShipState, endFight }. */
+/** Carry out a list of effects, in order. `ctx` is { sim, vars }. */
 export function applyEffects(effects, ctx) {
   for (const effect of effects ?? []) {
     EFFECTS[effect.do].run(ctx.sim, effect, ctx);

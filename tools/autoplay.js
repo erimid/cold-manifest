@@ -19,15 +19,11 @@
 //              to save the ship, to see whether the tools work
 //   under fire shots land on the ship for two minutes and do what hits do
 //              (S2.2); the same bot then has three minutes to clean up
-//   duels      every enemy in turn against a bot that fights (S2.3; it replaced
-//              S2.1's target practice), and fights off boarders (S2.4)
-//   boarding   every crewed enemy again, with the bot sending its own boarding
-//              party once their shields are down (S2.4)
 //   crossings  a run's sector chart from origin to the drop (S3.1): the bot plots
 //              the cheapest course a lane at a time, sometimes turns off it for a
-//              port, waits for the fix and jumps; if the pursuer catches it, it
-//              fights back in a simple way and escapes down the next lane of its
-//              course as soon as the fix allows. Since S3.4 every crossing carries a
+//              port, waits for the fix and jumps; a ship closing on it gets the gun
+//              laid on it, a toll gets paid when it can be, and the brace goes up when
+//              rounds are in the air (H.3). Since S3.4 every crossing carries a
 //              contract from the board (each type in turn): the bot works a salvage
 //              claim on the way, refuels and patches the hull at ports when it can
 //              pay, answers inspections like any event, and hands over at the drop.
@@ -35,8 +31,10 @@
 //              flies on as before, and the report says how each of those ended
 //   encounters every kind of contact from content/encounters/ in turn (H.1), put on the
 //              scope at a seeded range and bearing, against a bot that tries one answer:
-//              nothing, going quiet, running, a flare, a crate out of the airlock, or a
-//              bluff. An encounter still going after ENCOUNTER_MINUTES is a failure
+//              nothing, going quiet, running, a flare, a crate out of the airlock, a
+//              bluff, the deterrent gun, or paying what is asked (H.3). The duels of
+//              Stage 2 are gone with the enemy ship sim (H.3): this mode replaces them.
+//              An encounter still going after ENCOUNTER_MINUTES is a failure
 //   boardings  every kind of party from content/encounters/ at our lock in turn (H.2),
 //              against a bot with one answer: nothing, a bribe at the lock, handing over
 //              what they want, everyone hiding, everyone fighting at the lock, or venting
@@ -46,7 +44,8 @@
 // Chaos: the bot sends three crew around the ship to deal with whatever is
 // worst, suits them up for breaches, works doors, airlocks and lights, routes
 // power, starts fires and breaches, breaks systems and jams doors through the
-// debug commands, now and then jettisons a room, and pauses at random. Its strategy and the
+// debug commands, puts contacts on the scope and lays the gun on them, now and
+// then jettisons a room, and pauses at random. Its strategy and the
 // report grow stage by stage (PLAN.md §4).
 
 import { createClock } from '../src/engine/clock.js';
@@ -55,14 +54,12 @@ import { eventView } from '../src/narrative/events.js';
 import { findBadNumbers, hashState } from '../src/engine/hash.js';
 import { createRng } from '../src/engine/rng.js';
 import { POWERED, used, supply } from '../src/sim/power.js';
-import { BOARD_SECONDS } from '../src/sim/boarding.js';
-import { JOB_SECONDS } from '../src/sim/hold.js';
-import { DEBUG_ACTIONS, OUTCOMES, chargeOf, enemyOf, ourCrew } from '../src/sim/combat.js';
-import { resolvedRooms, signature } from '../src/sim/senses.js';
+import { gunSlot, ourCrew } from '../src/sim/combat.js';
+import { roundsInHold } from '../src/sim/hold.js';
 import { MANUAL_DOOR_SECONDS, TICK_RATE, TICK_SECONDS, checkInvariants, createSim } from '../src/sim/sim.js';
 import { cheapestRoute, laneBetween, neighbours, nodeOf, whyNoCourseJump } from '../src/sim/sector.js';
 import { contractCrates } from '../src/sim/contracts.js';
-import { BLUFFS, ENDINGS, SPAWN, bluffChance, scopeView } from '../src/sim/encounters.js';
+import { BLUFFS, ENDINGS, SPAWN, bluffChance, scopeView, whyNoPay } from '../src/sim/encounters.js';
 import { BOARD, GOALS, OUTCOMES as BOARD_OUTCOMES, REASONS, whyNoBribe } from '../src/sim/boarders.js';
 import { hidingSpot, lockersFree } from '../src/sim/agents.js';
 import { boardOffers } from '../src/sim/runflow.js';
@@ -92,7 +89,6 @@ const ruleSet = { memories: content.all('memories'), refusals: content.all('refu
 const transitEvents = content.all('events');
 const lines = content.all('ai-lines');
 const weapons = content.all('weapons');
-const ships = content.all('ships');
 const sectorDef = content.require('sectors', 'the-reach');
 const contractTemplates = content.all('contracts');
 const ports = content.all('ports');
@@ -101,20 +97,17 @@ const encounterDefs = content.all('encounters');
 /** The longest anyone should stand still with somewhere to be: a hand-worked door, with a wide margin. */
 const MAX_STILL_TICKS = 200;
 
-/** The longest anyone may spend boarding, from the order to coming out the other side: a long walk, a wait, the tube. */
-const MAX_BOARDING_TICKS = (60 + BOARD_SECONDS) * TICK_RATE;
-
 /** The longest a door can take to finish moving, plus a margin. Longer means stuck. */
 const MAX_DOOR_TICKS = Math.ceil(MANUAL_DOOR_SECONDS * TICK_RATE) + 3;
 
 /** Play one run to the end. Returns its stats, or throws on any failure. */
 function playRun(seed) {
-  const sim = createSim({ seed, ship, crew: roster, lines, weapons, ships, rules: ruleSet });
+  const sim = createSim({ seed, ship, crew: roster, lines, weapons, rules: ruleSet });
   const clock = createClock({ sim, tickSeconds: TICK_SECONDS });
   // The bot's own dice, kept apart from the sim's so its choices are not part of the game state.
   const bot = createRng(`bot:${seed}`);
-  const endings = {}; // how chaos fights ended, by outcome
-  const stats = { orders: 0, refused: 0, dropped: 0, doorMoves: 0, pauses: 0, powerMoves: 0, brownouts: 0, darkTicks: 0, fires: 0, spreads: 0, firesOut: 0, scorched: 0, jettisons: 0, airlessTicks: 0, moves: 0, arrivals: 0, blocked: 0, deaths: 0, firesFought: 0, patches: 0, repairs: 0, fights: 0, shots: 0, hits: 0, absorbed: 0, missed: 0, kills: 0, boarded: 0, boardedUs: 0, melee: 0, captured: 0, argued: 0, margoRefused: 0, overrides: 0, stoodDown: 0, lapsed: 0, crewRefused: 0, scares: 0, lamps: 0 };
+  const endings = {}; // how chaos encounters ended, by outcome
+  const stats = { orders: 0, refused: 0, dropped: 0, doorMoves: 0, pauses: 0, powerMoves: 0, brownouts: 0, darkTicks: 0, fires: 0, spreads: 0, firesOut: 0, scorched: 0, jettisons: 0, airlessTicks: 0, moves: 0, arrivals: 0, blocked: 0, deaths: 0, firesFought: 0, patches: 0, repairs: 0, contacts: 0, shots: 0, struck: 0, incoming: 0, hits: 0, absorbed: 0, missed: 0, warnings: 0, downed: 0, deterred: 0, boardedUs: 0, melee: 0, argued: 0, margoRefused: 0, overrides: 0, stoodDown: 0, lapsed: 0, crewRefused: 0, scares: 0, lamps: 0 };
   const watch = stuckWatch(sim);
   const movingSince = new Map(); // door id -> tick its last order was applied
 
@@ -141,14 +134,20 @@ function playRun(seed) {
   sim.events.on('fire.out', ({ by }) => by && (stats.firesFought += 1));
   sim.events.on('breach.sealed', () => (stats.patches += 1));
   sim.events.on('system.repaired', () => (stats.repairs += 1));
-  sim.events.on('fight.started', () => (stats.fights += 1));
-  sim.events.on('crew.boarded', () => (stats.boarded += 1));
+  sim.events.on('contact.spawned', () => (stats.contacts += 1));
   sim.events.on('enemy.crew.boarded', () => (stats.boardedUs += 1));
   sim.events.on('crew.died', ({ cause }) => cause === 'melee' && (stats.melee += 1));
   sim.events.on('enemy.crew.died', ({ cause }) => cause === 'melee' && (stats.melee += 1));
-  sim.events.on('crew.captured', () => (stats.captured += 1));
   sim.events.on('weapon.fired', () => (stats.shots += 1));
-  sim.events.on('shot.resolved', ({ result }) => (stats[result === 'hit' ? 'hits' : result === 'shield' ? 'absorbed' : 'missed'] += 1));
+  sim.events.on('pod.downed', () => (stats.downed += 1));
+  sim.events.on('drone.lost', ({ cause }) => cause === 'pd' && (stats.downed += 1));
+  sim.events.on('shot.resolved', ({ at, result }) => {
+    if (at === 'contact') stats.struck += result === 'hit' ? 1 : 0;
+    else {
+      stats.incoming += 1;
+      stats[{ hit: 'hits', shield: 'absorbed', miss: 'missed', warning: 'warnings' }[result]] += 1;
+    }
+  });
   sim.events.on('ai.argued', () => (stats.argued += 1));
   sim.events.on('ai.refused', () => (stats.margoRefused += 1));
   sim.events.on('captain.overrode', () => (stats.overrides += 1));
@@ -157,8 +156,8 @@ function playRun(seed) {
   sim.events.on('crew.refused', () => (stats.crewRefused += 1));
   sim.events.on('crew.spooked', () => (stats.scares += 1));
   sim.events.on('crew.lit', () => (stats.lamps += 1));
-  sim.events.on('fight.over', ({ outcome }) => {
-    if (outcome === 'destroyed') stats.kills += 1;
+  sim.events.on('encounter.ended', ({ outcome }) => {
+    if (outcome === 'deterred') stats.deterred += 1;
     endings[outcome] = (endings[outcome] ?? 0) + 1;
   });
 
@@ -188,16 +187,8 @@ function playRun(seed) {
   function crewAct() {
     const alive = ourCrew(sim).filter(({ member }) => member.alive);
     if (!alive.length) return;
-    const { member, ship: aboard } = bot.pick(alive);
+    const { member } = bot.pick(alive);
     if (bot.chance(0.15)) return order({ type: 'crew.suit', crew: member.id, on: !member.suit });
-    // In a fight, now and then: over to their ship, or back home.
-    const enemy = enemyOf(sim);
-    if (enemy && bot.chance(0.2)) {
-      const there = bot.chance(0.6) ? enemy : sim;
-      const rooms = there.layout.rooms.filter((room) => !there.state.rooms[room.id].jettisoned);
-      if (rooms.length) return order({ type: 'crew.move', crew: member.id, room: bot.pick(rooms).id, ship: there === sim ? 'us' : 'them' });
-    }
-    if (aboard !== sim) return;
     // Now and then a crate job (S2.8): open one, carry it somewhere, throw it out, or fetch rounds for a gun.
     const crates = Object.keys(sim.state.crates);
     if (crates.length && bot.chance(0.25)) {
@@ -212,31 +203,25 @@ function playRun(seed) {
     order({ type: 'crew.move', crew: member.id, room: room.id });
   }
 
-  /** Pick a fight, aim at things, set fire to the other ship, walk away: in no sensible order. */
-  function fightAct() {
-    const fight = sim.state.fight;
-    if (!fight) return order({ type: 'debug.fight', enemy: bot.pick(sim.catalog.enemies) });
-    if (fight.over) return order({ type: bot.chance(0.7) ? 'fight.dismiss' : 'debug.fight', enemy: null });
+  /** Put ships on the scope, lay the gun on them or take it off, pay, hail, brace, take a hit: in no sensible order. */
+  function contactAct() {
+    const contacts = sim.state.scope.contacts.filter((contact) => contact.state !== 'lost');
+    if (!contacts.length || bot.chance(0.05)) return order(contacts.length && bot.chance(0.5) ? { type: 'debug.contact', clear: true } : { type: 'debug.contact', encounter: bot.pick(encounterDefs).id, state: bot.pick(['unseen', 'shadowing', 'closing']), range: bot.range(8, 60), bearing: bot.range(0, 360) });
+    const contact = bot.pick(contacts);
     const roll = bot.next();
-    const enemyRooms = Object.keys(fight.enemy.rooms);
-    if (roll < 0.7) return order({ type: 'weapon.target', slot: bot.between(0, sim.state.weapons.length), room: bot.chance(0.85) ? bot.pick(enemyRooms) : null });
-    if (roll < 0.85) return order({ type: 'power.add', system: bot.pick(['weapons', 'shields', 'engines']), delta: 1 });
-    if (roll < 0.9) return order({ type: 'ship.brace' });
-    if (roll < 0.93) {
-      // Answer whatever is being asked, push toward an ending, or try to leave.
-      const pick = bot.pick(['fight.talk', 'fight.bribe', 'fight.engage', 'fight.accept', 'fight.refuse', 'ship.jump', 'debug.combat', 'debug.combat']);
-      return order(pick === 'debug.combat' ? { type: pick, action: bot.pick(DEBUG_ACTIONS) } : { type: pick });
-    }
-    if (roll < 0.97) {
-      // A shot out of nowhere, on either ship, through the debug panel.
-      return order({ type: 'debug.hit', at: bot.chance(0.5) ? 'us' : 'them', room: null, weapon: bot.pick(weapons).id, force: bot.chance(0.5) });
-    }
-    return order({ type: 'debug.fight', enemy: null });
+    if (roll < 0.45) return order({ type: 'gun.target', contact: bot.chance(0.85) ? contact.id : null });
+    if (roll < 0.6) return order({ type: 'ship.brace' });
+    if (roll < 0.7) return order({ type: 'contact.pay', contact: contact.id });
+    if (roll < 0.8) return order({ type: 'contact.hail', contact: contact.id, bluff: bot.pick(Object.keys(BLUFFS)) });
+    if (roll < 0.88) return order({ type: 'debug.gun', ...bot.pick([{ load: true }, { charge: true }, { money: true }]) });
+    if (roll < 0.94) return order({ type: 'power.add', system: bot.pick(['weapons', 'shields', 'engines']), delta: 1 });
+    // A shot out of nowhere, through the debug panel.
+    return order({ type: 'debug.hit', at: 'us', room: null, weapon: bot.pick(weapons).id, force: bot.chance(0.5) });
   }
 
   function act() {
     if (bot.chance(0.3)) return crewAct();
-    if (bot.chance(0.25)) return fightAct();
+    if (bot.chance(0.25)) return contactAct();
     const roll = bot.next();
     if (roll < 0.25) {
       // Like a player, it wants the doors working: half the time it tries to get door control back first.
@@ -321,28 +306,17 @@ function playRun(seed) {
   return { ...stats, endings, hash: hashState(sim.snapshot()) };
 }
 
-/**
- * Fail if anyone with somewhere to be has not moved for too long, on either
- * ship, or anyone has been boarding (walking to an airlock, waiting, in the
- * tube) for longer than MAX_BOARDING_TICKS. Call once a tick.
- */
+/** Fail if anyone aboard with somewhere to be has not moved for too long. Call once a tick. */
 function stuckWatch(sim) {
   const stillSince = new Map();
-  const boardingSince = new Map();
   return () => {
-    const enemy = enemyOf(sim);
     const { tick } = sim.state;
-    for (const ship of enemy ? [sim, enemy] : [sim]) {
-      for (const member of Object.values(ship.state.crew)) {
-        const last = stillSince.get(member.id);
-        if (!member.alive || !member.path.length || !last || last.side !== ship.side || last.x !== member.x || last.y !== member.y) {
-          stillSince.set(member.id, { tick, side: ship.side, x: member.x, y: member.y });
-        } else if (tick - last.tick > MAX_STILL_TICKS) {
-          throw new Error(`${member.id} stuck on a path in ${member.room} aboard the ${ship.side} ship since tick ${last.tick} (${member.task}, next ${JSON.stringify(member.path[0])}${member.path[0]?.door ? `, door ${JSON.stringify(ship.state.doors[member.path[0].door])}` : ""})`);
-        }
-        if (!member.board) boardingSince.delete(member.id);
-        else if (!boardingSince.has(member.id)) boardingSince.set(member.id, tick);
-        else if (tick - boardingSince.get(member.id) > MAX_BOARDING_TICKS) throw new Error(`${member.id} has been boarding since tick ${boardingSince.get(member.id)} (${member.task} in ${member.room})`);
+    for (const member of Object.values(sim.state.crew)) {
+      const last = stillSince.get(member.id);
+      if (!member.alive || !member.path.length || !last || last.x !== member.x || last.y !== member.y) {
+        stillSince.set(member.id, { tick, x: member.x, y: member.y });
+      } else if (tick - last.tick > MAX_STILL_TICKS) {
+        throw new Error(`${member.id} stuck on a path in ${member.room} since tick ${last.tick} (${member.task}, next ${JSON.stringify(member.path[0])}${member.path[0]?.door ? `, door ${JSON.stringify(sim.state.doors[member.path[0].door])}` : ''})`);
       }
     }
   };
@@ -397,7 +371,7 @@ const RESTORE_ORDER = ['life_support', 'ai_core', 'doors', 'engines', 'sensors',
  * running at the start, air first. Returns how it went, or throws on any failure.
  */
 function playScenario(seed, { incoming = false } = {}) {
-  const sim = createSim({ seed, ship, crew: roster, lines, weapons, ships, rules: ruleSet });
+  const sim = createSim({ seed, ship, crew: roster, lines, weapons, rules: ruleSet });
   const bot = createRng(`${incoming ? 'incoming' : 'scenario'}:${seed}`);
   const watch = stuckWatch(sim);
   const rooms = bot.shuffle(sim.layout.rooms.map((room) => room.id));
@@ -504,197 +478,6 @@ function playScenario(seed, { incoming = false } = {}) {
   };
 }
 
-// Braces (S2.8) make some fights a long grind; the stalemate rule still ends every one, but slowly (each hull point lost buys up to 90 s).
-const DUEL_MINUTES = 12;
-/** Which way each ending went for us, for the enemy table. */
-const OUTCOME_KIND = Object.freeze({ destroyed: 'won', 'crew-dead': 'won', surrendered: 'won', escaped: 'parted', fled: 'parted', talked: 'parted', bribed: 'parted', stalemate: 'parted', lost: 'lost' });
-
-/**
- * A duel: one enemy alongside, and a bot that fights it. It answers a hail
- * (mostly by shooting, sometimes by talking or paying), feeds air, sensors
- * and guns, aims at their shields and then their guns once its sensors have
- * made those rooms out, keeps someone at the helm and sends the others to
- * trouble, takes most surrenders, and jumps out when the hull is low and the
- * sensors have a fix. It fights one of two ways (S2.7, D-074):
- *   lit   every lamp on and the drive burning, as a new player would
- *   dark  every lamp off and the drive cold until it is time to leave, with
- *         the spare power on shields
- * Returns
- * how it ended, or throws on any failure, including a fight still going at
- * the end (the stalemate rule should make that impossible).
- */
-function playDuel(seed, enemyId, { boarding = false, dark = false } = {}) {
-  const sim = createSim({ seed, ship, crew: roster, lines, weapons, ships, rules: ruleSet });
-  const bot = createRng(`duel:${boarding ? 'board:' : ''}${dark ? 'dark:' : ''}${enemyId}:${seed}`);
-  const end = DUEL_MINUTES * 60 * TICK_RATE;
-  const watch = stuckWatch(sim);
-  const tally = { shots: 0, hit: 0, shield: 0, miss: 0, incoming: 0, incomingHits: 0, incomingWide: 0, incomingBlind: 0, incomingBraced: 0, lockLost: 0, lockTicks: 0, signature: 0, battleTicks: 0, offers: 0, hail: null, boarded: 0, boardedUs: 0, killedAboard: 0, lostAboard: 0, captured: 0, braces: 0, theirBraces: 0, ammoRuns: 0, theirAmmoRuns: 0, dryTicks: 0 };
-  sim.events.on('ship.braced', () => (tally.braces += 1));
-  sim.events.on('enemy.ship.braced', () => (tally.theirBraces += 1));
-  sim.events.on('weapon.loaded', () => (tally.ammoRuns += 1));
-  sim.events.on('enemy.weapon.loaded', () => (tally.theirAmmoRuns += 1));
-  // A crate job that ran out of time is someone stuck on an ammo run: that is a failure.
-  const slow = ({ reason, crew }) => {
-    if (reason === 'slow') throw new Error(`${crew} gave up a crate job after ${JOB_SECONDS}s at tick ${sim.state.tick}`);
-  };
-  sim.events.on('crew.blocked', slow);
-  sim.events.on('enemy.crew.blocked', slow);
-  sim.events.on('enemy.lock.lost', () => (tally.lockLost += 1));
-  sim.events.on('crew.boarded', ({ onto }) => onto === 'enemy' && (tally.boarded += 1));
-  sim.events.on('enemy.crew.boarded', ({ onto }) => onto === 'player' && (tally.boardedUs += 1));
-  sim.events.on('enemy.crew.died', ({ cause }) => cause === 'melee' && (tally.killedAboard += 1));
-  sim.events.on('crew.died', ({ cause }) => cause === 'melee' && (tally.lostAboard += 1));
-  sim.events.on('crew.captured', () => (tally.captured += 1));
-  sim.events.on('shot.resolved', ({ side, result, blind }) => {
-    if (side === 'player') tally[result] += 1;
-    else {
-      tally.incoming += 1;
-      if (result === 'hit') tally.incomingHits += 1;
-      if (result === 'shield') tally.incomingBraced += 1;
-      if (result === 'miss') tally.incomingWide += 1;
-      if (blind) tally.incomingBlind += 1;
-    }
-  });
-  sim.events.on('weapon.fired', ({ side }) => side === 'player' && (tally.shots += 1));
-  sim.events.on('fight.offer', () => (tally.offers += 1));
-  const order = (command) => !sim.whyNot(command) && sim.enqueue(command);
-  const mind = carefulAnswers(sim, order);
-  let sent = 0;
-  let litTicks = 0; // room-seconds of lamp on a ship that is trying to run dark
-  sim.events.on('crew.ordered', () => (sent += 1));
-  const answer = bot.next(); // how it answers a hail: talk, pay, or shoot
-  const trouble = (room) => {
-    const r = sim.state.rooms[room.id];
-    const system = room.system ? sim.state.systems[room.system] : null;
-    const boarders = Object.values(sim.state.crew).filter((member) => member.alive && member.owner === 'enemy' && member.room === room.id).length;
-    return r.jettisoned ? 0 : boarders * 4 + r.fire * 3 + r.breach * 2 + (system && !system.lost ? system.damage * 0.5 : 0);
-  };
-
-  while (sim.state.tick < end && !sim.state.fight?.over) {
-    const { tick } = sim.state;
-    if (tick === TICK_RATE) order({ type: 'debug.fight', enemy: enemyId });
-    const fight = sim.state.fight;
-    // Brace timing (S2.8): the moment a volley of theirs is in the air, dump the capacitor into it.
-    if (fight?.phase === 'battle' && fight.shots.some((shot) => shot.side === 'enemy') && !sim.whyNot({ type: 'ship.brace' })) order({ type: 'ship.brace' });
-    if (fight?.phase === 'battle' && sim.state.weapons.some((slot) => slot.powered && slot.rounds === 0)) tally.dryTicks += 1;
-    if (fight && tick % TICK_RATE === 0) {
-      const enemy = sim.state.fight.enemy;
-      if (fight.phase === 'hail' && tick > 2 * TICK_RATE) {
-        tally.hail = answer < 0.2 ? 'talk' : answer < 0.3 ? 'pay' : 'fight';
-        if (tally.hail === 'talk') order({ type: 'fight.talk' });
-        else if (tally.hail === 'pay' && !order({ type: 'fight.bribe' })) order({ type: 'fight.engage' });
-        else order({ type: 'fight.engage' });
-      }
-      if (fight.offer) order({ type: bot.chance(0.75) ? 'fight.accept' : 'fight.refuse' });
-      // Running: once the hull is low the drive gets a bar, whatever it costs the guns, and we go when the sensors have a fix.
-      const running = sim.state.hull.points <= sim.state.hull.max * 0.3;
-      // Dark: every lamp off (S2.7). Lit: every lamp left on.
-      // A lamp it lit for someone who would not walk into the dark gets a few seconds before it goes off again (S2.10).
-      for (const [roomId, until] of mind.lit) if (until <= tick) mind.lit.delete(roomId);
-      if (dark && !mind.lit.size && !sim.whyNot({ type: 'lights.all', on: false })) order({ type: 'lights.all', on: false });
-      const systems = sim.state.systems;
-      const room = (id) => systems[id].power < systems[id].level - systems[id].damage;
-      for (const id of ['doors', 'medbay', 'ai_core']) if (systems[id].power > 0) order({ type: 'power.add', system: id, delta: -1 });
-      if (dark && !running && systems.engines.power > 0) order({ type: 'power.add', system: 'engines', delta: -1 });
-      // One bar at a time, top of the list first: air, sensors (for a lock, and the fix to leave by), every gun, then shields, then the drive.
-      const wants = running ? ['life_support', 'sensors', 'engines', 'weapons', 'shields'] : ['life_support', 'sensors', 'weapons', 'shields', ...(dark ? [] : ['engines'])];
-      const want = wants.find((id) => (id === 'sensors' || id === 'engines' ? systems[id].power < 1 && room(id) : room(id)));
-      if (want) {
-        if (!sim.whyNot({ type: 'power.add', system: want, delta: 1 })) order({ type: 'power.add', system: want, delta: 1 });
-        else {
-          // Nothing spare: take a bar from further down the list.
-          const donor = [...wants.slice(wants.indexOf(want) + 1)].reverse().find((id) => systems[id].power > 0) ?? (!wants.includes('engines') && systems.engines.power > 0 ? 'engines' : null);
-          if (donor) order({ type: 'power.add', system: donor, delta: -1 });
-        }
-      }
-      // Their shields first; once those are broken, their guns. Only what the sensors have resolved can be aimed at.
-      const known = resolvedRooms(sim);
-      const shieldsDown = enemy.systems.shields.absent || enemy.systems.shields.damage >= enemy.systems.shields.level;
-      const wanted = shieldsDown && enemy.rooms.weapons ? 'weapons' : enemy.rooms.shields ? 'shields' : null;
-      const aim = known.includes(wanted) ? wanted : known.length ? bot.pick(known) : null;
-      // Hold fire until every powered gun is charged, then fire them together.
-      const guns = sim.state.weapons.map((slot, index) => ({ slot, index })).filter(({ slot }) => slot.powered);
-      const volley = guns.length > 0 && guns.every(({ index }) => chargeOf(sim, index) >= 1);
-      for (const { slot, index } of guns) {
-        const want = volley ? aim : null;
-        if (slot.target !== want) order({ type: 'weapon.target', slot: index, room: want });
-      }
-      // Get out if it is going badly.
-      if (running) order({ type: 'ship.jump' });
-      // Crew: the first stays at the helm, the others go to the worst trouble: boarders first.
-      const crew = ourCrew(sim).filter(({ member }) => member.alive);
-      // Ammo runs (S2.8): a heavy gun that is empty or nearly sends the last of the crew (never the pilot) for rounds.
-      sim.state.weapons.forEach((slot, index) => {
-        if (slot.rounds === null || slot.rounds > 1 || !slot.powered) return;
-        if (crew.some(({ member }) => member.job?.kind === 'load')) return;
-        const runner = [...crew].reverse().find(({ member, ship: aboard }, at) => aboard === sim && at < crew.length - 1 && !member.board && !member.job && !sim.whyNot({ type: 'weapon.load', crew: member.id, slot: index }));
-        if (runner) order({ type: 'weapon.load', crew: runner.member.id, slot: index });
-      });
-      const spots = sim.layout.rooms.filter((room) => trouble(room) > 0).sort((a, b) => trouble(b) - trouble(a));
-      const theirs = enemyOf(sim);
-      const theirShieldsDown = theirs && theirs.state.shield.charge < 1 && !(theirs.state.shield.field > 0) && fight.phase === 'battle';
-      const repelling = Object.values(sim.state.crew).some((m) => m.alive && m.owner === 'enemy');
-      crew.forEach(({ member, ship: aboard }, index) => {
-        if (member.path.length || member.board || member.job) return;
-        if (aboard !== sim) {
-          // Aboard them: home when hurt, or when we are being boarded; otherwise to wherever their crew are.
-          if (member.health < 0.35 || repelling) return order({ type: 'crew.move', crew: member.id, room: 'medbay', ship: 'us' });
-          const foes = Object.values(theirs.state.crew).filter((m) => m.alive && m.owner === 'enemy');
-          const at = foes.find((m) => m.room === member.room) ?? foes[0];
-          if (at && at.room !== member.room && !at.path.length) order({ type: 'crew.move', crew: member.id, room: at.room, ship: 'them' });
-          return;
-        }
-        if (boarding && index > 0 && theirShieldsDown && !repelling && member.health >= 0.7) {
-          const bridge = theirs.layout.rooms.find((room) => room.kind === 'helm') ?? theirs.layout.rooms[0];
-          return order({ type: 'crew.move', crew: member.id, room: bridge.id, ship: 'them' });
-        }
-        if (index === 0) {
-          if (member.room !== 'bridge') order({ type: 'crew.move', crew: member.id, room: 'bridge' });
-          return;
-        }
-        if (trouble(sim.layout.room(member.room)) > 0) return;
-        const open = spots.filter((room) => !mind.avoid.get(member.id)?.has(room.id));
-        const spot = open[(index - 1) % Math.max(1, open.length)];
-        if (!spot) return;
-        const needsSuit = sim.state.rooms[spot.id].breach > 0 || mind.suits.has(member.id);
-        if (member.suit !== needsSuit) order({ type: 'crew.suit', crew: member.id, on: needsSuit });
-        order({ type: 'crew.move', crew: member.id, room: spot.id });
-      });
-    }
-    sim.step();
-    const problems = checkInvariants(sim);
-    if (problems.length) throw new Error(`tick ${sim.state.tick}: ${problems.join('; ')}`);
-    watch();
-    const now = sim.state.fight;
-    // Sampled once a second: how loud we were, and whether they had us.
-    if (now && !now.over && now.phase === 'battle' && sim.state.tick % TICK_RATE === 0) {
-      tally.battleTicks += 1;
-      tally.signature += signature(sim).total;
-      litTicks += Object.values(sim.state.rooms).filter((r) => r.lightsOn).length;
-      if (now.enemy.contact.locked) tally.lockTicks += 1;
-    }
-  }
-  const bad = findBadNumbers(sim.state);
-  if (bad.length) throw new Error(`non-finite numbers at ${bad.join(', ')}`);
-  const over = sim.state.fight?.over ?? null;
-  if (!over) throw new Error(`the fight with the ${enemyId} was still going after ${DUEL_MINUTES} minutes`);
-  if (tally.shots < tally.hit + tally.shield + tally.miss) throw new Error('more shots landed than were fired');
-  return {
-    ...tally,
-    enemy: enemyId,
-    outcome: over.outcome,
-    seconds: (over.tick - sim.state.fight.started) / TICK_RATE,
-    ourHull: sim.state.hull.points,
-    alive: Object.values(sim.state.crew).filter((member) => member.alive && member.owner === 'player').length,
-    boarding,
-    dark,
-    sent,
-    litTicks,
-    mind: mind.counts,
-    hash: hashState(sim.snapshot()),
-  };
-}
-
 const CROSSING_MINUTES = 30;
 /** The chance the crossing bot turns off its route for a port a lane away, when it can spare the fuel and the jump. */
 const DETOUR_CHANCE = 0.3;
@@ -707,12 +490,12 @@ function playCrossing(seed, index) {
   // The board for this seed, and the contract of the type whose turn it is (S3.4).
   const offers = boardOffers(contractTemplates, { seed });
   const offer = offers[index % offers.length];
-  const sim = createSim({ seed, ship, crew: roster, lines, weapons, ships, rules: ruleSet, events: transitEvents, sector: sectorDef, contract: offer.template, ports, encounters: encounterDefs, run: { pursuit: offer.followed } });
+  const sim = createSim({ seed, ship, crew: roster, lines, weapons, rules: ruleSet, events: transitEvents, sector: sectorDef, contract: offer.template, ports, encounters: encounterDefs, run: { pursuit: offer.followed } });
   const bot = createRng(`crossing:${seed}`);
   const { run } = sim.state;
   const contract = run.contract;
   const end = CROSSING_MINUTES * 60 * TICK_RATE;
-  const tally = { caught: 0, escapes: 0, detours: 0, sighted: 0, fightTicks: 0, lines: 0, outcomes: {}, events: 0, lapsed: 0, eventFights: 0, hooks: 0, met: {}, picked: {}, locked: 0, offered: 0, inspections: 0, seized: 0, fuelBought: 0, fuelSpent: 0, repairSpent: 0, claimLeft: false, contacts: {}, contactKinds: {}, boardings: {} };
+  const tally = { caught: 0, escapes: 0, detours: 0, sighted: 0, lines: 0, outcomes: {}, events: 0, lapsed: 0, eventContacts: 0, shots: 0, braces: 0, tolls: 0, hooks: 0, met: {}, picked: {}, locked: 0, offered: 0, inspections: 0, seized: 0, fuelBought: 0, fuelSpent: 0, repairSpent: 0, claimLeft: false, contacts: {}, contactKinds: {}, boardings: {} };
   sim.events.on('cargo.seized', () => (tally.seized += 1));
   sim.events.on('port.refueled', (event) => {
     tally.fuelBought += event.bought;
@@ -727,21 +510,25 @@ function playCrossing(seed, index) {
   sim.events.on('event.chosen', (event) => (tally.picked[`${event.event}/${event.choice}`] = (tally.picked[`${event.event}/${event.choice}`] ?? 0) + 1));
   sim.events.on('event.lapsed', () => (tally.lapsed += 1));
   sim.events.on('effect.applied', (event) => {
-    if (event.effect === 'fight') tally.eventFights += 1;
+    if (event.effect === 'contact') tally.eventContacts += 1;
     if (event.effect === 'scene' || event.effect === 'threat') tally.hooks += 1;
   });
   sim.events.on('boarding.ended', (event) => (tally.boardings[event.outcome] = (tally.boardings[event.outcome] ?? 0) + 1));
   sim.events.on('encounter.ended', (event) => {
     tally.contacts[event.outcome] = (tally.contacts[event.outcome] ?? 0) + 1;
     tally.contactKinds[event.encounter] = (tally.contactKinds[event.encounter] ?? 0) + 1;
+    // The pursuer is a contact now (H.3): how it ended is how the chase went this time.
+    if (event.pursuer) {
+      tally.outcomes[event.outcome] = (tally.outcomes[event.outcome] ?? 0) + 1;
+      if (event.outcome !== 'docked') tally.escapes += 1;
+    }
   });
+  sim.events.on('weapon.fired', () => (tally.shots += 1));
+  sim.events.on('ship.braced', () => (tally.braces += 1));
+  sim.events.on('contact.paid', () => (tally.tolls += 1));
   sim.events.on('pursuit.caught', () => (tally.caught += 1));
   sim.events.on('pursuit.sighted', () => (tally.sighted += 1));
   sim.events.on('ai.line', (event) => event.trigger && ['sector.jumped', 'course.ready', 'pursuit.sighted', 'contract.late', 'sector.delivered', 'fuel.out', 'pursuit.ended'].includes(event.trigger) && (tally.lines += 1));
-  sim.events.on('fight.over', (event) => {
-    tally.outcomes[event.outcome] = (tally.outcomes[event.outcome] ?? 0) + 1;
-    if (event.outcome === 'escaped') tally.escapes += 1;
-  });
   const give = (command) => !sim.whyNot(command) && sim.enqueue(command);
   /** Where the bot is making for: the salvage claim while it is still to be worked, then the drop. */
   const goal = () => (contract.status === 'active' && contract.claim && !contract.claim.done && !tally.claimLeft ? contract.claim.node : run.map.delivery);
@@ -773,11 +560,37 @@ function playCrossing(seed, index) {
   let crewDead = false;
   let settled = false;
   while (!settled && sim.state.tick < end) {
-    const fight = sim.state.fight;
     const view = eventView(sim);
     if (!ourCrew(sim).some(({ member }) => member.alive)) {
       crewDead = true;
       break;
+    }
+    if (sim.state.hull.points === 0) {
+      lost = true;
+      break;
+    }
+    // Ships on the scope (H.3), alongside whatever else is going on: brace into rounds in the air, pay a toll
+    // if the money allows, and lay the gun on anything closing that is not a boarder we would rather pay.
+    if (sim.state.shots.some((shot) => shot.at === 'us') || sim.state.scope.drones.some((drone) => drone.on)) give({ type: 'ship.brace' });
+    if (sim.state.tick % TICK_RATE === 0) {
+      const live = sim.state.scope.contacts.filter((contact) => contact.state !== 'lost' && contact.track.shown);
+      for (const contact of live) if (contact.tolled && !whyNoPay(sim, contact.id)) give({ type: 'contact.pay', contact: contact.id });
+      const slot = gunSlot(sim);
+      const threat = live.find((contact) => contact.state === 'closing' || contact.state === 'alongside' || contact.tolled);
+      // Something closing: bars for the gun and the brace, out of the medbay if need be.
+      if (threat) {
+        for (const system of ['weapons', 'shields']) {
+          const { power: bars, level, damage } = sim.state.systems[system];
+          if (bars < level - damage && !give({ type: 'power.add', system, delta: 1 }) && sim.state.systems.medbay.power > 0) give({ type: 'power.add', system: 'medbay', delta: -1 });
+        }
+      }
+      if (slot >= 0) {
+        const want = threat?.id ?? null;
+        if (sim.state.weapons[slot].target !== want) give({ type: 'gun.target', contact: want });
+        const rounds = sim.state.weapons[slot].rounds;
+        const hand = ourCrew(sim).map(({ member }) => member).find((member) => member.alive && !member.job && member.task === 'idle' && member.room !== 'bridge');
+        if (threat && rounds !== null && rounds < 1 && roundsInHold(sim) && hand) give({ type: 'weapon.load', crew: hand.id, slot });
+      }
     }
     if (view) {
       // An event on the table (S3.3): answer it with any choice that is open to us, then put it away.
@@ -792,34 +605,6 @@ function playCrossing(seed, index) {
       // A party at the lock (H.2): pay if the money allows, otherwise let them get on with it.
       if (!whyNoBribe(sim)) give({ type: 'boarding.bribe' });
       else give({ type: 'boarding.admit' });
-    } else if (fight?.over) {
-      if (fight.over.outcome === 'lost') {
-        lost = true;
-        break;
-      }
-      give({ type: 'fight.dismiss' });
-    } else if (fight) {
-      tally.fightTicks += 1;
-      // A short fight: answer the hail by shooting, take a surrender, run dark, strip the doors, medbay and core
-      // for guns and shields, brace when it can, aim at their shields and then their guns in volleys, and go
-      // the moment the fix allows. Fleeing alone does not work: every hit shakes the fix (D-087).
-      if (fight.phase === 'hail') give({ type: 'fight.engage' });
-      if (fight.offer) give({ type: 'fight.accept' });
-      give({ type: 'lights.all', on: false });
-      const systems = sim.state.systems;
-      for (const id of ['doors', 'medbay', 'ai_core']) if (systems[id].power > 0) give({ type: 'power.add', system: id, delta: -1 });
-      for (const id of ['weapons', 'shields']) give({ type: 'power.add', system: id, delta: 1 });
-      give({ type: 'ship.brace' });
-      const enemy = enemyOf(sim).state;
-      const known = resolvedRooms(sim);
-      const shieldsDown = enemy.systems.shields.absent || enemy.systems.shields.damage >= enemy.systems.shields.level;
-      const wanted = shieldsDown && enemy.rooms.weapons ? 'weapons' : enemy.rooms.shields ? 'shields' : null;
-      const aim = known.includes(wanted) ? wanted : (known[0] ?? null);
-      const guns = sim.state.weapons.map((slot, index) => ({ slot, index })).filter(({ slot }) => slot.powered);
-      const volley = guns.length > 0 && guns.every(({ index }) => chargeOf(sim, index) >= 1);
-      for (const { slot, index } of guns) if (slot.target !== (volley ? aim : null)) give({ type: 'weapon.target', slot: index, room: volley ? aim : null });
-      if (!run.plot) give({ type: 'course.plot', to: cheapestRoute(run.map, run.at, run.map.delivery).path[1] });
-      give({ type: 'ship.jump' });
     } else if (run.at === run.map.delivery) {
       // The drop: hand over whatever is left of the cargo, if there is a contract left to hand over.
       if (!sim.whyNot({ type: 'contract.deliver' })) give({ type: 'contract.deliver' });
@@ -906,19 +691,35 @@ function playCrossing(seed, index) {
 
 const ENCOUNTER_MINUTES = 20;
 /** What the encounter bot can try. Each seed gives each kind of contact one of them, in turn. */
-const TACTICS = Object.freeze(['nothing', 'quiet', 'run', 'flare', 'crate', 'bluff']);
+const TACTICS = Object.freeze(['nothing', 'quiet', 'run', 'flare', 'crate', 'bluff', 'gun', 'pay']);
 
 /**
  * One contact on the scope (H.1) and a bot with one idea. Throws on any failure, including an
- * encounter that has not ended after ENCOUNTER_MINUTES. No enemy ships are loaded, so a docking is
- * only a docking: what a boarding party does is H.2.
+ * encounter that has not ended after ENCOUNTER_MINUTES. The encounter is over when the contact is: a
+ * party that docks goes on to its boarding (H.2), which the boardings below play out. Since H.3:
+ *   gun   lay the deterrent gun on it the moment it closes, fetch rounds when empty, and brace into
+ *         rounds coming the other way
+ *   pay   pay a toll when one is called; otherwise sit tight (a party's price at the lock is the boardings' bribe)
  */
 function playEncounter(seed, def, tactic) {
-  const sim = createSim({ seed, ship, crew: roster, lines, weapons, ships: [], rules: ruleSet, encounters: encounterDefs });
+  const sim = createSim({ seed, ship, crew: roster, lines, weapons, rules: ruleSet, encounters: encounterDefs });
   const bot = createRng(`encounter:${def.id}:${tactic}:${seed}`);
   const end = ENCOUNTER_MINUTES * 60 * TICK_RATE;
   const give = (command) => !sim.whyNot(command) && sim.enqueue(command);
-  const tally = { encounter: def.id, tactic, outcome: null, seconds: 0, sighted: null, named: false, noticed: false, fooled: 0, hails: 0, flares: 0, crates: 0 };
+  const tally = { encounter: def.id, tactic, outcome: null, seconds: 0, sighted: null, named: false, noticed: false, fooled: 0, hails: 0, flares: 0, crates: 0, shots: 0, struck: 0, incoming: 0, hits: 0, braced: 0, downed: 0, hull: 0, wrecked: false };
+  sim.state.money = 200; // enough for a toll or a bribe, so paying is a real answer
+  sim.events.on('weapon.fired', () => (tally.shots += 1));
+  sim.events.on('pod.downed', () => (tally.downed += 1));
+  sim.events.on('drone.lost', ({ cause }) => cause === 'pd' && (tally.downed += 1));
+  sim.events.on('ship.wrecked', () => (tally.wrecked = true));
+  sim.events.on('shot.resolved', ({ at, result }) => {
+    if (at === 'contact') tally.struck += result === 'hit' ? 1 : 0;
+    else if (result !== 'warning') {
+      tally.incoming += 1;
+      tally.hits += result === 'hit' ? 1 : 0;
+      tally.braced += result === 'shield' ? 1 : 0;
+    }
+  });
   sim.events.on('contact.sighted', () => (tally.sighted ??= sim.state.tick / TICK_RATE));
   sim.events.on('contact.identified', () => (tally.named = true));
   sim.events.on('contact.noticed', () => (tally.noticed = true));
@@ -971,6 +772,20 @@ function playEncounter(seed, def, tactic) {
             tally.crates += 1;
           }
         }
+      } else if (tactic === 'gun') {
+        // Bars for the gun and the brace: from the drive and the medbay if the reactor has none spare.
+        for (const system of ['weapons', 'shields']) {
+          const { power: bars, level, damage } = sim.state.systems[system];
+          if (bars >= level - damage) continue;
+          if (!power(system, 1)) for (const donor of ['medbay', 'engines']) if (sim.state.systems[donor].power > 0 && power(donor, -1)) break;
+        }
+        if (view.state === 'closing' || view.state === 'alongside' || sim.state.scope.contacts.find((item) => item.id === view.id)?.tolled) give({ type: 'gun.target', contact: view.id });
+        const slot = gunSlot(sim);
+        const hand = ourCrew(sim).map(({ member }) => member).find((member) => member.alive && !member.job && member.task === 'idle' && member.room !== 'bridge');
+        if (slot >= 0 && sim.state.weapons[slot].rounds === 0 && hand) give({ type: 'weapon.load', crew: hand.id, slot });
+        if (sim.state.shots.some((shot) => shot.at === 'us')) give({ type: 'ship.brace' });
+      } else if (tactic === 'pay') {
+        give({ type: 'contact.pay', contact: view.id });
       } else if (tactic === 'bluff') {
         if (view.state === 'shadowing' || view.state === 'closing' || view.state === 'alongside') {
           const contact = sim.state.scope.contacts.find((item) => item.id === view.id);
@@ -986,6 +801,7 @@ function playEncounter(seed, def, tactic) {
     }
   }
   if (!tally.outcome) throw new Error(`the ${def.id} was still on the scope after ${ENCOUNTER_MINUTES} minutes (${sim.state.scope.contacts.map((contact) => contact.state).join(', ') || 'no contact'})`);
+  tally.hull = sim.state.hull.points;
   if (!ENDINGS[tally.outcome]) throw new Error(`the ${def.id} ended in no known way: "${tally.outcome}"`);
   const bad = findBadNumbers(sim.state);
   if (bad.length) throw new Error(`non-finite numbers at ${bad.join(', ')}`);
@@ -1000,7 +816,7 @@ const ANSWERS = Object.freeze(['nothing', 'bribe', 'yield', 'hide', 'fight', 've
  * still aboard after its demand, its stay and its leaving are all up.
  */
 function playBoarding(seed, def, answer) {
-  const sim = createSim({ seed, ship, crew: roster, lines, weapons, ships: [], rules: ruleSet, encounters: encounterDefs });
+  const sim = createSim({ seed, ship, crew: roster, lines, weapons, rules: ruleSet, encounters: encounterDefs });
   sim.state.money = 500;
   // Something for an inspection to find.
   const smuggled = Object.values(sim.state.crates).find((crate) => crate.label.includes('7731-D'));
@@ -1071,12 +887,9 @@ function playBoarding(seed, def, answer) {
 
 const started = performance.now();
 const failures = [];
-const totals = { orders: 0, refused: 0, dropped: 0, doorMoves: 0, pauses: 0, powerMoves: 0, brownouts: 0, darkTicks: 0, fires: 0, spreads: 0, firesOut: 0, scorched: 0, jettisons: 0, airlessTicks: 0, moves: 0, arrivals: 0, blocked: 0, deaths: 0, firesFought: 0, patches: 0, repairs: 0, fights: 0, shots: 0, hits: 0, absorbed: 0, missed: 0, kills: 0, boarded: 0, boardedUs: 0, melee: 0, captured: 0, said: 0, argued: 0, margoRefused: 0, overrides: 0, stoodDown: 0, lapsed: 0, crewRefused: 0, scares: 0, lamps: 0 };
+const totals = { orders: 0, refused: 0, dropped: 0, doorMoves: 0, pauses: 0, powerMoves: 0, brownouts: 0, darkTicks: 0, fires: 0, spreads: 0, firesOut: 0, scorched: 0, jettisons: 0, airlessTicks: 0, moves: 0, arrivals: 0, blocked: 0, deaths: 0, firesFought: 0, patches: 0, repairs: 0, contacts: 0, shots: 0, struck: 0, incoming: 0, hits: 0, absorbed: 0, missed: 0, warnings: 0, downed: 0, deterred: 0, boardedUs: 0, melee: 0, said: 0, argued: 0, margoRefused: 0, overrides: 0, stoodDown: 0, lapsed: 0, crewRefused: 0, scares: 0, lamps: 0 };
 const scenarios = [];
-const duels = [];
 const chaosEndings = {};
-const enemyIds = ships.filter((item) => item.enemy === true).map((item) => item.id);
-const crewedIds = ships.filter((item) => item.enemy === true && item.crew?.length).map((item) => item.id);
 const underFire = [];
 const crossings = [];
 const encounters = [];
@@ -1137,21 +950,6 @@ for (let i = 1; i <= runs; i++) {
   } catch (err) {
     failures.push({ seed, reason: `under fire: ${err.message}` });
   }
-  for (const enemyId of enemyIds) {
-    for (const boarding of crewedIds.includes(enemyId) ? [false, true] : [false]) {
-      const label = `${boarding ? 'boarding duel' : 'duel'} with ${enemyId}`;
-      try {
-        // Odd seeds fight lit, even seeds run dark, so the report can set the two side by side.
-        const dark = i % 2 === 0;
-        const first = playDuel(seed, enemyId, { boarding, dark });
-        const second = playDuel(seed, enemyId, { boarding, dark });
-        if (first.hash !== second.hash) failures.push({ seed, reason: `${label}: replay mismatch (${first.hash} vs ${second.hash})` });
-        duels.push(first);
-      } catch (err) {
-        failures.push({ seed, reason: `${label}: ${err.message}` });
-      }
-    }
-  }
 }
 const seconds = (performance.now() - started) / 1000;
 const per = (n) => (n / runs).toFixed(1);
@@ -1162,7 +960,7 @@ const pct = (n, of) => (of ? `${Math.round((100 * n) / of)}%` : 'n/a');
 
 const out = [];
 out.push('Cold Manifest autoplay');
-out.push(`  runs:              ${runs} (seeds ${baseSeed}-1 to ${baseSeed}-${runs}), each played as chaos, as a hazard scenario, under fire, as a duel with every enemy, as a sector crossing and as an encounter with every kind of contact, each twice`);
+out.push(`  runs:              ${runs} (seeds ${baseSeed}-1 to ${baseSeed}-${runs}), each played as chaos, as a hazard scenario, under fire, as a sector crossing, as an encounter with every kind of contact and as a boarding by every kind of party, each twice`);
 out.push(`  ship:              ${ship.name}, crew of ${roster.length}, ${lines.length} AI lines`);
 out.push(`  crashed or bad:    ${failures.length}`);
 out.push('');
@@ -1174,9 +972,10 @@ out.push(`  hazards per run:   ${per(totals.fires)} fires lit, ${per(totals.spre
 out.push(`  crew per run:      ${per(totals.moves)} sent, ${per(totals.arrivals)} arrived, ${per(totals.blocked)} blocked, ${per(totals.deaths)} of ${roster.length} died`);
 out.push(`  crew work per run: ${per(totals.firesFought)} fires put out, ${per(totals.patches)} breaches patched, ${per(totals.repairs)} system bars repaired`);
 out.push(`  air:               rooms were unbreathable ${((100 * totals.airlessTicks) / (runs * ticks * ship.rooms.length)).toFixed(0)}% of room-time`);
-out.push(`  fights per run:    ${per(totals.fights)} started, ${per(totals.shots)} shots fired (${per(totals.hits)} hit, ${per(totals.absorbed)} stopped by a brace, ${per(totals.missed)} missed), ${per(totals.kills)} enemies destroyed`);
-out.push(`  boarding per run:  ${per(totals.boarded)} of ours crossed, ${per(totals.boardedUs)} of theirs crossed, ${per(totals.melee)} killed hand to hand, ${per(totals.captured)} captured`);
-out.push(`  fight endings:     ${Object.keys(OUTCOMES).map((k) => `${OUTCOMES[k].toLowerCase()} ${chaosEndings[k] ?? 0}`).join(', ')}`);
+out.push(`  contacts per run:  ${per(totals.contacts)} put on the scope; our gun fired ${per(totals.shots)} times and struck ${per(totals.struck)}; ${per(totals.deterred)} driven off by it; point defence downed ${per(totals.downed)} drones and pods`);
+out.push(`  incoming per run:  ${per(totals.incoming)} rounds and zaps at us: ${per(totals.hits)} hit, ${per(totals.absorbed)} stopped by a brace, ${per(totals.missed)} missed, ${per(totals.warnings)} warning shots`);
+out.push(`  boarders per run:  ${per(totals.boardedUs)} came aboard, ${per(totals.melee)} killed hand to hand`);
+out.push(`  contact endings:   ${Object.keys(ENDINGS).map((k) => `${ENDINGS[k].toLowerCase()} ${chaosEndings[k] ?? 0}`).join(', ')}`);
 out.push(`  AI lines per run:  ${per(totals.said)} (about one every ${totals.said ? Math.round((runs * minutes * 60) / totals.said) : 0} seconds)`);
 out.push(`  pauses per run:    ${per(totals.pauses)} (state checked every paused frame)`);
 out.push('');
@@ -1202,59 +1001,6 @@ for (const s of underFire) for (const [cause, n] of Object.entries(s.deaths)) ca
 out.push(`  deaths by cause:   ${Object.entries(causes).sort((a, b) => b[1] - a[1]).map(([cause, n]) => `${cause} ${n}`).join(', ') || 'none'}`);
 out.push(`  hull left:         ${mean(underFire.map((s) => s.hull)).toFixed(1)} of ${ship.hullPoints} on average; ${mean(underFire.map((s) => s.damage)).toFixed(1)} system bars still broken at the end`);
 out.push('');
-out.push(`Duels (up to ${DUEL_MINUTES} game minutes each): every enemy in turn, and a bot fighting it`);
-for (const [enemyId, boarding] of enemyIds.flatMap((id) => (crewedIds.includes(id) ? [[id, false], [id, true]] : [[id, false]]))) {
-  const mine = duels.filter((d) => d.enemy === enemyId && d.boarding === boarding);
-  const name = `${ships.find((item) => item.id === enemyId).name}${boarding ? ', and we board them' : ''}`;
-  const counts = {};
-  for (const d of mine) counts[d.outcome] = (counts[d.outcome] ?? 0) + 1;
-  const times = mine.map((d) => d.seconds).sort((a, b) => a - b);
-  const fired = mine.reduce((n, d) => n + d.shots, 0);
-  const hails = {};
-  for (const d of mine) if (d.hail) hails[d.hail] = (hails[d.hail] ?? 0) + 1;
-  out.push(`  ${name}: ${mine.length} fights`);
-  out.push(`    endings:        ${Object.entries(counts).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${OUTCOMES[k].toLowerCase()} ${n}`).join(', ')}`);
-  out.push(`    length:         median ${times.length ? Math.round(times[Math.floor(times.length / 2)]) : 'n/a'}s, longest ${times.length ? Math.round(times.at(-1)) : 'n/a'}s`);
-  out.push(`    our shots:      ${mean(mine.map((d) => d.shots)).toFixed(1)} per fight; ${pct(mine.reduce((n, d) => n + d.hit, 0), fired)} hit, ${pct(mine.reduce((n, d) => n + d.shield, 0), fired)} stopped by a brace, ${pct(mine.reduce((n, d) => n + d.miss, 0), fired)} missed`);
-  out.push(`    braces:         we braced ${mean(mine.map((d) => d.braces)).toFixed(1)} times a fight and stopped ${pct(mine.reduce((n, d) => n + d.incomingBraced, 0), mine.reduce((n, d) => n + d.incoming, 0))} of their shots; they braced ${mean(mine.map((d) => d.theirBraces)).toFixed(1)} times`);
-  out.push(`    ammo:           ${mean(mine.map((d) => d.ammoRuns)).toFixed(1)} runs to the hold per fight (theirs ${mean(mine.map((d) => d.theirAmmoRuns)).toFixed(1)}); a heavy gun of ours sat empty ${pct(mine.reduce((n, d) => n + d.dryTicks, 0), mine.reduce((n, d) => n + d.seconds * TICK_RATE, 0))} of the fight`);
-  out.push(`    their shots:    ${mean(mine.map((d) => d.incoming)).toFixed(1)} per fight, ${mean(mine.map((d) => d.incomingHits)).toFixed(1)} hit; our hull at the end ${mean(mine.map((d) => d.ourHull)).toFixed(1)} of ${ship.hullPoints}, crew alive ${mean(mine.map((d) => d.alive)).toFixed(2)} of ${roster.length}`);
-  if (crewedIds.includes(enemyId)) out.push(`    boarding:       ${mean(mine.map((d) => d.boardedUs)).toFixed(1)} of theirs crossed to us, ${mean(mine.map((d) => d.boarded)).toFixed(1)} of ours to them per fight; ${mine.reduce((n, d) => n + d.killedAboard, 0)} of theirs and ${mine.reduce((n, d) => n + d.lostAboard, 0)} of ours killed hand to hand, ${mine.reduce((n, d) => n + d.captured, 0)} captured`);
-  if (Object.keys(hails).length) out.push(`    hails answered: ${Object.entries(hails).map(([k, n]) => `${k} ${n}`).join(', ')}; ${mine.reduce((n, d) => n + d.offers, 0)} surrender offers made`);
-}
-out.push('');
-out.push('Enemy types (S2.5): the plain duels side by side, lit and dark together');
-out.push('  enemy              won   parted  lost   median length   our hull lost   their shots that hit');
-for (const enemyId of enemyIds) {
-  const mine = duels.filter((d) => d.enemy === enemyId && !d.boarding);
-  if (!mine.length) continue;
-  const kinds = { won: 0, parted: 0, lost: 0 };
-  for (const d of mine) kinds[OUTCOME_KIND[d.outcome]] += 1;
-  const times = mine.map((d) => d.seconds).sort((a, b) => a - b);
-  const median = Math.round(times[Math.floor(times.length / 2)]);
-  const name = ships.find((item) => item.id === enemyId).name;
-  const shots = mine.reduce((n, d) => n + d.incoming, 0);
-  out.push(`  ${name.padEnd(18)} ${pct(kinds.won, mine.length).padStart(4)}  ${pct(kinds.parted, mine.length).padStart(5)}  ${pct(kinds.lost, mine.length).padStart(5)}   ${`${median}s`.padStart(13)}   ${mean(mine.map((d) => ship.hullPoints - d.ourHull)).toFixed(1).padStart(13)}   ${shots ? pct(mine.reduce((n, d) => n + d.incomingHits, 0), shots) : 'never fired'}`);
-}
-out.push('');
-out.push('Running dark (S2.7): the same duels, split by how the bot fought. Odd seeds lit (every lamp on, drive burning), even seeds dark (lamps off, drive cold)');
-for (const enemyId of enemyIds) {
-  const name = ships.find((item) => item.id === enemyId).name;
-  for (const dark of [false, true]) {
-    const mine = duels.filter((d) => d.enemy === enemyId && d.dark === dark);
-    const shots = mine.reduce((n, d) => n + d.incoming, 0);
-    const battle = mine.reduce((n, d) => n + d.battleTicks, 0);
-    const won = mine.filter((d) => ['destroyed', 'crew-dead', 'surrendered'].includes(d.outcome)).length;
-    const lost = mine.filter((d) => d.outcome === 'lost').length;
-    if (!shots) {
-      out.push(`  ${name}, ${dark ? 'dark' : 'lit '}: ${mine.length} fights; it never fired. Our signature ${pct(mine.reduce((n, d) => n + d.signature, 0), battle)} on average`);
-      continue;
-    }
-    out.push(`  ${name}, ${dark ? 'dark' : 'lit '}: ${mine.length} fights; their shots ${pct(mine.reduce((n, d) => n + d.incomingHits, 0), shots)} hit, ${pct(mine.reduce((n, d) => n + d.incomingWide, 0), shots)} went wide, ${pct(mine.reduce((n, d) => n + d.incomingBlind, 0), shots)} were fired blind`);
-    out.push(`    ${' '.repeat(name.length)}      our signature ${pct(mine.reduce((n, d) => n + d.signature, 0), battle)} on average; they held a lock ${pct(mine.reduce((n, d) => n + d.lockTicks, 0), battle)} of the fight and lost it ${mean(mine.map((d) => d.lockLost)).toFixed(1)} times; we won ${pct(won, mine.length)}, lost the ship ${pct(lost, mine.length)}, hull left ${mean(mine.map((d) => d.ourHull)).toFixed(1)}`);
-  }
-}
-out.push('');
 // S2.10: how often Margo and the crew say no. The plan wants both above zero and neither the main event.
 const sumMind = (list, key) => list.reduce((n, item) => n + item.mind[key], 0);
 const ruleNames = { grave: 'a room where someone died', burn: 'burns', choke: 'thin air', dark: 'the dark', override: 'an override' };
@@ -1271,13 +1017,6 @@ for (const [label, list] of [['hazard scenarios', scenarios], ['under fire', und
   const orders = list.reduce((n, item) => n + item.sent, 0) + sumMind(list, 'crewRefused') + sumMind(list, 'argued');
   out.push(`  ${`${label}:`.padEnd(18)} she argued in ${withAny(list, 'argued')} of runs (${pct(sumMind(list, 'argued'), orders)} of orders to move); crew refused in ${withAny(list, 'crewRefused')} of runs (${pct(sumMind(list, 'crewRefused'), orders)} of orders): ${rules(list)}`);
 }
-for (const dark of [false, true]) {
-  const list = duels.filter((d) => d.dark === dark);
-  const orders = list.reduce((n, item) => n + item.sent, 0) + sumMind(list, 'crewRefused');
-  const battle = list.reduce((n, d) => n + d.battleTicks, 0);
-  out.push(`  duels, ${dark ? 'dark' : 'lit '}:       the dark got to someone ${(sumMind(list, 'scares') / Math.max(1, list.length)).toFixed(1)} times a fight and ${(sumMind(list, 'lamps') / Math.max(1, list.length)).toFixed(1)} lamps went on by a crew hand; ${(list.reduce((n, d) => n + d.litTicks, 0) / Math.max(1, battle)).toFixed(1)} of ${ship.rooms.length} rooms lit on average`);
-  out.push(`                     crew refused in ${withAny(list, 'crewRefused')} of fights (${pct(sumMind(list, 'crewRefused'), orders)} of orders to move): ${rules(list)}`);
-}
 out.push(`  her trust:         ${mean(scenarios.map((s) => s.trust)).toFixed(0)} of 100 at the end of a hazard scenario, ${mean(underFire.map((s) => s.trust)).toFixed(0)} under fire (it starts at 50)`);
 out.push('');
 const followed = crossings.filter((c) => c.followed);
@@ -1288,7 +1027,8 @@ out.push(`  charts:            ${mean(crossings.map((c) => c.nodes)).toFixed(1)}
 out.push(`  delivered:         ${crossings.filter((c) => c.delivered).length} of ${crossings.length}, ${crossings.filter((c) => c.late).length} late; ship lost ${crossings.filter((c) => c.lost).length}, stranded ${crossings.filter((c) => c.stranded).length}`);
 out.push(`  jumps:             ${mean(crossings.map((c) => c.jumps)).toFixed(1)} per crossing, ${mean(crossings.map((c) => c.detours)).toFixed(1)} of them detours to a port; ${mean(crossings.map((c) => c.fuelLeft)).toFixed(1)} fuel left; ${mean(crossings.map((c) => c.minutes)).toFixed(1)} game minutes`);
 out.push(`  followed:          ${followed.length} of ${crossings.length}; Margo saw the pursuer in ${pct(followed.filter((c) => c.sighted > 0).length, followed.length)} of those; it caught us ${followed.reduce((n, c) => n + c.caught, 0)} times (${pct(followed.filter((c) => c.caught > 0).length, followed.length)} of followed crossings)`);
-out.push(`  pursuit fights:    ${Object.entries(crossOutcomes).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${OUTCOMES[k].toLowerCase()} ${n}`).join(', ') || 'none'}`);
+out.push(`  the pursuer:       ${Object.entries(crossOutcomes).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${ENDINGS[k].toLowerCase()} ${n}`).join(', ') || 'never closed'}`);
+out.push(`  guns and braces:   ${mean(crossings.map((c) => c.shots)).toFixed(1)} rounds fired, ${mean(crossings.map((c) => c.braces)).toFixed(1)} braces and ${mean(crossings.map((c) => c.tolls)).toFixed(1)} tolls paid a crossing`);
 out.push(`  Margo on the chart: ${mean(crossings.map((c) => c.lines)).toFixed(1)} lines a crossing`);
 const sumOf = (key) => crossings.reduce((n, c) => n + c[key], 0);
 const merged = (key) => {
@@ -1300,7 +1040,7 @@ out.push('');
 out.push(`Events (S3.3): what the crossings met, from content/events/ (${transitEvents.length} events)`);
 out.push(`  met:               ${mean(crossings.map((c) => c.events)).toFixed(1)} a crossing (${sumOf('events')} in all), ${sumOf('lapsed')} left behind unanswered; crew all dead in ${crossings.filter((c) => c.crewDead).length} crossings`);
 out.push(`  choices:           ${sumOf('offered')} shown, ${sumOf('locked')} of them locked behind a requirement the crew did not meet (${pct(sumOf('locked'), sumOf('offered'))})`);
-out.push(`  led to:            ${sumOf('eventFights')} fights, ${sumOf('hooks')} scene or threat hooks`);
+out.push(`  led to:            ${sumOf('eventContacts')} ships put on the scope, ${sumOf('hooks')} scene or threat hooks`);
 out.push(`  by event:          ${merged('met').map(([k, n]) => `${k} ${n}`).join(', ') || 'none'}`);
 out.push(`  never met:         ${transitEvents.filter((event) => !merged('met').some(([k]) => k === event.id)).map((event) => event.id).join(', ') || 'none'}`);
 out.push(`  by choice:         ${merged('picked').map(([k, n]) => `${k} ${n}`).join(', ') || 'none'}`);
@@ -1332,6 +1072,14 @@ for (const tactic of TACTICS) {
   const of = encounters.filter((e) => e.tactic === tactic);
   out.push(`  bot: ${tactic.padEnd(13)} got away ${pct(slipped(of), of.length)}: ${endingList(of)}`);
 }
+out.push(`Guns as deterrents (H.3): the same encounters, by what was fired and what it did`);
+for (const def of encounterDefs) {
+  const of = encounters.filter((e) => e.encounter === def.id);
+  const sum = (key) => of.reduce((n, e) => n + e[key], 0);
+  out.push(`  ${def.id.padEnd(18)} at us ${(sum('incoming') / Math.max(1, of.length)).toFixed(1)} a time (${pct(sum('hits'), sum('incoming'))} hit, ${pct(sum('braced'), sum('incoming'))} braced); hull lost ${mean(of.map((e) => ship.hullPoints - e.hull)).toFixed(1)}, wrecked ${of.filter((e) => e.wrecked).length}; our gun ${(sum('shots') / Math.max(1, of.length)).toFixed(1)} rounds, ${sum('struck')} struck; ${sum('downed')} drones and pods downed`);
+}
+const gunners = encounters.filter((e) => e.tactic === 'gun');
+out.push(`  the gun bot:       fired ${mean(gunners.map((e) => e.shots)).toFixed(1)} rounds an encounter and drove off ${pct(gunners.filter((e) => e.outcome === 'deterred').length, gunners.length)} of what it met; it never aims at a room`);
 const crossContacts = {};
 const crossKinds = {};
 for (const c of crossings) {
@@ -1360,7 +1108,7 @@ out.push('');
 out.push(`  wall time:         ${seconds.toFixed(2)}s`);
 const verdict = failures.length
   ? `FAILED: ${failures.length} problem(s).`
-  : 'PASSED: no crashes, no stuck doors, no crew stuck on a path, power never over supply, no fire without air, no fight left hanging, no crossing left unfinished, no contact left on the scope, no party left aboard, nothing moved while paused, every run replays from its seed.';
+  : 'PASSED: no crashes, no stuck doors, no crew stuck on a path, power never over supply, no fire without air, no crossing left unfinished, no contact left on the scope, no party left aboard, nothing moved while paused, every run replays from its seed.';
 
 console.log(out.join('\n'));
 const reportPath = option('report', null);

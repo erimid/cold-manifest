@@ -94,7 +94,7 @@ const ours = (sim) =>
 export const CREW_FILTERS = Object.freeze({
   id: { type: 'crew', fits: (member, id) => member.id === id },
   not: { type: 'crew', fits: (member, id) => member.id !== id },
-  in: { type: 'room', fits: (member, room) => member.room === room && member.task !== 'crossing' },
+  in: { type: 'room', fits: (member, room) => member.room === room },
   away: { type: 'room', fits: (member, room) => member.room !== room },
   suit: { type: 'boolean', fits: (member, suit) => Boolean(member.suit) === suit },
   engineer: { type: 'boolean', fits: (member, engineer) => Boolean(member.engineer) === engineer },
@@ -306,7 +306,7 @@ export function checkValue(value, type, env, what) {
     if (path.length) return ['data', 'memory'].includes(found) ? [] : [`${what}: "$${name}" is a ${found}, so it has no .${path.join('.')}`];
     return found === type || found === 'data' || type === 'any' ? [] : [`${what}: "$${name}" is a ${found}, and a ${type} is wanted`];
   }
-  const sets = { room: 'rooms', crew: 'crew', door: 'doors', system: 'systems', trait: 'traits', memory: 'memories', ship: 'ships', scene: 'scenes', event: 'events', threat: 'threats', faction: 'factions', encounter: 'encounters' };
+  const sets = { room: 'rooms', crew: 'crew', door: 'doors', system: 'systems', trait: 'traits', memory: 'memories', scene: 'scenes', event: 'events', threat: 'threats', faction: 'factions', encounter: 'encounters' };
   if (type === 'faction' && value === 'client') return []; // the contract's client, whoever that is
   if (type === 'boolean') return typeof value === 'boolean' ? [] : [`${what} must be true or false`];
   if (type === 'number') return typeof value === 'number' && Number.isFinite(value) ? [] : [`${what} must be a number`];

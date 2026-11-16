@@ -1,5 +1,5 @@
-// The passive scope (Stage H, H.1; D-151): a small green screen let into the corner of Margo's monitor,
-// where the fight's sensor return used to stand. We are the centre. A contact is not a dot: it is the
+// The passive scope (Stage H, H.1; D-151): a small green screen let into the corner of Margo's monitor.
+// We are the centre. Drones and boarding pods on their way in are drawn as small marks (H.3). A contact is not a dot: it is the
 // patch of space it could be in, a wedge as wide as the bearing is unsure and as deep as the range is.
 // Drawing and hit-testing only: what is on the scope comes from scopeView() in sim/encounters.js.
 
@@ -140,6 +140,30 @@ export function drawScope(ctx, box, view, { selected = null, time = 0, active = 
       }
     } else ctx.rect(p.x - 3.5, p.y - 3.5, 7, 7);
     ctx.stroke();
+  }
+
+  // Drones and pods coming in: a small diamond for a drone, a triangle for a pod; a drone on our hull rings the centre.
+  for (const item of view.incoming ?? []) {
+    const p = at(dial, view, item.bearing, item.range);
+    ctx.strokeStyle = RED;
+    ctx.fillStyle = RED;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    if (item.on) ctx.arc(p.x, p.y, 7, 0, Math.PI * 2);
+    else if (item.kind === 'drone') {
+      ctx.moveTo(p.x, p.y - 4);
+      ctx.lineTo(p.x + 4, p.y);
+      ctx.lineTo(p.x, p.y + 4);
+      ctx.lineTo(p.x - 4, p.y);
+      ctx.closePath();
+    } else {
+      ctx.moveTo(p.x, p.y - 4);
+      ctx.lineTo(p.x + 4, p.y + 3);
+      ctx.lineTo(p.x - 4, p.y + 3);
+      ctx.closePath();
+    }
+    if (item.on) ctx.stroke();
+    else ctx.fill();
   }
 
   // Contacts: the patch each could be in, then the best guess at where in it.

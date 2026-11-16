@@ -1,5 +1,5 @@
 {
-  "note": "Encounters (Stage H, H.1; D-151): the ships that turn up on the scope, and how each behaves. `wants` is what it is looking for (H.2 gives its boarding party that goal). `at` is the kinds of point it can turn up at and `weight` how often. `signature` is what it gives off on its own course and burning after us: what our scope has to read. `sensors`, `reach`, `keen`, `notice` and `sure` are how hard it looks: our signature times `sensors`, falling to nothing at `reach`, has to pass `notice` before it takes an interest and `sure` before it is certain; `keen` is how fast it makes its mind up. `speed` is its cruise and its chase, against our 1.0 at full engine power (a stern chase closes only by the difference). `standoff` is how far off it shadows us, and `shadow` how many seconds it looks before it comes in anyway. `patience` is the seconds it will search with nothing to go on, and `chase` the seconds of pursuit before it gives up. `decoys` is how hard each kind of decoy pulls it (0 not at all; a ship that wants cargo takes a crate and goes). `bluffs` is the chance each lie works, before the crew's negotiation. `alongside` is the seconds before its clamp goes on, what it says first, and (until H.3 retires the duel) the enemy ship it stands for. `party` (H.2, src/sim/boarders.js) is who comes through the lock when it docks: how many, their names, skills and suits, what they say at the lock (`demand`; {crew_name} is the one a bounty is for, {system} what a wrecker wants), the `bribe` that sends them away from the lock, how many seconds they `stay` looking, how `thorough` a search is, and by goal: the `rooms` an inspection goes over with its `fine` and `faction`, the crates a raid means to `take`, and the systems a wrecker would `strip` first.",
+  "note": "Encounters (Stage H, H.1; D-151): the ships that turn up on the scope, and how each behaves. `wants` is what it is looking for (H.2 gives its boarding party that goal). `at` is the kinds of point it can turn up at and `weight` how often. `signature` is what it gives off on its own course and burning after us: what our scope has to read. `sensors`, `reach`, `keen`, `notice` and `sure` are how hard it looks: our signature times `sensors`, falling to nothing at `reach`, has to pass `notice` before it takes an interest and `sure` before it is certain; `keen` is how fast it makes its mind up. `speed` is its cruise and its chase, against our 1.0 at full engine power (a stern chase closes only by the difference). `standoff` is how far off it shadows us, and `shadow` how many seconds it looks before it comes in anyway. `patience` is the seconds it will search with nothing to go on, and `chase` the seconds of pursuit before it gives up. `decoys` is how hard each kind of decoy pulls it (0 not at all; a ship that wants cargo takes a crate and goes). `bluffs` is the chance each lie works, before the crew's negotiation. `alongside` is the seconds before its clamp goes on and what it says first (a ship that boards needs it). `party` (H.2, src/sim/boarders.js) is who comes through the lock when it docks: how many, their names, skills and suits, what they say at the lock (`demand`; {crew_name} is the one a bounty is for, {system} what a wrecker wants), the `bribe` that sends them away from the lock, how many seconds they `stay` looking, how `thorough` a search is, and by goal: the `rooms` an inspection goes over with its `fine` and `faction`, the crates a raid means to `take`, and the systems a wrecker would `strip` first. H.3 (D-175 to D-177): `wants` may also be toll, hull or scan, for a ship that never docks and holds off at its `standoff` instead: a bulwark calls a `toll` ({ cost, zone, grace, demand }: credits, how close it calls, seconds to pay before its gun clears, what it says); a drone carrier swarms the hull with `drones` ({ every, max, total, fire, range }); a gunnery drone builds a `scan` of us ({ range, seconds, calls }) and calls in another encounter. `pods` ({ range, flight }) puts a boarding party across in pods that point defence can shoot down, instead of a clamp. `guns` ({ weapon, range, every, hit, warn, when }) is a gun it fires at our rooms: a weapon from content/weapons/, its reach in scope units, seconds between rounds, its chance to hit when it has us cold, how many warning shots come first, and when it opens up (running: we burn away while it closes; shot: we fired on it; closing: whenever it closes; toll: we have not paid). `nerve` is how much of our deterrent gun it takes to break off: a hit counts 1 and a warning shot 0.35; 0 or none means it never does.",
   "items": [
     {
       "id": "patrol-cutter",
@@ -7,32 +7,65 @@
       "class": "Customs cutter",
       "blurb": "Fast, well lit and by the book. It cannot be outrun, but its crew would rather read a clean manifest than open an airlock.",
       "wants": "inspect",
-      "at": ["checkpoint", "empty"],
+      "at": [
+        "checkpoint",
+        "empty"
+      ],
       "weight": 3,
-      "signature": { "cruise": 0.5, "chase": 0.85 },
+      "signature": {
+        "cruise": 0.5,
+        "chase": 0.85
+      },
       "sensors": 1.1,
       "reach": 130,
       "keen": 1,
       "notice": 0.22,
       "sure": 0.4,
-      "speed": { "cruise": 0.45, "chase": 1.3 },
+      "speed": {
+        "cruise": 0.45,
+        "chase": 1.3
+      },
       "standoff": 25,
       "shadow": 40,
       "patience": 40,
       "chase": 240,
-      "decoys": { "flare": 0.5, "crate": 0.3 },
-      "bluffs": { "transponder": 0.45, "manifest": 0.7 },
+      "decoys": {
+        "flare": 0.5,
+        "crate": 0.3
+      },
+      "bluffs": {
+        "transponder": 0.45,
+        "manifest": 0.7
+      },
       "alongside": {
         "seconds": 12,
-        "hail": "Hauler, this is the cutter off your beam. Cut your drive and stand by your lock for inspection.",
-        "fight": "knife-cutter"
+        "hail": "Hauler, this is the cutter off your beam. Cut your drive and stand by your lock for inspection."
+      },
+      "nerve": 3,
+      "guns": {
+        "weapon": "pulse-laser",
+        "range": 12,
+        "every": 7,
+        "hit": 0.6,
+        "warn": 1,
+        "when": [
+          "running",
+          "shot"
+        ]
       },
       "party": {
         "size": 3,
-        "names": ["Officer Brandt", "Scanner Ileri", "Scanner Moss"],
+        "names": [
+          "Officer Brandt",
+          "Scanner Ileri",
+          "Scanner Moss"
+        ],
         "suits": false,
         "demand": "Receivers customs. Three of us are coming through your lock to go over the hold. Keep your people out of our way.",
-        "bribe": { "cost": 150, "chance": 0.75 },
+        "bribe": {
+          "cost": 150,
+          "chance": 0.75
+        },
         "stay": 200,
         "thorough": 1.1,
         "rooms": 5,
@@ -46,33 +79,68 @@
       "class": "Stripped skiff",
       "blurb": "A hot, noisy drive on a small hull, after anything in a crate. It is slower than a hauler at full burn, and it will stop for cargo left in its path.",
       "wants": "cargo",
-      "at": ["empty", "hazard", "derelict"],
+      "at": [
+        "empty",
+        "hazard",
+        "derelict"
+      ],
       "weight": 3,
-      "signature": { "cruise": 0.55, "chase": 0.95 },
+      "signature": {
+        "cruise": 0.55,
+        "chase": 0.95
+      },
       "sensors": 0.9,
       "reach": 110,
       "keen": 1.2,
       "notice": 0.2,
       "sure": 0.35,
-      "speed": { "cruise": 0.4, "chase": 0.85 },
+      "speed": {
+        "cruise": 0.4,
+        "chase": 0.85
+      },
       "standoff": 20,
       "shadow": 25,
       "patience": 30,
       "chase": 160,
-      "decoys": { "flare": 0.8, "crate": 2.5 },
-      "bluffs": { "transponder": 0.25 },
+      "decoys": {
+        "flare": 0.8,
+        "crate": 2.5
+      },
+      "bluffs": {
+        "transponder": 0.25
+      },
       "alongside": {
         "seconds": 10,
-        "hail": "Open your hold and nobody has to come looking for it.",
-        "fight": "salvager-skiff"
+        "hail": "Open your hold and nobody has to come looking for it."
+      },
+      "nerve": 2,
+      "guns": {
+        "weapon": "pulse-laser",
+        "range": 10,
+        "every": 8,
+        "hit": 0.5,
+        "warn": 1,
+        "when": [
+          "closing",
+          "shot"
+        ]
       },
       "party": {
         "size": 3,
-        "names": ["Kett", "Orla", "Spar"],
-        "skills": { "combat": 1 },
+        "names": [
+          "Kett",
+          "Orla",
+          "Spar"
+        ],
+        "skills": {
+          "combat": 1
+        },
         "suits": false,
         "demand": "Two crates through the lock and we never came aboard. Make us look, and we take what we find.",
-        "bribe": { "cost": 120, "chance": 0.6 },
+        "bribe": {
+          "cost": 120,
+          "chance": 0.6
+        },
         "stay": 160,
         "take": 2
       }
@@ -81,35 +149,72 @@
       "id": "bounty-tender",
       "name": "Bounty tender",
       "class": "Grapple tender",
-      "blurb": "Runs cold and listens hard, for one name on a warrant. It is patient and does not care what the manifest says.",
+      "blurb": "Runs cold and listens hard, for one name on a warrant. It does not clamp on: it stands off and fires its people across in pods, and it does not care what the manifest says.",
       "wants": "crew",
-      "at": ["empty", "hazard", "checkpoint"],
+      "at": [
+        "empty",
+        "hazard",
+        "checkpoint"
+      ],
       "weight": 1,
-      "signature": { "cruise": 0.22, "chase": 0.7 },
+      "signature": {
+        "cruise": 0.22,
+        "chase": 0.7
+      },
       "sensors": 1.2,
       "reach": 140,
       "keen": 0.8,
       "notice": 0.18,
       "sure": 0.48,
-      "speed": { "cruise": 0.35, "chase": 1.05 },
+      "speed": {
+        "cruise": 0.35,
+        "chase": 1.05
+      },
       "standoff": 30,
       "shadow": 60,
       "patience": 70,
       "chase": 200,
-      "decoys": { "flare": 0.9, "crate": 0.1 },
-      "bluffs": { "transponder": 0.5 },
+      "decoys": {
+        "flare": 0.9,
+        "crate": 0.1
+      },
+      "bluffs": {
+        "transponder": 0.5
+      },
       "alongside": {
         "seconds": 14,
-        "hail": "We hold a warrant for one of your crew. Send them across and you keep your ship.",
-        "fight": "grapple-tender"
+        "hail": "We hold a warrant for one of your crew. Pods are coming across. Send them to the lock and nobody else is touched."
+      },
+      "nerve": 2.5,
+      "guns": {
+        "weapon": "pulse-laser",
+        "range": 12,
+        "every": 9,
+        "hit": 0.5,
+        "when": [
+          "shot"
+        ]
+      },
+      "pods": {
+        "range": 12,
+        "flight": 7
       },
       "party": {
         "size": 3,
-        "names": ["Warrant Officer Haas", "Tracker Venn", "Tracker Oduya"],
-        "skills": { "combat": 2 },
+        "names": [
+          "Warrant Officer Haas",
+          "Tracker Venn",
+          "Tracker Oduya"
+        ],
+        "skills": {
+          "combat": 2
+        },
         "suits": true,
         "demand": "The warrant is for {crew_name}. Send them to the lock and nobody else is touched.",
-        "bribe": { "cost": 250, "chance": 0.45 },
+        "bribe": {
+          "cost": 250,
+          "chance": 0.45
+        },
         "stay": 220,
         "thorough": 1.4
       }
@@ -120,34 +225,194 @@
       "class": "Wrecker",
       "blurb": "Slow, half blind and loud. It wants hull plate and fittings, ours if we look dead enough, and it will follow anything bright.",
       "wants": "salvage",
-      "at": ["derelict", "hazard"],
+      "at": [
+        "derelict",
+        "hazard"
+      ],
       "weight": 2,
-      "signature": { "cruise": 0.6, "chase": 0.9 },
+      "signature": {
+        "cruise": 0.6,
+        "chase": 0.9
+      },
       "sensors": 0.7,
       "reach": 95,
       "keen": 0.7,
       "notice": 0.21,
       "sure": 0.39,
-      "speed": { "cruise": 0.3, "chase": 0.6 },
+      "speed": {
+        "cruise": 0.3,
+        "chase": 0.6
+      },
       "standoff": 15,
       "shadow": 30,
       "patience": 25,
       "chase": 90,
-      "decoys": { "flare": 1.6, "crate": 1 },
-      "bluffs": { "transponder": 0.6, "manifest": 0.3 },
+      "decoys": {
+        "flare": 1.6,
+        "crate": 1
+      },
+      "bluffs": {
+        "transponder": 0.6,
+        "manifest": 0.3
+      },
       "alongside": {
         "seconds": 16,
-        "hail": "No answer on any channel. Logging her as abandoned and making fast.",
-        "fight": "salvager-skiff"
+        "hail": "No answer on any channel. Logging her as abandoned and making fast."
       },
+      "nerve": 1,
       "party": {
         "size": 2,
-        "names": ["Cutter Dubois", "Cutter Pym"],
+        "names": [
+          "Cutter Dubois",
+          "Cutter Pym"
+        ],
         "suits": true,
         "demand": "Wrecker crew coming aboard to take her {system}. If anyone is alive in there, now is the time to say so.",
-        "bribe": { "cost": 90, "chance": 0.8 },
+        "bribe": {
+          "cost": 90,
+          "chance": 0.8
+        },
         "stay": 150,
-        "strip": ["sensors", "shields", "medbay", "weapons"]
+        "strip": [
+          "sensors",
+          "shields",
+          "medbay",
+          "weapons"
+        ]
+      }
+    },
+    {
+      "id": "bulwark",
+      "name": "Bulwark",
+      "class": "Ex-navy picket",
+      "blurb": "All plating and patience, refitted as a toll gate. It is slow and it is armoured, our gun means nothing to it, and inside its zone it wants paying.",
+      "wants": "toll",
+      "at": [
+        "checkpoint",
+        "hazard"
+      ],
+      "weight": 2,
+      "signature": {
+        "cruise": 0.7,
+        "chase": 0.8
+      },
+      "sensors": 1.0,
+      "reach": 130,
+      "keen": 1,
+      "notice": 0.2,
+      "sure": 0.4,
+      "speed": {
+        "cruise": 0.1,
+        "chase": 0.6
+      },
+      "standoff": 6,
+      "shadow": 30,
+      "patience": 60,
+      "chase": 240,
+      "decoys": {
+        "flare": 0.2,
+        "crate": 0
+      },
+      "bluffs": {
+        "transponder": 0.35
+      },
+      "nerve": 0,
+      "guns": {
+        "weapon": "slug-thrower",
+        "range": 25,
+        "every": 12,
+        "hit": 0.55,
+        "warn": 1,
+        "when": [
+          "toll",
+          "shot"
+        ]
+      },
+      "toll": {
+        "cost": 60,
+        "zone": 25,
+        "grace": 20,
+        "demand": "This lane is tolled. Sixty credits and you pass. Stay in our zone without paying and we will take it out of your hull."
+      }
+    },
+    {
+      "id": "drone-carrier",
+      "name": "Drone carrier",
+      "class": "Survey tender",
+      "blurb": "A survey tender whose drones learned to bite. It never comes close: it sits off and sends them to chew on the hull, and point defence is the answer.",
+      "wants": "hull",
+      "at": [
+        "derelict",
+        "empty"
+      ],
+      "weight": 1,
+      "signature": {
+        "cruise": 0.45,
+        "chase": 0.75
+      },
+      "sensors": 1.0,
+      "reach": 120,
+      "keen": 1,
+      "notice": 0.2,
+      "sure": 0.42,
+      "speed": {
+        "cruise": 0.35,
+        "chase": 0.75
+      },
+      "standoff": 14,
+      "shadow": 35,
+      "patience": 40,
+      "chase": 180,
+      "decoys": {
+        "flare": 1.2,
+        "crate": 0.3
+      },
+      "nerve": 2,
+      "drones": {
+        "every": 8,
+        "max": 3,
+        "total": 4,
+        "fire": 6,
+        "range": 20
+      }
+    },
+    {
+      "id": "gunnery-drone",
+      "name": "Gunnery drone",
+      "class": "Halloran-pattern target drone",
+      "blurb": "Small, quick and unmanned. It shadows a ship until it has a good look, then calls in a patrol. One round puts it out of the sky.",
+      "wants": "scan",
+      "at": [
+        "checkpoint",
+        "empty"
+      ],
+      "weight": 2,
+      "signature": {
+        "cruise": 0.15,
+        "chase": 0.3
+      },
+      "sensors": 1.3,
+      "reach": 120,
+      "keen": 1.4,
+      "notice": 0.18,
+      "sure": 0.38,
+      "speed": {
+        "cruise": 0.5,
+        "chase": 1.1
+      },
+      "standoff": 8,
+      "shadow": 20,
+      "patience": 50,
+      "chase": 150,
+      "decoys": {
+        "flare": 1.5,
+        "crate": 0.5
+      },
+      "nerve": 1,
+      "scan": {
+        "range": 14,
+        "seconds": 25,
+        "calls": "patrol-cutter"
       }
     }
   ]

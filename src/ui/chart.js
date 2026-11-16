@@ -57,8 +57,7 @@ export function createChart({ sim, order, onClose }) {
   );
 
   function doJump() {
-    if (sim.state.fight && !sim.state.fight.over) order({ type: 'ship.jump' });
-    else order({ type: 'course.jump' });
+    order({ type: 'course.jump' });
   }
 
   // ---------- the static layer: lanes and points, redrawn only when the run moves ----------
@@ -158,9 +157,8 @@ export function createChart({ sim, order, onClose }) {
     draw();
     const chase = r.pursuit && !r.pursuit.done ? r.pursuit : null;
     const left = r.deadline - r.jumps;
-    const fight = sim.state.fight && !sim.state.fight.over;
-    const problem = fight ? sim.whyNot({ type: 'ship.jump' }) : whyNoCourseJump(sim);
-    const note = !r.plot && !fight ? 'Plot a course' : fixOf(sim) < 1 && /fix/.test(problem ?? '') ? `Fix ${percent(fixOf(sim))}` : problem ? (/helm/.test(problem) ? 'No pilot' : /engines/.test(problem) ? 'No drive' : /fuel/.test(problem) ? 'No fuel' : /fix|sensors/.test(problem) ? 'No sensors' : 'Not now') : fight ? (r.plot ? 'Escape down the course' : 'Escape') : 'Ready';
+    const problem = whyNoCourseJump(sim);
+    const note = !r.plot ? 'Plot a course' : fixOf(sim) < 1 && /fix/.test(problem ?? '') ? `Fix ${percent(fixOf(sim))}` : problem ? (/helm/.test(problem) ? 'No pilot' : /engines/.test(problem) ? 'No drive' : /fuel/.test(problem) ? 'No fuel' : /fix|sensors/.test(problem) ? 'No sensors' : /alongside|clamped/.test(problem) ? 'Ship alongside' : 'Not now') : 'Ready';
     const text = [
       `Fuel ${r.fuel}/${r.fuelMax}`,
       r.delivered ? `Delivered in ${r.jumps}` : left >= 0 ? `Jump ${r.jumps} · ${left} to deadline` : `Jump ${r.jumps} · ${-left} late`,

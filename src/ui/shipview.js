@@ -5,40 +5,32 @@
 // bottom routes the reactor's bars between systems (S1.4). Air, fire and crew
 // arrive in the next sessions and plug into this screen.
 //
-// In a fight (S2.1) the enemy ship stands in a column on the right and a
-// weapons bar appears above the status panel: tap a weapon, then a room on
-// their ship, to aim it. It all works while paused. From S2.3 a card above the
-// weapons bar answers a hail (talk, pay, open fire) or a surrender (accept,
-// refuse), and the weapons bar has a Jump button that fills as the sensors take a fix.
 // From S2.7 the screen shows what Margo knows, not what is so (senses.js): a
 // room of ours she cannot see into is drawn as last seen, behind static, and
-// their ship is static until the sensors resolve it room by room. Each side's
-// signature and the other's lock on it are in the weapons bar, and with nothing
-// selected the status panel breaks our signature down and has the Go dark button.
-// From S2.4, with one of ours selected, a tap on a room of theirs sends them
-// across to board; a tap on a room of ours brings them home. Ours aboard them
-// are drawn on their ship and say so on their chip; their boarders are drawn
-// red aboard ours and cannot be selected.
-// From S2.8 the weapons bar has a Brace button that dumps the shield capacitor
-// (D-075), heavy guns show their rounds and can send someone for more, and the
+// with nothing selected the status panel breaks our signature down and has
+// the Go dark button. Boarders are drawn red aboard ours and cannot be selected.
+// From S2.8 heavy guns show their rounds and can send someone for more, and the
 // crates in the holds are drawn and can be tapped: open, move (then tap a
-// room), jettison, or load the guns. Each goes to the crew member selected
+// room), jettison, or load the gun. Each goes to the crew member selected
 // last, or the nearest free hand.
 // From H.1 (D-151) the corner of the monitor is the passive scope: contacts as patches of space they could
 // be in. Tap a return to read it and hail it with a lie; tap anywhere else on the dial to come round to
 // that heading. With nothing selected the status panel lights or cuts the drive and puts out a flare.
+// From H.3 (D-152) there is no enemy ship on the screen and no weapons bar: a contact's panel lays the
+// deterrent gun on it (or holds fire), pays a toll and shows our gun's rounds; point defence looks after
+// itself; Brace sits with the helm controls; drones and pods are drawn on the scope.
 
 import { REFUSALS_PER_RUN, trustWord } from '../ai/judgement.js';
 import { pickTarget } from '../engine/hit.js';
-import { DEBUG_ACTIONS, OUTCOMES, OFFER_SECONDS, braced, bribePrice, capacitorOf, capacity, chargeOf, enemyOf, findCrew, fixOf, offerText, ourCrew, talkChance, whyNoBrace, whyNoJump } from '../sim/combat.js';
+import { braced, capacitorOf, capacity, chargeOf, findCrew, gunChance, gunSlot, ourCrew, pdSlot, whyNoBrace, whyNoGun } from '../sim/combat.js';
 import { GOALS, REASONS, OUTCOMES as BOARDING_OUTCOMES, bribeChance, describeBoarder, partyOf, whyNoBribe, whyNoYield } from '../sim/boarders.js';
 import { HIDING, compartmentsFree, whyNoHide } from '../sim/agents.js';
 import { describeTask } from '../sim/crew.js';
-import { BLUFFS, ENDINGS, bluffChance, scopeView, whyNoHail } from '../sim/encounters.js';
+import { BLUFFS, ENDINGS, bluffChance, findContact, scopeView, whyNoHail, whyNoPay } from '../sim/encounters.js';
 import { describeJob, magazineOf, pickHand, roundsInHold } from '../sim/hold.js';
 import { nerveWord, topMemory } from '../sim/memory.js';
 import { POWERED, aiCoreStatus, free, lightsDraw, litRooms, supply, usable } from '../sim/power.js';
-import { contactView, roomView, sensorsUp, signature, unseen } from '../sim/senses.js';
+import { roomView, sensorsUp, signature, unseen } from '../sim/senses.js';
 import { SPACE, SYSTEMS } from '../sim/systems.js';
 import { roleOf, skillWords } from '../sim/roles.js';
 import { TICK_SECONDS } from '../sim/sim.js';
@@ -51,14 +43,13 @@ import { bearingText, drawScope, rangeText, scopeDial, scopeHit, scopeMarks } fr
 
 const percent = (value) => `${Math.round(value * 100)}%`;
 const POWER_KEYS = 'QWERTYUI';
-const WEAPON_KEYS = 'ASDF';
 /** How long a crew member's intercom reply stays on the monitor, in real milliseconds. */
 const INTERCOM_MS = 4000;
 /** How long a crew member's reason for refusing stays in the status panel: long enough to read a whole sentence. */
 const REFUSAL_MS = 7000;
 /** How long a shot's result stays on screen, in seconds of game time. */
 const IMPACT_SECONDS = 0.9;
-const IMPACT_TEXT = { hit: 'HIT', shield: 'SHIELD', miss: 'MISS' };
+const IMPACT_TEXT = { hit: 'HIT', shield: 'SHIELD', miss: 'MISS', warning: 'WARNING SHOT' };
 /** A hit lights up the room it lands in for this long, and shakes the screen for this long when it is ours (brief §17). */
 const FLASH_SECONDS = 0.3;
 const SHAKE_SECONDS = 0.45;
@@ -77,14 +68,13 @@ function effectWords(effects) {
   return words.join('  ');
 }
 /** Short task names for the crew bar, where there is no room for a sentence. */
-const CHIP_TASKS = { walking: 'Walking', crawling: 'Crawling', waiting: 'At a door', extinguish: 'Fighting fire', patch: 'Patching hull', repair: 'Repairing', unjam: 'Freeing door', idle: 'Standing by', fighting: 'Fighting', sabotage: 'Wrecking', crossing: 'In the tube', lifting: 'Lifting', opening: 'Opening', loading: 'Loading gun', cycling: 'At the airlock', stashing: 'Stashing', hiding: 'Hiding' };
+const CHIP_TASKS = { walking: 'Walking', crawling: 'Crawling', waiting: 'At a door', extinguish: 'Fighting fire', patch: 'Patching hull', repair: 'Repairing', unjam: 'Freeing door', idle: 'Standing by', fighting: 'Fighting', sabotage: 'Wrecking', lifting: 'Lifting', opening: 'Opening', loading: 'Loading gun', cycling: 'At the airlock', stashing: 'Stashing', hiding: 'Hiding' };
 /** What a crate is, in a few words for its panel. */
 const CRATE_KIND = { ammo: 'Ordnance · rounds for the heavy guns', cargo: 'Company manifest', salvage: 'Salvage' };
 /** Start a sentence with a capital: the sim's reasons are written to follow "because". */
 const sentence = (text) => `${text.charAt(0).toUpperCase()}${text.slice(1)}.`;
 
-/** What each debug ending button is called (DEBUG_ACTIONS in combat.js). */
-const DEBUG_LABELS = { cripple: 'Cripple them', killCrew: 'Kill their crew', surrender: 'They surrender', flee: 'They run', chargeJump: 'Get our fix', scan: 'Perfect lock', stalemate: 'Stalemate now', sinkUs: 'Sink us', money: '+100 money', boardUs: 'They board us' };
+/** Ticks as whole seconds, rounded up. */
 const seconds = (ticks) => `${Math.max(0, Math.ceil(ticks * TICK_SECONDS))}s`;
 
 /** How fast the AI's lines type out, in characters per second of real time, and how often a character blips. */
@@ -101,17 +91,13 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
   let view = { scale: 1, ox: 0, oy: 0 };
   let selected = null; // { kind: 'room' | 'door', id }
   let selectedCrew = null; // a crew id; while set, tapping a room sends them there
-  let selectedWeapon = null; // a weapon slot; while set, tapping a room on the enemy ship aims it there
   let lastHand = null; // the crew member selected last: crate orders go to them if they can take them
   let movingCrate = null; // a crate id; while set, tapping a room of ours has it carried there
-  let foe = null; // the enemy ship's renderer, while there is one: { id, renderer }
-  let foeView = null; // where the enemy ship is drawn
   let monitor = { x: 0, y: 0, w: 0, h: 0 }; // Margo's schematic screen, in CSS pixels
-  let sensorBox = null; // the enemy's sensor-return screen, in a fight
-  let scopeBox = null; // the passive scope, the rest of the time (H.1)
-  let fightBar = null; // the weapons bar's live parts
+  let scopeBox = null; // the passive scope (H.1)
   let boardCall = null; // the boarding card's live parts (H.2)
-  let impacts = []; // shots that just landed, for a moment: { side, room, result, damage, effects, tick }
+  let tollCall = null; // the toll card's live parts (H.3)
+  let impacts = []; // rounds that just landed on us, for a moment: { room, result, damage, effects, tick }
   let shake = null; // { tick, strength } the last hit on our ship, while the screen shakes
   let roster = null; // the crew bar's live parts
   let showCrawlways = false;
@@ -133,6 +119,8 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
   const roomName = (id) => (id === SPACE ? 'space' : layout.room(id).name);
   /** The hardest-hitting weapon we carry: what the debug Hit us button is struck with. */
   const heaviestGun = () => sim.state.weapons.map((slot) => sim.catalog.weapon(slot.id)).reduce((a, b) => (b.damage > a.damage ? b : a)).id;
+  /** The deterrent gun's slot, or -1. */
+  const gun = () => gunSlot(sim);
   const weaponOf = (slot) => sim.catalog.weapon(sim.state.weapons[slot].id);
 
   function doorName(door) {
@@ -148,22 +136,16 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
       if (room.kind === 'hold' || room.kind === 'cargo') return `${room.name}. Where the paying cargo goes, when there is any.`;
       return `${room.name}. Gets you from one problem to the next.`;
     }
-    if (target?.kind === 'foe') {
-      const enemy = enemyOf(sim);
-      const room = enemy.layout.room(target.id);
-      if (!contactView(sim, target.id)?.resolved) return `${enemy.layout.name}: a part of the return the sensors have not made out yet. Sensor power resolves it faster; so does anything they have lit, hot or loud.`;
-      return `${enemy.layout.name}: ${room.name}. ${room.system ? SYSTEMS[room.system].blurb : 'Part of their ship.'}`;
-    }
     if (target?.kind === 'crate') {
       const crate = sim.state.crates[target.id];
       if (!crate) return null;
-      if (crate.kind === 'ammo') return `${crate.label}: ${crate.rounds} rounds for the slug thrower and the lance. Tap it to load the guns.`;
+      if (crate.kind === 'ammo') return `${crate.label}: ${crate.rounds} rounds for the slug thrower. Tap it to load the gun.`;
       return `${crate.label}${crate.contract ? ' (contract cargo)' : ''}. ${crate.sealed ? 'Under a company seal.' : crate.contents ?? 'Opened.'}`;
     }
     if (target?.kind === 'crew') {
       const { member, ship } = findCrew(sim, target.id);
       const role = roleOf(member);
-      return `${member.name}${role ? `, ${role.name.toLowerCase()}` : ''}${ship === sim ? '' : `, aboard the ${ship.layout.name}`}. ${describeTask(ship, member)}.${member.alive ? ` Health ${percent(member.health)}.` : ''}${role ? ` ${role.blurb}` : ''}`;
+      return `${member.name}${role ? `, ${role.name.toLowerCase()}` : ''}. ${describeTask(ship, member)}.${member.alive ? ` Health ${percent(member.health)}.` : ''}${role ? ` ${role.blurb}` : ''}`;
     }
     if (target?.kind === 'door') {
       const door = layout.door(target.id);
@@ -188,15 +170,14 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     // The ship gets the space between the top bar and the bottom panels, and is refitted if either moves.
     const top = Math.round(nodes.top.getBoundingClientRect().bottom) + 10;
-    const enemyId = sim.state.fight?.enemy.ship ?? null;
     const bottom = Math.round(nodes.bottom.getBoundingClientRect().top) - 10;
-    if (w === size.w && h === size.h && dpr === size.dpr && top === size.top && bottom === size.bottom && enemyId === size.enemyId) return;
+    if (w === size.w && h === size.h && dpr === size.dpr && top === size.top && bottom === size.bottom) return;
     if (w !== size.w || h !== size.h || dpr !== size.dpr) {
       canvas.width = Math.round(w * dpr);
       canvas.height = Math.round(h * dpr);
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     }
-    size = { w, h, dpr, top, bottom, enemyId };
+    size = { w, h, dpr, top, bottom };
     // The monitor: the space between the top bar and the dock, with a bezel round the schematic.
     monitor = { x: 12, y: top, w: w - 24, h: Math.max(80, bottom - top) };
     // The intercom line sits on the bottom edge of the monitor, inside the bezel.
@@ -204,32 +185,18 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
     nodes.intercom.style.top = `${monitor.y + monitor.h - 58}px`;
     // The chart takes the whole monitor when it is up (D-106).
     if (chart) Object.assign(chart.node.style, { left: `${monitor.x}px`, top: `${monitor.y}px`, width: `${monitor.w}px`, height: `${monitor.h}px` });
-    // A small green screen is let into the corner of Margo's (D-073): the passive scope (H.1), or in a
-    // fight their ship as a sensor return. Our ship is fitted to what is left either way, so it never jumps.
+    // A small green screen is let into the corner of Margo's (D-073): the passive scope (H.1). Our ship is fitted to what is left.
     const boxW = Math.round(Math.min(320, Math.max(240, monitor.w * 0.29)));
-    const corner = { x: monitor.x + monitor.w - boxW - 10, y: monitor.y + 10, w: boxW, h: monitor.h - 20 };
+    scopeBox = { x: monitor.x + monitor.w - boxW - 10, y: monitor.y + 10, w: boxW, h: monitor.h - 20 };
     view = renderer.fit({ x: monitor.x + 12, y: monitor.y + 10, w: monitor.w - boxW - 34, h: monitor.h - 20 });
-    if (!enemyId) {
-      foe = null;
-      foeView = null;
-      sensorBox = null;
-      scopeBox = corner;
-      return;
-    }
-    scopeBox = null;
-    if (foe?.id !== enemyId) foe = { id: enemyId, renderer: createShipRenderer(enemyOf(sim).layout, { sensor: true }) };
-    sensorBox = corner;
-    foeView = foe.renderer.fit({ x: sensorBox.x + 8, y: sensorBox.y + 24, w: sensorBox.w - 16, h: sensorBox.h - 50 }); // clear of the title above and the lock readout below
   }
 
   /** Our own people aboard a ship: the ones that can be tapped. Their boarders are only looked at. */
   const oursOn = (ship) => Object.values(ship.state.crew).filter((member) => member.owner === 'player');
 
-  /** Everything tappable on the canvas: our ship and our crew, and in a fight the rooms of theirs and any of ours aboard. */
+  /** Everything tappable on the canvas: our ship, our crew and the crates. */
   function allTargets() {
-    const own = renderer.targets(view, oursOn(sim), { crates: sim.state.crates });
-    const enemy = enemyOf(sim);
-    return foe && foeView && enemy ? [...own, ...foe.renderer.targets(foeView, oursOn(enemy), { foe: true })] : own;
+    return renderer.targets(view, oursOn(sim), { crates: sim.state.crates });
   }
 
   // ---------- orders ----------
@@ -351,9 +318,8 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
     if (sheet === 'debug') drawDebug();
   }
 
-  /** Debug only: start a fight with any enemy, and push one toward each ending (brief §7). */
+  /** Debug only: the gun, Margo, memories, the chart, the contract, events and the scope. */
   function drawDebug() {
-    const fight = sim.state.fight;
     // Whose head the memory buttons write into: whoever was picked last, if they are aboard and alive.
     const mind = Object.values(sim.state.crew).find((member) => member.id === lastHand && member.alive && member.owner === 'player') ?? Object.values(sim.state.crew).find((member) => member.alive && member.owner === 'player') ?? null;
     const act = (fn) => () => {
@@ -361,15 +327,14 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
       openSheet('debug');
     };
     nodes.sheet.replaceChildren(
-      el('div', { class: 'stencil' }, 'Debug: fights'),
+      el('div', { class: 'stencil' }, 'Debug: guns'),
       el(
         'div',
         { class: 'sheet__grid' },
-        sim.catalog.enemies.map((id) => button(`btn-dbg-fight-${id}`, sim.catalog.layout(id).name, act(() => order({ type: 'debug.fight', enemy: id })), 'btn--debug')),
-        fight && button('btn-dbg-away', 'Send away', act(() => order({ type: 'debug.fight', enemy: null })), 'btn--debug'),
+        button('btn-dbg-gun-load', 'Load the gun', act(() => order({ type: 'debug.gun', load: true })), 'btn--debug'),
+        button('btn-dbg-gun-charge', 'Charge the mounts', act(() => order({ type: 'debug.gun', charge: true })), 'btn--debug'),
+        sim.state.run && button('btn-dbg-fix', 'Get our fix', act(() => order({ type: 'debug.run', fix: true })), 'btn--debug'),
       ),
-      el('div', { class: 'stencil sheet__sub' }, 'Push the fight to an ending'),
-      el('div', { class: 'sheet__grid' }, DEBUG_ACTIONS.map((action) => button(`btn-dbg-end-${action}`, DEBUG_LABELS[action], act(() => order({ type: 'debug.combat', action })), 'btn--debug'))),
       el('div', { class: 'stencil sheet__sub', id: 'dbg-trust' }, `Margo: trust ${Math.round(sim.state.ai.trust)} (${trustWord(sim.state.ai.trust)}), refused ${sim.state.ai.refusals} of ${REFUSALS_PER_RUN}`),
       el(
         'div',
@@ -396,7 +361,7 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
           button('btn-dbg-fuel', 'Fill the tanks', act(() => order({ type: 'debug.run', fuel: sim.state.run.fuelMax })), 'btn--debug'),
           button('btn-dbg-fuel-out', 'Empty the tanks', act(() => order({ type: 'debug.run', fuel: 0 })), 'btn--debug'),
           button('btn-dbg-chase', sim.state.run.pursuit ? 'Nobody follows' : 'Someone follows', act(() => order({ type: 'debug.run', pursuit: sim.state.run.pursuit ? 'off' : 'on' })), 'btn--debug'),
-          button('btn-dbg-caught', 'Pursuer alongside', act(() => order({ type: 'debug.run', pursuit: 'catch' })), 'btn--debug'),
+          button('btn-dbg-caught', 'Pursuer closes', act(() => order({ type: 'debug.run', pursuit: 'catch' })), 'btn--debug'),
         ),
       sim.state.run?.contract?.status === 'active' &&
         el(
@@ -405,7 +370,7 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
           // The contract (S3.4): put the rest of its cargo aboard (works a claim), or fail it.
           button('btn-dbg-load', 'Load all the cargo', act(() => order({ type: 'debug.contract', load: true })), 'btn--debug'),
           button('btn-dbg-fail', 'Fail the contract', act(() => order({ type: 'debug.contract', fail: 'lost' })), 'btn--debug'),
-          button('btn-dbg-rich', '+100 credits', act(() => order({ type: 'debug.combat', action: 'money' })), 'btn--debug'),
+          button('btn-dbg-rich', '+100 credits', act(() => order({ type: 'debug.gun', money: true })), 'btn--debug'),
         ),
       sim.transit.all.length > 0 && el('div', { class: 'stencil sheet__sub' }, `Events: ${sim.state.run?.events.count ?? 0} met this run`),
       sim.transit.all.length > 0 &&
@@ -474,10 +439,10 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
       const mini = el('div', { class: 'power__mini', id: `power-mini-${id}` }, el('span', {}, SYSTEMS[id].code), el('span', { class: 'power__minipips' }, lamps));
       return { id, node, minus, plus, bars, mini, lamps };
     });
-    const toggle = el('button', { class: 'btn btn--small power__toggle', type: 'button', id: 'btn-breakers', 'aria-expanded': 'false', press: () => openBoard(!power.open, { byHand: true }) }, el('span', { id: 'breakers-label' }, 'Breakers'), el('small', { class: 'power__key' }, 'P'));
+    const toggle = el('button', { class: 'btn btn--small power__toggle', type: 'button', id: 'btn-breakers', 'aria-expanded': 'false', press: () => openBoard(!power.open) }, el('span', { id: 'breakers-label' }, 'Breakers'), el('small', { class: 'power__key' }, 'P'));
     const board = el('div', { class: 'power__tiles', id: 'breaker-board', hidden: true }, tiles.map((t) => t.node));
     const folded = el('div', { class: 'power__folded', id: 'breakers-folded' }, tiles.map((t) => t.mini));
-    power = { reactorPips, summary, lights, tiles, toggle, board, folded, open: false, byFight: false, node: null };
+    power = { reactorPips, summary, lights, tiles, toggle, board, folded, open: false, node: null };
     power.node = el(
       'div',
       { class: 'panel power breakers is-closed', id: 'power' },
@@ -488,11 +453,9 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
     return power.node;
   }
 
-  /** Open or fold the breaker board. One a fight opened folds again when the fight is over, unless the player has touched it since. */
-  function openBoard(open, { byHand = false, byFight = false } = {}) {
-    if (byHand) power.byFight = false;
+  /** Open or fold the breaker board. */
+  function openBoard(open) {
     if (power.open === open) return;
-    power.byFight = byFight && open;
     power.open = open;
     power.board.hidden = !open;
     power.folded.hidden = open;
@@ -547,7 +510,6 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
     selected = next;
     if (next?.kind !== 'crate') movingCrate = null;
     if (next) selectedCrew = null;
-    if (next) selectedWeapon = null;
     nodes.info.hidden = true;
     buildPanel();
   }
@@ -559,16 +521,6 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
 
   function button(id, label, press, extraClass = '') {
     return el('button', { class: `btn btn--small ${extraClass}`, type: 'button', id, press }, label);
-  }
-
-  function selectWeapon(slot) {
-    selectedWeapon = slot;
-    if (slot !== null) {
-      selected = null;
-      selectedCrew = null;
-    }
-    nodes.info.hidden = true;
-    buildPanel();
   }
 
   /** Who a crate order goes to: whoever was selected last, if they can take it, else the nearest free hand. */
@@ -603,43 +555,71 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
     return best?.index ?? null;
   }
 
-  // ---------- the weapons bar (fights only) ----------
+  // ---------- the cards above the status panel: a party at the lock, a toll ----------
 
-  function sideStats(id, title) {
-    const fill = el('i', {});
-    const hull = el('span', { class: 'fightside__hull', id: `${id}-hull` });
-    const line = el('span', { class: 'fightside__line', id: `${id}-line` });
-    const lock = el('span', { class: 'fightside__line fightside__lock', id: `${id}-lock` });
-    const name = el('span', { class: 'stencil' }, title);
-    return { node: el('div', { class: 'fightside', id }, el('div', { class: 'fightside__head' }, name, hull), el('span', { class: 'fightside__bar' }, fill), line, lock), fill, hull, line, lock, name };
+  function buildCalls() {
+    boardCall = buildBoardCall();
+    tollCall = buildTollCall();
+    return el('div', { class: 'fightstack' }, boardCall.node, tollCall.node);
   }
 
-  function buildFightBar() {
-    const tiles = sim.state.weapons.map((slot, index) => {
-      const weapon = sim.catalog.weapon(slot.id);
-      const charge = el('i', { class: 'crewchip__health' });
-      const state = el('span', { class: 'crewchip__task' });
-      const node = el(
-        'button',
-        { class: 'btn crewchip weapon', type: 'button', id: `weapon-${index}`, 'aria-label': `Aim the ${weapon.name}`, press: () => selectWeapon(selectedWeapon === index ? null : index) },
-        el('span', { class: 'crewchip__num weapon__num' }, WEAPON_KEYS[index]),
-        el('span', { class: 'crewchip__body' }, el('span', { class: 'crewchip__name' }, `${index + 1} ${weapon.short}`), state, el('span', { class: 'crewchip__bar' }, charge)),
-      );
-      return { index, node, charge, state };
-    });
-    const own = sideStats('fight-own', 'Our hull');
-    const theirs = sideStats('fight-foe', 'Their hull');
-    const leave = button('btn-fight-leave', 'Leave it', () => order({ type: 'fight.dismiss' }));
-    const jumpLabel = el('span', {}, 'Jump');
-    const jumpNote = el('small', { id: 'jump-note' }, '');
-    const jump = el('button', { class: 'btn btn--small btn--jump', type: 'button', id: 'btn-jump', press: () => order({ type: 'ship.jump' }) }, jumpLabel, jumpNote);
-    // The brace (D-075): dump the capacitor to soak the next few seconds of fire. B on a keyboard.
-    const braceNote = el('small', { id: 'brace-note' }, '');
-    const braceBtn = el('button', { class: 'btn btn--small btn--brace', type: 'button', id: 'btn-brace', press: () => order({ type: 'ship.brace' }) }, el('span', {}, 'Brace'), braceNote);
-    fightBar = { tiles, own, theirs, leave, jump, jumpNote, brace: braceBtn, braceNote, call: buildCall() };
-    fightBar.node = el('div', { class: 'panel fightbar', id: 'fightbar', hidden: true }, own.node, el('div', { class: 'fightbar__weapons' }, tiles.map((t) => t.node)), theirs.node, braceBtn, jump, leave);
-    boardCall = buildBoardCall();
-    return el('div', { class: 'fightstack' }, boardCall.node, fightBar.call.node, fightBar.node);
+  /** The toll card (H.3): a bulwark has called its toll. Pay it, or get out of its zone before its gun clears. */
+  function buildTollCall() {
+    const title = el('span', { class: 'stencil fightcall__title', id: 'tollcall-title' });
+    const text = el('span', { class: 'fightcall__text', id: 'tollcall-text' });
+    const clockText = el('small', { class: 'fightcall__clock', id: 'tollcall-clock' });
+    const pay = button('btn-toll-pay', 'Pay', () => tollCall.contact !== null && order({ type: 'contact.pay', contact: tollCall.contact }));
+    const node = el('div', { class: 'panel fightcall tollcall', id: 'tollcall', hidden: true }, el('div', { class: 'fightcall__words' }, title, text, clockText), el('div', { class: 'fightcall__buttons' }, pay));
+    return { node, title, text, clock: clockText, pay, contact: null };
+  }
+
+  function updateToll() {
+    const card = tollCall;
+    const contact = sim.state.scope.contacts.find((item) => item.tolled && item.state !== 'lost');
+    card.contact = contact?.id ?? null;
+    if (card.node.hidden !== !contact) card.node.hidden = !contact;
+    if (!contact) return;
+    const def = sim.encounters.byId.get(contact.encounter);
+    const range = Math.hypot(contact.x, contact.y);
+    const inside = range <= def.toll.zone;
+    setText(card.title, `C${contact.id} ${def.name} · toll ${def.toll.cost}`);
+    setText(card.text, `"${def.toll.demand}"`);
+    const left = contact.tollEnds - sim.state.tick;
+    setText(card.clock, !inside ? 'Outside its zone: its gun holds' : left > 0 ? `Its gun clears in ${seconds(left)}` : 'Its gun is clear to fire');
+    const why = whyNoPay(sim, contact.id);
+    setText(card.pay, `Pay ${def.toll.cost} · have ${sim.state.money}`);
+    card.pay.disabled = Boolean(why);
+    card.pay.title = why ? sentence(why) : 'They let us through the lane.';
+  }
+
+  function updateCalls() {
+    updateBoarding();
+    updateToll();
+  }
+
+  /** The deterrent gun in a few words: power, rounds, charge, and what it is laid on. */
+  function gunText() {
+    const slot = gun();
+    if (slot < 0) return 'No gun fitted';
+    const state = sim.state.weapons[slot];
+    const weapon = weaponOf(slot);
+    if (!state.powered) return `No power: needs ${weapon.power}`;
+    if (state.rounds !== null && state.rounds < 1) return roundsInHold(sim) ? 'Out of rounds · fetch more' : 'Out of rounds';
+    const rounds = state.rounds === null ? '' : ` · ${state.rounds} rds`;
+    const on = state.target === null ? null : `C${state.target}`;
+    if (chargeOf(sim, slot) < 1) return `Charging ${percent(chargeOf(sim, slot))}${on ? ` · on ${on}` : ''}${rounds}`;
+    return `${on ? `Laid on ${on}` : 'Ready · not laid'}${rounds}`;
+  }
+
+  /** Point defence in a few words. */
+  function pdText() {
+    const slot = pdSlot(sim);
+    if (slot < 0) return 'None fitted';
+    const state = sim.state.weapons[slot];
+    if (!state.powered) return `No power: needs ${weaponOf(slot).power}`;
+    const { drones, pods } = sim.state.scope;
+    const threats = drones.length + pods.length;
+    return threats ? `Firing · ${drones.length ? `${drones.length} drone${drones.length === 1 ? '' : 's'}` : ''}${drones.length && pods.length ? ', ' : ''}${pods.length ? `${pods.length} pod${pods.length === 1 ? '' : 's'}` : ''}` : 'On watch';
   }
 
   /**
@@ -704,141 +684,6 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
     return (def?.party.demand ?? '').replaceAll('{crew_name}', target).replaceAll('{system}', boarding.strip ? SYSTEMS[boarding.strip].name.toLowerCase() : 'your fittings');
   }
 
-  /** The card that answers a hail or a surrender. Its buttons are built once and shown or hidden. */
-  function buildCall() {
-    const title = el('span', { class: 'stencil fightcall__title', id: 'fightcall-title' });
-    const text = el('span', { class: 'fightcall__text', id: 'fightcall-text' });
-    const clockText = el('small', { class: 'fightcall__clock', id: 'fightcall-clock' });
-    const talk = button('btn-talk', 'Talk', () => order({ type: 'fight.talk' }));
-    const bribe = button('btn-bribe', 'Pay', () => order({ type: 'fight.bribe' }));
-    const engage = button('btn-engage', 'Open fire', () => order({ type: 'fight.engage' }), 'btn--danger');
-    const accept = button('btn-accept', 'Accept', () => order({ type: 'fight.accept' }));
-    const refuse = button('btn-refuse', 'Refuse', () => order({ type: 'fight.refuse' }), 'btn--danger');
-    const node = el('div', { class: 'panel fightcall', id: 'fightcall', hidden: true }, el('div', { class: 'fightcall__words' }, title, text, clockText), el('div', { class: 'fightcall__buttons' }, talk, bribe, engage, accept, refuse));
-    return { node, title, text, clock: clockText, talk, bribe, engage, accept, refuse };
-  }
-
-  function updateCall(fight, enemy) {
-    const call = fightBar.call;
-    const hailing = !fight.over && fight.phase === 'hail';
-    const offer = !fight.over ? fight.offer : null;
-    const show = hailing || Boolean(offer);
-    if (call.node.hidden !== !show) call.node.hidden = !show;
-    if (!show) return;
-    const name = enemy.layout.name;
-    const toggle = (node, on) => node.hidden !== !on && (node.hidden = !on);
-    toggle(call.talk, hailing && !fight.talked);
-    toggle(call.bribe, hailing);
-    toggle(call.engage, hailing);
-    toggle(call.accept, Boolean(offer));
-    toggle(call.refuse, Boolean(offer));
-    if (hailing) {
-      const hail = enemy.layout.tactics.hail;
-      setText(call.title, `${name} hails us`);
-      setText(call.text, `"${hail.text}"`);
-      setText(call.clock, `They open fire in ${seconds(fight.hailEnds - sim.state.tick)}`);
-      setText(call.talk, `Talk · ${percent(talkChance(sim))}`);
-      setText(call.bribe, `Pay ${bribePrice(sim)} · have ${sim.state.money}`);
-    } else {
-      setText(call.title, `${name} surrenders`);
-      setText(call.text, `They offer ${offerText(offer)}.`);
-      setText(call.clock, `Offer stands ${seconds(offer.expires - sim.state.tick)}`);
-    }
-  }
-
-  function updateSide(part, ship) {
-    const { hull } = ship.state;
-    setText(part.hull, `${hull.points}/${hull.max}`);
-    const width = `${Math.round((hull.points / hull.max) * 100)}%`;
-    if (part.fill.style.width !== width) part.fill.style.width = width;
-    part.node.classList.toggle('is-alarm', hull.points <= hull.max * 0.3);
-    // How loud the ship is, and how good a firing solution the other side has on it (D-074).
-    const watcher = ship === sim ? enemyOf(sim) : sim;
-    const contact = watcher?.state.contact;
-    const ours = ship === sim;
-    // Their capacitor and guns are only known once the sensors have made out the rooms they are in.
-    const seen = (system) => {
-      if (ours) return true;
-      const room = ship.layout.roomOfSystem(system);
-      const view = room ? contactView(sim, room.id, ship) : null;
-      return Boolean(view?.resolved && view.live);
-    };
-    const shield = !seen('shields') ? 'Capacitor ?' : braced(ship) ? `Braced · holds ${Math.round(ship.state.shield.field * 10) / 10}` : capacity(ship) ? `Capacitor ${percent(capacitorOf(ship))}` : 'No shields';
-    const guns = !ours && ship.state.weapons.length ? ` · Guns ${seen('weapons') ? percent(Math.max(...ship.state.weapons.map((_, i) => chargeOf(ship, i)))) : '?'}` : '';
-    // A carrier's drones are out in the open: the sensors see them whatever is resolved (D-097).
-    const out = sim.state.fight?.drones?.length ?? 0;
-    const drones = !ours && out ? ` · ${out} drone${out === 1 ? '' : 's'} out` : '';
-    setText(part.line, `${shield}${guns} · Signature ${percent(signature(ship).total)}`);
-    setText(part.lock, !contact || sim.state.fight?.over ? '' : `${contact.locked ? `${ours ? 'Their' : 'Our'} lock on ${ours ? 'us' : 'them'} ${percent(contact.lock)}` : ours ? 'They have no lock on us' : 'We have no lock on them'}${drones}`);
-    // Good news on our side is no lock; on theirs it is a lock.
-    part.lock.classList.toggle('is-good', Boolean(contact) && contact.locked !== ours);
-  }
-
-  /** The Jump button's small print: the fix as it builds, then whatever else is missing, then Ready. */
-  function jumpNote() {
-    if (fixOf(sim) < 1) return sim.state.systems.sensors.power > 0 ? `Fix ${percent(fixOf(sim))}` : 'No sensors';
-    const problem = whyNoJump(sim);
-    return !problem ? 'Ready' : /helm/.test(problem) ? 'No pilot' : 'No drive';
-  }
-
-  function weaponStatus(slot) {
-    const state = sim.state.weapons[slot];
-    const weapon = weaponOf(slot);
-    if (!state.powered) return `No power: needs ${weapon.power}`;
-    if (state.rounds !== null && state.rounds < 1) return roundsInHold(sim) ? 'Out of rounds · fetch more' : 'Out of rounds';
-    if (state.rounds !== null) return `${weaponStatusText(slot)} · ${state.rounds} rds`;
-    return weaponStatusText(slot);
-  }
-
-  function weaponStatusText(slot) {
-    const state = sim.state.weapons[slot];
-    const aim = state.target ? enemyOf(sim)?.layout.room(state.target)?.name : null;
-    if (chargeOf(sim, slot) < 1) return aim ? `Charging · ${aim}` : 'Charging · no target';
-    const fight = sim.state.fight;
-    if (fight && !fight.over && fight.phase === 'hail') return 'Holding fire: talking';
-    return aim ? `Firing · ${aim}` : 'Ready · no target';
-  }
-
-  function updateFight() {
-    updateBoarding();
-    const fight = sim.state.fight;
-    if (fightBar.node.hidden !== !fight) fightBar.node.hidden = !fight;
-    if (!fight && !fightBar.call.node.hidden) fightBar.call.node.hidden = true;
-    if (!fight) {
-      // The fight is gone: let go of anything that pointed at it, and fold the board it opened.
-      if (power.byFight) openBoard(false);
-      if (selectedWeapon !== null) selectWeapon(null);
-      if (selected?.kind === 'foe') select(null);
-      impacts = [];
-      return;
-    }
-    const enemy = enemyOf(sim);
-    updateSide(fightBar.own, sim);
-    updateSide(fightBar.theirs, enemy);
-    if (fight.fleeing && !fight.over) setText(fightBar.theirs.line, `Running · jump fix ${percent(fixOf(enemy))}`);
-    setText(fightBar.theirs.name, fight.over ? OUTCOMES[fight.over.outcome] : enemy.layout.name);
-    fightBar.leave.hidden = !fight.over;
-    fightBar.jump.hidden = Boolean(fight.over);
-    const note = jumpNote();
-    setText(fightBar.jumpNote, note);
-    fightBar.jump.classList.toggle('is-ready', note === 'Ready');
-    fightBar.brace.hidden = Boolean(fight.over);
-    const braceProblem = whyNoBrace(sim);
-    setText(fightBar.braceNote, braced(sim) ? `Up ${seconds(sim.state.shield.until - sim.state.tick)}` : capacity(sim) ? percent(capacitorOf(sim)) : 'No power');
-    fightBar.brace.classList.toggle('is-ready', !braceProblem);
-    fightBar.brace.classList.toggle('is-active', braced(sim));
-    updateCall(fight, enemy);
-    for (const tile of fightBar.tiles) {
-      const state = sim.state.weapons[tile.index];
-      setText(tile.state, weaponStatus(tile.index));
-      const width = `${Math.round(chargeOf(sim, tile.index) * 100)}%`;
-      if (tile.charge.style.width !== width) tile.charge.style.width = width;
-      tile.node.classList.toggle('is-selected', selectedWeapon === tile.index);
-      tile.node.classList.toggle('is-dead', !state.powered);
-      tile.node.classList.toggle('is-ready', state.powered && chargeOf(sim, tile.index) >= 1);
-    }
-  }
-
   // ---------- Margo's monitor ----------
 
   /** A cheap company CRT: a dark glass screen in a chunky bezel, behind the schematic. */
@@ -861,56 +706,8 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
     ctx.font = "700 10px ui-monospace, 'SF Mono', Menlo, Consolas, monospace";
     ctx.textBaseline = 'bottom';
     ctx.textAlign = 'right';
-    ctx.fillText('M.A.R.G.O. SCHEMATIC · COMPANY ISSUE', x + w - ((sensorBox ?? scopeBox) ? (sensorBox ?? scopeBox).w + 28 : 18), y + h - 6);
+    ctx.fillText('M.A.R.G.O. SCHEMATIC · COMPANY ISSUE', x + w - (scopeBox ? scopeBox.w + 28 : 18), y + h - 6);
     if (scopeBox) drawScope(ctx, scopeBox, scopeView(sim), { selected: selected?.kind === 'contact' ? selected.id : null, time: (sim.state.tick + clock.alpha) * TICK_SECONDS, active: sensorsUp(sim), reduce: reduceMotion() });
-    if (sensorBox) {
-      const b = sensorBox;
-      ctx.fillStyle = '#04100a';
-      ctx.strokeStyle = '#2f5a3c';
-      ctx.lineWidth = 3;
-      roundRect(b.x, b.y, b.w, b.h, 8);
-      ctx.fill();
-      ctx.stroke();
-      // Range rings, and a sweep going round.
-      const cx = b.x + b.w / 2;
-      const cy = b.y + 14 + (b.h - 14) / 2;
-      ctx.save();
-      roundRect(b.x, b.y, b.w, b.h, 8);
-      ctx.clip();
-      ctx.strokeStyle = 'rgba(127, 227, 154, 0.12)';
-      ctx.lineWidth = 1;
-      for (let r = 40; r < b.w; r += 40) {
-        ctx.beginPath();
-        ctx.arc(cx, cy, r, 0, Math.PI * 2);
-        ctx.stroke();
-      }
-      const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
-      if (!reduce) {
-        const angle = ((sim.state.tick + clock.alpha) * TICK_SECONDS * 1.4) % (Math.PI * 2);
-        ctx.strokeStyle = 'rgba(127, 227, 154, 0.35)';
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.moveTo(cx, cy);
-        ctx.lineTo(cx + Math.cos(angle) * b.w, cy + Math.sin(angle) * b.w);
-        ctx.stroke();
-      }
-      ctx.restore();
-      ctx.fillStyle = '#7fe39a';
-      ctx.font = "700 11px ui-monospace, 'SF Mono', Menlo, Consolas, monospace";
-      ctx.textAlign = 'left';
-      ctx.textBaseline = 'top';
-      ctx.fillText(`SENSOR RETURN · ${enemyOf(sim)?.layout.name.toUpperCase() ?? ''}`, b.x + 10, b.y + 7, b.w - 20);
-      const contact = sim.state.contact;
-      if (contact && !sim.state.fight?.over) {
-        // How good our firing solution is, in words as well as a number.
-        const text = `${sensorsUp(sim) ? 'ACTIVE' : 'PASSIVE'} · ${contact.locked ? `LOCK ${percent(contact.lock)}` : 'NO LOCK'}`;
-        ctx.textBaseline = 'bottom';
-        ctx.fillStyle = 'rgba(4, 16, 10, 0.85)';
-        ctx.fillRect(b.x + 4, b.y + b.h - 22, b.w - 8, 18);
-        ctx.fillStyle = contact.locked ? '#7fe39a' : '#ff8a2b';
-        ctx.fillText(text, b.x + 10, b.y + b.h - 6, b.w - 20);
-      }
-    }
     ctx.textAlign = 'start';
     ctx.textBaseline = 'alphabetic';
   }
@@ -952,38 +749,34 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
     ctx.closePath();
   }
 
-  // ---------- shots and their results, drawn over both ships ----------
+  // ---------- rounds coming in, and what they did ----------
 
-  function drawFight(alpha) {
-    const fight = sim.state.fight;
-    if (!fight || !foe) return;
-
+  /** A round or a zap on its way to one of our rooms: a streak from the side of the screen its ship is on. */
+  function drawShots(alpha) {
     const now = sim.state.tick - 1 + alpha; // the frame sits between the last tick and this one, as crew do
-    for (const shot of fight.shots) {
-      const ours = shot.side === 'player';
-      const from = ours ? renderer.hardpointAt(view, shot.slot) : foe.renderer.hardpointAt(foeView, shot.slot);
-      const to = ours ? foe.renderer.roomCentre(foeView, shot.room) : renderer.roomCentre(view, shot.room);
+    for (const shot of sim.state.shots) {
+      if (shot.at !== 'us') continue;
+      const to = renderer.roomCentre(view, shot.room);
+      const contact = findContact(sim, shot.contact);
+      const bearing = contact ? (Math.atan2(contact.x, contact.y) * 180) / Math.PI : 45;
+      const reach = Math.max(size.w, size.h);
+      const from = { x: to.x + Math.sin((bearing * Math.PI) / 180) * reach, y: to.y - Math.cos((bearing * Math.PI) / 180) * reach };
       const t = Math.max(0, Math.min(1, (now - shot.born) / (shot.lands - shot.born)));
-      const tail = Math.max(0, t - 0.12);
-      const at = (k) => ({ x: from.x + (to.x - from.x) * k, y: from.y + (to.y - from.y) * k });
-      const head = at(t);
+      // Only the last stretch is drawn: it comes in from off the monitor.
+      const k = 0.75 + 0.25 * t;
+      const tail = Math.max(0.75, k - 0.05);
+      const at = (u) => ({ x: from.x + (to.x - from.x) * u, y: from.y + (to.y - from.y) * u });
+      const head = at(k);
       const back = at(tail);
       const kinetic = sim.catalog.weapon(shot.weapon).kind === 'kinetic';
       ctx.lineCap = 'round';
-      ctx.strokeStyle = kinetic ? 'rgba(233, 220, 195, 0.55)' : 'rgba(255, 179, 71, 0.9)';
+      ctx.strokeStyle = shot.warn ? 'rgba(233, 220, 195, 0.35)' : kinetic ? 'rgba(233, 220, 195, 0.55)' : 'rgba(255, 179, 71, 0.9)';
       ctx.lineWidth = kinetic ? 2 : 4;
       ctx.beginPath();
       ctx.moveTo(back.x, back.y);
       ctx.lineTo(head.x, head.y);
       ctx.stroke();
-      ctx.fillStyle = kinetic ? '#e9dcc3' : '#fff3d6';
-      ctx.beginPath();
-      ctx.arc(head.x, head.y, kinetic ? 4 : 3, 0, Math.PI * 2);
-      ctx.fill();
     }
-
-    ctx.textAlign = 'start';
-    ctx.textBaseline = 'alphabetic';
     ctx.lineCap = 'butt';
   }
 
@@ -994,20 +787,18 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
   };
 
   /**
-   * What the last shots did, on either ship: a flash over a room that was hit, a ring where
-   * each shot landed, and words for the result and what it did, so it never rests on colour alone.
+   * What the last rounds did to us: a flash over a room that was hit, a ring where each one
+   * landed, and words for the result and what it did, so it never rests on colour alone.
    */
   function drawImpacts(alpha) {
     const now = sim.state.tick - 1 + alpha;
     impacts = impacts.filter((impact) => (now - impact.tick) * TICK_SECONDS < IMPACT_SECONDS && now >= impact.tick - 1);
-    const enemy = enemyOf(sim);
     for (const impact of impacts) {
       const age = Math.max(0, ((now - impact.tick) * TICK_SECONDS) / IMPACT_SECONDS);
-      const ours = impact.side === 'player'; // our shot, so it landed on them
-      const r = ours ? foe?.renderer : renderer;
-      const v = ours ? foeView : view;
-      const shipLayout = ours ? enemy?.layout : layout;
-      if (!r || !v || !shipLayout?.room(impact.room)) continue;
+      const r = renderer;
+      const v = view;
+      const shipLayout = layout;
+      if (!shipLayout.room(impact.room)) continue;
       const at = r.roomCentre(v, impact.room);
       const colour = impact.result === 'hit' ? '255, 120, 40' : impact.result === 'shield' ? '127, 212, 255' : '233, 220, 195';
       const flash = impact.result === 'hit' ? 1 - (age * IMPACT_SECONDS) / FLASH_SECONDS : 0;
@@ -1029,10 +820,9 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       const rise = age * 14;
-      const wild = impact.blind ? 'WILD ' : '';
-      ctx.fillText(impact.result === 'hit' ? `${wild}${IMPACT_TEXT.hit} ${impact.damage}` : `${wild}${IMPACT_TEXT[impact.result]}`, at.x, at.y - 14 - rise);
+      ctx.fillText(impact.result === 'hit' ? `${IMPACT_TEXT.hit} ${impact.damage}` : IMPACT_TEXT[impact.result], at.x, at.y - 14 - rise);
       // What a hit did is only known if someone could see the room it landed in.
-      const words = (ours ? contactView(sim, impact.room)?.live : !unseen(sim, impact)) ? effectWords(impact.effects) : impact.result === 'hit' ? '?' : '';
+      const words = !unseen(sim, impact) ? effectWords(impact.effects) : impact.result === 'hit' ? '?' : '';
       if (words) {
         ctx.font = "700 10px ui-monospace, 'SF Mono', Menlo, Consolas, monospace";
         ctx.fillStyle = `rgba(255, 214, 150, ${fade})`;
@@ -1060,20 +850,10 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
     return { x: k * Math.sin(t * 71), y: k * Math.cos(t * 53) };
   }
 
-  /** Which rooms the weapons of `ship` are pointed at: Map of room id -> [slots]. */
-  function aimedBy(ship) {
-    const aimed = new Map();
-    ship.state.weapons.forEach((slot, index) => {
-      if (slot.target !== null) aimed.set(slot.target, [...(aimed.get(slot.target) ?? []), index]);
-    });
-    return aimed;
-  }
-
   function selectCrew(id) {
     selectedCrew = id;
     if (id) lastHand = id;
     if (id) selected = null;
-    if (id) selectedWeapon = null;
     nodes.info.hidden = true;
     buildPanel();
   }
@@ -1137,46 +917,11 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
           suit,
           hide,
           debug && button('btn-dbg-hurt', 'Hurt', () => order({ type: 'debug.crew', crew: member.id, health: Math.max(0.05, findCrew(sim, member.id).member.health - 0.3) }), 'btn--debug'),
-          el('span', { class: 'status__hint status__hint--inline', id: 'crew-hint' }, sim.state.fight ? 'Tap a room to send them there, or a room of theirs to board.' : 'Tap a room to send them there.'),
+          el('span', { class: 'status__hint status__hint--inline', id: 'crew-hint' }, 'Tap a room to send them there.'),
           memory,
         ),
       );
       panel = { kind: 'crew', id: member.id, stats, suit, hide, note, memory };
-      updatePanel();
-      return;
-    }
-    if (selectedWeapon !== null) {
-      const weapon = weaponOf(selectedWeapon);
-      const stats = { needs: stat('Needs'), charge: stat('Charge'), damage: stat('Damage'), target: stat('Aimed at') };
-      const slot = selectedWeapon;
-      const fed = magazineOf(sim, slot) !== null;
-      if (fed) stats.rounds = stat('Rounds');
-      setText(stats.needs.value, `${weapon.power} ${weapon.power === 1 ? 'bar' : 'bars'}`);
-      setText(stats.damage.value, `${weapon.damage}${weapon.pierce ? `, takes ${1 + weapon.pierce} of a brace` : ''}`);
-      const clear = button('btn-clear-target', 'Hold fire', () => order({ type: 'weapon.target', slot, room: null }));
-      const fetch = fed ? button('btn-fetch-rounds', 'Fetch rounds', () => crateOrder({ type: 'weapon.load', slot })) : null;
-      const note = el('span', { class: 'status__note' });
-      nodes.status.replaceChildren(
-        el('div', { class: 'status__head' }, el('div', { class: 'status__title', id: 'status-title' }, weapon.name), el('div', { class: 'stencil' }, `Weapon ${slot + 1}`), note),
-        el('div', { class: 'status__stats' }, Object.values(stats).map((s) => s.node)),
-        el('div', { class: 'status__controls' }, clear, fetch, el('span', { class: 'status__hint status__hint--inline', id: 'weapon-hint' }, fed ? 'Tap a room on their ship to aim it there. Rounds are carried up from the hold by hand.' : 'Tap a room on their ship to aim it there.')),
-      );
-      panel = { kind: 'weapon', slot, stats, clear, fetch, note };
-      updatePanel();
-      return;
-    }
-    if (selected?.kind === 'foe') {
-      const enemy = enemyOf(sim);
-      const room = enemy.layout.room(selected.id);
-      const resolved = Boolean(contactView(sim, room.id)?.resolved);
-      const stats = { system: stat(resolved && room.system ? SYSTEMS[room.system].name : 'Room'), hull: stat('Hull'), fire: stat('Fire'), breach: stat('Breach'), oxygen: stat('Oxygen') };
-      const note = el('span', { class: 'status__note' });
-      nodes.status.replaceChildren(
-        el('div', { class: 'status__head' }, el('div', { class: 'status__title', id: 'status-title' }, resolved ? room.name : 'Unresolved return'), el('div', { class: 'stencil' }, enemy.layout.name), note),
-        el('div', { class: 'status__stats' }, Object.values(stats).map((s) => s.node)),
-        el('p', { class: 'status__hint' }, 'Their ship. Tap a weapon, then a room here, to aim at it.'),
-      );
-      panel = { kind: 'foe', id: room.id, sys: room.system ?? null, stats, note, resolved };
       updatePanel();
       return;
     }
@@ -1192,10 +937,10 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
       const move = button('btn-crate-move', 'Move', () => {
         movingCrate = movingCrate === id ? null : id;
       });
-      const load = button('btn-crate-load', 'Load guns', () => {
+      const load = button('btn-crate-load', 'Load the gun', () => {
         const slot = hungriestGun();
         if (slot === null) {
-          refusal = { text: 'Every heavy gun is fully loaded.', until: performance.now() + 2600 };
+          refusal = { text: 'The gun is fully loaded.', until: performance.now() + 2600 };
           return;
         }
         crateOrder({ type: 'weapon.load', slot, crate: id });
@@ -1221,36 +966,43 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
     }
     if (!selected) {
       // Nothing picked: how loud the ship is and why (D-074), and the one switch that matters most to it.
-      const stats = { total: stat('Signature'), light: stat('Light'), noise: stat('Noise'), heat: stat('Heat'), burn: stat('Burn'), eyes: stat('Eyes') };
+      const stats = { total: stat('Signature'), light: stat('Light'), noise: stat('Noise'), heat: stat('Heat'), burn: stat('Burn'), eyes: stat('Eyes'), hull: stat('Hull'), gun: stat('Gun'), pd: stat('Point def.') };
       const dark = button('btn-dark', 'Go dark', () => order({ type: 'lights.all', on: litRooms(sim) === 0 }));
       // The helm (H.1): light the drive or cut it and drift, and a flare for something to chase instead of us.
       const burn = button('btn-burn', 'Burn', () => order({ type: 'helm.burn', on: !sim.state.helm.burn }));
       const flare = button('btn-flare', 'Flare', () => order({ type: 'decoy.flare' }));
+      // The brace (D-075): dump the capacitor to soak the next few seconds of incoming fire. B on a keyboard.
+      const braceNote = el('small', { id: 'brace-note' }, '');
+      const brace = el('button', { class: 'btn btn--small btn--brace', type: 'button', id: 'btn-brace', press: () => order({ type: 'ship.brace' }) }, el('span', {}, 'Brace'), braceNote);
       const note = el('span', { class: 'status__note' });
       nodes.status.replaceChildren(
         el('div', { class: 'status__head' }, el('div', { class: 'status__title', id: 'status-title' }, layout.name), el('div', { class: 'stencil' }, 'What we give off'), note),
         el('div', { class: 'status__stats' }, Object.values(stats).map((s) => s.node)),
-        el('div', { class: 'status__controls status__controls--row' }, dark, burn, flare, el('span', { class: 'status__hint status__hint--inline' }, 'Tap crew, then a room, to send them. Tap the scope to turn the ship, or a contact on it to read it. Long-press anything to ask what it is.')),
+        el('div', { class: 'status__controls status__controls--row' }, dark, burn, flare, brace, el('span', { class: 'status__hint status__hint--inline' }, 'Tap crew, then a room, to send them. Tap the scope to turn the ship, or a contact on it to read it and lay the gun on it. Long-press anything to ask what it is.')),
       );
-      panel = { kind: 'ship', stats, dark, burn, flare, note };
+      panel = { kind: 'ship', stats, dark, burn, flare, brace, braceNote, note };
       updatePanel();
       return;
     }
 
     if (selected.kind === 'contact') {
-      // A return on the scope (H.1): what Margo makes of it, and the lies we can hail it with.
-      const stats = { bearing: stat('Bearing'), range: stat('Range'), intent: stat('Doing'), fix: stat('Return') };
+      // A return on the scope (H.1): what Margo makes of it, the lies we can hail it with, and (H.3) our gun.
+      const stats = { bearing: stat('Bearing'), range: stat('Range'), intent: stat('Doing'), fix: stat('Return'), gun: stat('Our gun') };
       const title = el('div', { class: 'status__title', id: 'status-title' });
       const sub = el('div', { class: 'stencil' });
       const note = el('span', { class: 'status__note' });
       const id = selected.id;
       const hails = Object.fromEntries(Object.entries(BLUFFS).map(([bluff, label]) => [bluff, button(`btn-hail-${bluff}`, label, () => order({ type: 'contact.hail', contact: id, bluff }))]));
+      // Lay the deterrent gun on it, or take it off; A on a keyboard. Rounds come up from the hold by hand.
+      const lay = button('btn-gun', 'Lay the gun', () => order({ type: 'gun.target', contact: gun() >= 0 && sim.state.weapons[gun()].target === id ? null : id }), 'btn--danger');
+      const fetch = gun() >= 0 && magazineOf(sim, gun()) !== null ? button('btn-fetch-rounds', 'Fetch rounds', () => crateOrder({ type: 'weapon.load', slot: gun() })) : null;
+      const pay = button('btn-pay', 'Pay', () => order({ type: 'contact.pay', contact: id }));
       nodes.status.replaceChildren(
         el('div', { class: 'status__head' }, title, sub, note),
         el('div', { class: 'status__stats' }, Object.values(stats).map((s) => s.node)),
-        el('div', { class: 'status__controls status__controls--row' }, Object.values(hails), el('span', { class: 'status__hint status__hint--inline', id: 'contact-hint' }, 'A hail is a lie told once. If they do not believe it, they know exactly where it came from.')),
+        el('div', { class: 'status__controls status__controls--row' }, Object.values(hails), lay, fetch, pay, el('span', { class: 'status__hint status__hint--inline', id: 'contact-hint' }, 'A hail is a lie told once. The gun cannot sink anything; it can make a ship think twice, and every round tells everyone where we are.')),
       );
-      panel = { kind: 'contact', id, stats, title, sub, note, hails };
+      panel = { kind: 'contact', id, stats, title, sub, note, hails, lay, fetch, pay };
       updatePanel();
       return;
     }
@@ -1359,24 +1111,6 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
   /** Refresh the numbers and button states in place. The panel's elements are never rebuilt mid-press. */
   function updatePanel() {
     if (!panel) return;
-    if (panel.kind === 'weapon') {
-      const state = sim.state.weapons[panel.slot];
-      const weapon = weaponOf(panel.slot);
-      setText(panel.stats.charge.value, state.powered ? `${Math.floor(state.charge)} of ${weapon.charge}s` : 'no power');
-      panel.stats.charge.node.classList.toggle('is-alarm', !state.powered);
-      setText(panel.stats.target.value, state.target ? (enemyOf(sim)?.layout.room(state.target)?.name ?? 'nothing') : 'nothing');
-      panel.clear.disabled = state.target === null;
-      let hint = state.powered ? '' : 'Route power to weapons (WPN) to charge it.';
-      if (panel.stats.rounds) {
-        setText(panel.stats.rounds.value, `${state.rounds} of ${magazineOf(sim, panel.slot)} · ${roundsInHold(sim)} in the hold`);
-        panel.stats.rounds.node.classList.toggle('is-alarm', state.rounds < 1);
-        const runner = ourCrew(sim).find(({ member }) => member.job?.kind === 'load' && member.job.slot === panel.slot)?.member;
-        if (runner) hint = `${runner.name}: ${describeJob(sim, runner).toLowerCase()}.`;
-        else if (state.rounds < 1) hint = roundsInHold(sim) ? 'Empty. Send someone down to the hold for rounds.' : 'Empty, and there are no rounds left aboard.';
-      }
-      setText(panel.note, queuedFor('slot', panel.slot) ? 'Order queued' : refusalText() || hint);
-      return;
-    }
     if (panel.kind === 'crate') {
       const crate = sim.state.crates[panel.id];
       if (!crate) {
@@ -1421,6 +1155,15 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
       panel.burn.classList.toggle('is-on', sim.state.helm.burn);
       setText(panel.flare, `Flare (${sim.state.helm.flares})`);
       panel.flare.disabled = sim.state.helm.flares < 1;
+      const { hull } = sim.state;
+      setText(panel.stats.hull.value, `${hull.points} of ${hull.max}`);
+      panel.stats.hull.node.classList.toggle('is-alarm', hull.points < hull.max / 2);
+      setText(panel.stats.gun.value, gunText());
+      setText(panel.stats.pd.value, pdText());
+      const braceProblem = whyNoBrace(sim);
+      setText(panel.braceNote, braced(sim) ? `Up ${seconds(sim.state.shield.until - sim.state.tick)}` : capacity(sim) ? percent(capacitorOf(sim)) : 'No power');
+      panel.brace.classList.toggle('is-ready', !braceProblem);
+      panel.brace.classList.toggle('is-active', braced(sim));
       setText(panel.note, ['lights.all', 'helm.burn', 'helm.heading', 'decoy.flare'].some((type) => queuedFor('type', type)) ? 'Order queued' : refusalText() || (blind ? 'Static is a room nobody can see: lamps, sensors, or someone standing in it.' : ''));
       return;
     }
@@ -1433,6 +1176,8 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
         setText(panel.sub, 'No longer on the scope');
         for (const s of Object.values(panel.stats)) setText(s.value, 'none');
         for (const node of Object.values(panel.hails)) node.disabled = true;
+        panel.lay.disabled = true;
+        panel.pay.hidden = true;
         setText(panel.note, last ? `${ENDINGS[last.outcome]}.` : '');
         return;
       }
@@ -1449,32 +1194,22 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
         node.disabled = Boolean(why);
         node.title = why ? sentence(why) : `About ${percent(bluffChance(sim, contact, bluff))}, as far as Margo can judge`;
       }
+      const slot = gun();
+      const noGun = whyNoGun(sim, panel.id);
+      const laid = slot >= 0 && sim.state.weapons[slot].target === panel.id;
+      const reach = slot >= 0 ? weaponOf(slot).range : 0;
+      setText(panel.stats.gun.value, noGun ? 'cannot bear' : seen.range > reach ? `out of reach (${reach})` : `${laid ? 'laid · ' : ''}about ${percent(gunChance(sim, contact))}`);
+      panel.lay.disabled = Boolean(noGun) && !laid;
+      panel.lay.title = noGun ? sentence(noGun) : 'Fire on it whenever the gun is charged and loaded. It does not sink anything: it scares.';
+      setText(panel.lay, laid ? 'Hold fire' : 'Lay the gun');
+      panel.lay.classList.toggle('is-on', laid);
+      if (panel.fetch) panel.fetch.disabled = !roundsInHold(sim);
+      const noPay = whyNoPay(sim, panel.id);
+      panel.pay.hidden = !contact?.tolled;
+      panel.pay.disabled = Boolean(noPay);
+      if (contact?.tolled) setText(panel.pay, `Pay ${sim.encounters.byId.get(contact.encounter).toll.cost}`);
       const blocked = Object.keys(BLUFFS).map((bluff) => whyNoHail(sim, { contact: panel.id, bluff })).filter(Boolean);
       setText(panel.note, queuedFor('type', 'contact.hail') ? 'Hailing' : refusalText() || (blocked.length === Object.keys(BLUFFS).length ? sentence(blocked[0]) : ''));
-      return;
-    }
-    if (panel.kind === 'foe') {
-      const enemy = enemyOf(sim);
-      if (!enemy) return;
-      const r = contactView(sim, panel.id, enemy);
-      if (r.resolved !== panel.resolved) return buildPanel(); // the scan just made it out
-      if (!r.resolved) {
-        for (const s of Object.values(panel.stats)) setText(s.value, '?');
-        setText(panel.note, refusalText() || `Resolving: ${percent(r.resolve)}`);
-        return;
-      }
-      if (panel.sys && !r.live) setText(panel.stats.system.value, 'unknown');
-      else if (panel.sys) {
-        const system = enemy.state.systems[panel.sys];
-        const works = system.level - system.damage;
-        setText(panel.stats.system.value, panel.sys === 'reactor' ? `${works} of ${system.level} bars` : POWERED.includes(panel.sys) ? `power ${system.power} of ${works}` : system.damage ? 'damaged' : 'working');
-        panel.stats.system.node.classList.toggle('is-alarm', system.damage > 0);
-      } else setText(panel.stats.system.value, 'no system');
-      setText(panel.stats.hull.value, percent(r.hull));
-      setText(panel.stats.fire.value, r.fire > 0 ? percent(r.fire) : 'none');
-      setText(panel.stats.breach.value, r.breach > 0 ? percent(r.breach) : 'none');
-      setText(panel.stats.oxygen.value, percent(r.oxygen));
-      setText(panel.note, refusalText() || (r.live ? '' : `Sensors are dark: this is the last scan, ${seconds(r.age)} ago.`));
       return;
     }
     if (panel.kind === 'crew') {
@@ -1595,7 +1330,6 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
     let target = pickTarget(allTargets(), x, y, pointerType);
     if (!target) {
       selectedCrew = null;
-      selectedWeapon = null;
       select(null);
       return;
     }
@@ -1604,14 +1338,6 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
     if (target.kind === 'room' && movingCrate) {
       const crate = movingCrate;
       if (crateOrder({ type: 'crate.move', crate, room: target.id })) movingCrate = null;
-      return;
-    }
-    if (target.kind === 'foe') {
-      // A weapon is selected: a room of theirs is what it should shoot. It stays selected, to change its mind.
-      if (selectedWeapon !== null) order({ type: 'weapon.target', slot: selectedWeapon, room: target.id });
-      // Someone of ours is selected: that is where they board (or, aboard already, go next).
-      else if (selectedCrew) order({ type: 'crew.move', crew: selectedCrew, room: target.id, ship: 'them' });
-      else select({ kind: 'foe', id: target.id });
       return;
     }
     if (target.kind === 'crew') {
@@ -1648,9 +1374,13 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
       if (system) order({ type: 'power.add', system, delta: shift ? -1 : 1 });
       return;
     }
-    if (action.startsWith('weapon-')) {
-      const slot = Number(action.slice(7)) - 1;
-      if (sim.state.fight && sim.state.weapons[slot]) selectWeapon(selectedWeapon === slot ? null : slot);
+    if (action === 'gun') {
+      // Lay the gun on the contact being read, or hold fire if it is laid already.
+      const slot = gun();
+      if (slot < 0) return;
+      const laid = sim.state.weapons[slot].target;
+      const on = selected?.kind === 'contact' ? selected.id : null;
+      order({ type: 'gun.target', contact: on === null || laid === on ? null : on });
       return;
     }
     if (action.startsWith('select-')) {
@@ -1659,7 +1389,7 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
       return;
     }
     if (action === 'brace') {
-      if (sim.state.fight) order({ type: 'ship.brace' });
+      order({ type: 'ship.brace' });
       return;
     }
     if (action === 'burn') {
@@ -1671,7 +1401,7 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
       return;
     }
     if (action === 'breakers') {
-      openBoard(!power.open, { byHand: true });
+      openBoard(!power.open);
       return;
     }
     if (action === 'override') {
@@ -1683,8 +1413,7 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
       return;
     }
     if (action === 'jump') {
-      if (sim.state.fight && !sim.state.fight.over) order({ type: 'ship.jump' });
-      else if (chart) chart.jump();
+      if (chart) chart.jump();
       return;
     }
     if (action !== 'back') return;
@@ -1693,7 +1422,6 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
     else if (chartOpen && chart.selected) chart.select(null);
     else if (chartOpen) openChart(false);
     else if (movingCrate) movingCrate = null;
-    else if (selectedWeapon !== null) selectWeapon(null);
     else if (selectedCrew) selectCrew(null);
     else if (selected) select(null);
     else onBack();
@@ -1738,13 +1466,13 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
         { class: 'shipbar__buttons' },
         debug && button('btn-dbg-step', 'Step', () => clock.stepOnce(), 'btn--debug'),
         debug && button('btn-dbg-hit', 'Hit us', () => order({ type: 'debug.hit', at: 'us', room: selected?.kind === 'room' ? selected.id : null, weapon: heaviestGun(), force: true }), 'btn--debug'),
-        debug && button('btn-dbg-fight', 'Fight', () => order({ type: 'debug.fight', enemy: sim.state.fight ? null : sim.catalog.enemies[0] }), 'btn--debug'),
+        debug && button('btn-dbg-contact', 'Contact', () => order(sim.state.scope.contacts.length ? { type: 'debug.contact', clear: true } : { type: 'debug.contact', encounter: sim.encounters.all[0].id, state: 'closing', range: 25 }), 'btn--debug'),
         debug && button('btn-dbg-menu', 'More', () => openSheet('debug'), 'btn--debug'),
         sim.state.run && (nodes.chartButton = button('btn-chart', 'Chart', () => openChart(!chartOpen))),
         button('btn-back', 'Back', onBack),
       ),
     );
-    nodes.bottom = el('div', { class: 'shipdock' }, nodes.sheet, nodes.ai, buildFightBar(), el('div', { class: 'shipdock__row' }, nodes.status, nodes.pause), buildPower());
+    nodes.bottom = el('div', { class: 'shipdock' }, nodes.sheet, nodes.ai, buildCalls(), el('div', { class: 'shipdock__row' }, nodes.status, nodes.pause), buildPower());
     chart = sim.state.run ? createChart({ sim, order, onClose: () => openChart(false) }) : null;
     root.replaceChildren(el('section', { class: 'ship' }, nodes.top, nodes.bottom, nodes.info, nodes.intercom, chart?.node));
     if (chart) chart.node.hidden = !chartOpen;
@@ -1761,7 +1489,6 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
     nodes.chartButton?.setAttribute('aria-pressed', String(open));
     if (open) {
       selectedCrew = null;
-      selectedWeapon = null;
       movingCrate = null;
       nodes.info.hidden = true;
       chart.update();
@@ -1801,8 +1528,6 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
         input.on('info', onInfo),
         input.on('key', onKey),
         input.on('dragstart', () => (nodes.info.hidden = true)),
-        // A fight opens the breaker board: power is what you play with in one (D-095).
-        sim.events.on('fight.started', () => openBoard(true, { byFight: true })),
         // Our crew answer every order over the intercom (D-094).
         sim.events.on('crew.ordered', (event) => hear(event, event.room)),
         // They can say no (S2.10): their own words on the intercom, and the reason, naming what they remember, in the panel.
@@ -1814,8 +1539,9 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
         // And they put lamps back on when the dark gets too much.
         sim.events.on('crew.lit', (event) => hear({ ...event, lamp: true }, event.room)),
         sim.events.on('shot.resolved', (event) => {
-          impacts.push({ side: event.side, room: event.room, result: event.result, damage: event.damage, effects: event.effects, blind: event.blind, tick: event.tick });
-          if (event.side === 'enemy' && event.result === 'hit') shake = { tick: event.tick, strength: SHAKE_BASE + SHAKE_PER_DAMAGE * event.damage };
+          if (event.at !== 'us') return;
+          impacts.push({ room: event.room, result: event.result, damage: event.damage, effects: event.effects, tick: event.tick });
+          if (event.result === 'hit') shake = { tick: event.tick, strength: SHAKE_BASE + SHAKE_PER_DAMAGE * event.damage };
         }),
       ];
     },
@@ -1830,9 +1556,8 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
         heard = null;
         nodes.intercom.hidden = true;
       }
-      updateFight(); // first: the weapons bar coming or going moves the space the ships are fitted to
+      updateCalls(); // first: a card coming or going moves the space the ship is fitted to
       measure();
-      const enemy = enemyOf(sim);
       const jolt = shakeOffset(clock.alpha);
       ctx.clearRect(0, 0, size.w, size.h);
       drawBezel();
@@ -1848,36 +1573,15 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
         // Game time, so flames and alarms hold still while paused.
         time: (sim.state.tick + clock.alpha) * TICK_SECONDS,
         alpha: clock.alpha,
-        selected: selected?.kind === 'foe' || selected?.kind === 'crate' || selected?.kind === 'contact' ? null : selected,
+        selected: selected?.kind === 'crate' || selected?.kind === 'contact' ? null : selected,
         selectedCrew,
         selectedCrate: selected?.kind === 'crate' ? selected.id : null,
         showCrawlways,
         charges: sim.state.weapons.map((_, slot) => chargeOf(sim, slot)),
-        chosenWeapon: selectedWeapon,
-        aimed: enemy ? aimedBy(enemy) : null,
         rooms: Object.fromEntries(layout.rooms.map((room) => [room.id, roomView(sim, room.id)])),
         reduceFlicker: reduceMotion(),
       });
-      if (enemy && foe) {
-        foe.renderer.draw(ctx, {
-          view: foeView,
-          width: size.w,
-          height: size.h,
-          dpr: size.dpr,
-          state: enemy.state,
-          time: (sim.state.tick + clock.alpha) * TICK_SECONDS,
-          alpha: clock.alpha,
-          selected: selected?.kind === 'foe' ? selected : null,
-          clear: false,
-          charges: enemy.state.weapons.map((_, slot) => chargeOf(enemy, slot)),
-          aimed: aimedBy(sim),
-          inviting: selectedWeapon !== null && !sim.state.fight.over,
-          selectedCrew,
-          contact: Object.fromEntries(enemy.layout.rooms.map((room) => [room.id, contactView(sim, room.id, enemy)])),
-          reduceFlicker: reduceMotion(),
-        });
-        drawFight(clock.alpha);
-      }
+      drawShots(clock.alpha);
       drawImpacts(clock.alpha);
       ctx.restore();
       drawScanlines();
@@ -1901,20 +1605,13 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
       get movingCrate() {
         return movingCrate;
       },
-      foeTargets: () => (foe && foeView && enemyOf(sim) ? foe.renderer.targets(foeView, oursOn(enemyOf(sim)), { foe: true }) : []),
       get shake() {
         return shake;
       },
       get impacts() {
         return impacts;
       },
-      get selectedWeapon() {
-        return selectedWeapon;
-      },
-      get foeView() {
-        return foeView;
-      },
-      /** The scope's box and where each return is drawn on it (null in a fight). */
+      /** The scope's box and where each return is drawn on it. */
       get scope() {
         return scopeBox ? { box: scopeBox, dial: scopeDial(scopeBox), marks: scopeMarks(scopeBox, scopeView(sim)) } : null;
       },

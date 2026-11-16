@@ -32,15 +32,11 @@
 //   hardpoints  [{ id, x, y }]: where weapons mount on the hull, 2 to 4
 //   weapons     ids from content/weapons/, fitted to the hardpoints in order
 //   facing      "right" (the default), "left" or "up": which way the bow points
-//   enemy       true for a ship the player fights rather than flies. An enemy
-//               may leave systems out, mount no weapons and carry no crew.
-//   crew        enemies only: who is aboard, [{ id, name, role? }], placed in crewStart (roles.js)
-//   tactics     enemies only: how it fights, hails, surrenders and runs (tactics.js)
+// Enemy ships, with their own crews and tactics, went with the duel in H.3:
+// another ship is an encounter on the scope now (content/encounters/).
 
-import { ROLES } from './roles.js';
 import { validateCrates } from './hold.js';
 import { validatePower } from './power.js';
-import { validateTactics } from './tactics.js';
 import { SPACE, SYSTEM_IDS } from './systems.js';
 
 const EPS = 1e-9;
@@ -157,13 +153,12 @@ export function validateLayout(data) {
     rooms.set(room.id, room);
   }
 
-  if (data.enemy !== undefined && typeof data.enemy !== 'boolean') problems.push('"enemy" must be true or false');
-  const enemy = data.enemy === true;
+  for (const key of ['enemy', 'crew', 'tactics']) if (data[key] !== undefined) problems.push(`"${key}" went with the ship duels (H.3): another ship is an encounter now`);
 
-  // Systems: each exactly once. An enemy ship may do without most of them.
+  // Systems: each exactly once.
   for (const system of SYSTEM_IDS) {
     const homes = data.rooms.filter((r) => r?.system === system).map((r) => r.id);
-    if (homes.length === 0 && (!enemy || system === 'reactor')) problems.push(`no room holds the ${system} system`);
+    if (homes.length === 0) problems.push(`no room holds the ${system} system`);
     if (homes.length > 1) problems.push(`the ${system} system is in more than one room: ${homes.join(', ')}`);
   }
 
@@ -260,24 +255,12 @@ export function validateLayout(data) {
   }
 
   // Where the crew start
-  if (!Array.isArray(data.crewStart) || (!data.crewStart.length && !enemy)) problems.push('needs a "crewStart" list of room ids');
+  if (!Array.isArray(data.crewStart) || !data.crewStart.length) problems.push('needs a "crewStart" list of room ids');
   else for (const id of data.crewStart) if (!rooms.has(id)) problems.push(`crewStart: no room "${id}"`);
 
   problems.push(...validatePower(data));
 
-  // An enemy's own crew and how it fights. The player's crew come from content/crew/ instead.
-  const roster = data.crew ?? [];
-  if (!Array.isArray(roster) || !roster.every((p) => p && typeof p.id === 'string' && p.id && typeof p.name === 'string' && p.name)) problems.push('"crew" must be a list of { id, name }');
-  else for (const p of roster) if (p.role !== undefined && !ROLES[p.role]) problems.push(`crew ${p.id}: no role "${p.role}"`);
-  else {
-    if (roster.length && !enemy) problems.push('only an enemy ship lists its own "crew"');
-    if (new Set(roster.map((p) => p.id)).size !== roster.length) problems.push('crew: duplicate id');
-    if (roster.length && Array.isArray(data.crewStart) && !data.crewStart.length) problems.push('a ship with crew needs a "crewStart" list');
-  }
-  if (data.tactics !== undefined && !enemy) problems.push('only an enemy ship has "tactics"');
-  problems.push(...validateTactics(data.tactics, { crewed: Array.isArray(roster) && roster.length > 0 }));
-
-  // Fighting: hull strength, hardpoints and what is mounted on them
+  // Hull strength, hardpoints and what is mounted on them
   if (!Number.isInteger(data.hullPoints) || data.hullPoints < 1) problems.push('"hullPoints" must be a whole number, at least 1');
   const hardpoints = data.hardpoints ?? [];
   const fitted = data.weapons ?? [];
@@ -285,7 +268,7 @@ export function validateLayout(data) {
     problems.push('"hardpoints" must be a list of { id, x, y }');
   } else {
     if (new Set(hardpoints.map((h) => h.id)).size !== hardpoints.length) problems.push('hardpoints: duplicate id');
-    if (hardpoints.length > 4 || (!enemy && hardpoints.length < 2)) problems.push(`needs ${enemy ? 'at most 4' : '2 to 4'} hardpoints, has ${hardpoints.length}`);
+    if (hardpoints.length > 4 || hardpoints.length < 2) problems.push(`needs 2 to 4 hardpoints, has ${hardpoints.length}`);
     if (!Array.isArray(fitted) || !fitted.every((id) => typeof id === 'string' && id)) problems.push('"weapons" must be a list of weapon ids');
     else if (fitted.length > hardpoints.length) problems.push(`${fitted.length} weapons fitted but only ${hardpoints.length} hardpoints`);
   }
@@ -343,9 +326,6 @@ export function buildLayout(data) {
     crawlways,
     power: Object.freeze(structuredClone(data.power)),
     crewStart: Object.freeze([...data.crewStart]),
-    enemy: data.enemy === true,
-    crew: Object.freeze((data.crew ?? []).map((p) => Object.freeze({ ...p }))),
-    tactics: data.tactics ? Object.freeze(structuredClone(data.tactics)) : null,
     facing: data.facing ?? 'right',
     hullPoints: data.hullPoints,
     hardpoints: Object.freeze((data.hardpoints ?? []).map((h) => Object.freeze({ ...h }))),
