@@ -35,6 +35,7 @@ import { POWERED, aiCoreStatus, free, lightsDraw, litRooms, supply, usable } fro
 import { contactView, roomView, sensorsUp, signature, unseen } from '../sim/senses.js';
 import { SPACE, SYSTEMS } from '../sim/systems.js';
 import { TICK_SECONDS } from '../sim/sim.js';
+import { createChart } from './chart.js';
 import { el } from './dom.js';
 import { createIntercom } from './intercom.js';
 import { AUTO_PAUSE } from './settings.js';
@@ -112,6 +113,8 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
   let notice = null; // why the game paused itself, shown on the pause button until it resumes
   let typed = { n: 0, start: 0, shown: -1 }; // the AI line being typed out
   let sheet = null; // which pop-up sheet is open: 'log' | 'settings' | null
+  let chart = null; // Margo's route chart (chart.js), while there is a run
+  let chartOpen = false; // the chart is up on the monitor, over the schematic
   let logShown = -1; // the last line number the open log has drawn
   const counts = { canvasTaps: 0, infos: 0 };
 
@@ -181,6 +184,8 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
     // The intercom line sits on the bottom edge of the monitor, inside the bezel.
     nodes.intercom.style.left = `${monitor.x + 22}px`;
     nodes.intercom.style.top = `${monitor.y + monitor.h - 58}px`;
+    // The chart takes the whole monitor when it is up (D-106).
+    if (chart) Object.assign(chart.node.style, { left: `${monitor.x}px`, top: `${monitor.y}px`, width: `${monitor.w}px`, height: `${monitor.h}px` });
     if (!enemyId) {
       foe = null;
       foeView = null;
@@ -361,6 +366,16 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
             button(`btn-dbg-mem-${memory}`, label, act(() => order({ type: 'debug.memory', crew: mind.id, memory, room: selected?.kind === 'room' ? selected.id : mind.room })), 'btn--debug'),
           ),
           button('btn-dbg-dread', 'Nerves on edge', act(() => order({ type: 'debug.memory', crew: mind.id, dread: 0.97 })), 'btn--debug'),
+        ),
+      sim.state.run && el('div', { class: 'stencil sheet__sub' }, `Chart: fuel ${sim.state.run.fuel}, ${sim.state.run.pursuit ? (sim.state.run.pursuit.done ? 'pursuer beaten' : 'followed') : 'nobody following'}`),
+      sim.state.run &&
+        el(
+          'div',
+          { class: 'sheet__grid' },
+          button('btn-dbg-fuel', 'Fill the tanks', act(() => order({ type: 'debug.run', fuel: sim.state.run.fuelMax })), 'btn--debug'),
+          button('btn-dbg-fuel-out', 'Empty the tanks', act(() => order({ type: 'debug.run', fuel: 0 })), 'btn--debug'),
+          button('btn-dbg-chase', sim.state.run.pursuit ? 'Nobody follows' : 'Someone follows', act(() => order({ type: 'debug.run', pursuit: sim.state.run.pursuit ? 'off' : 'on' })), 'btn--debug'),
+          button('btn-dbg-caught', 'Pursuer alongside', act(() => order({ type: 'debug.run', pursuit: 'catch' })), 'btn--debug'),
         ),
       el('div', { class: 'stencil sheet__sub' }, 'View'),
       el('div', { class: 'sheet__grid' }, button('btn-crawlways', showCrawlways ? 'Hide crawlways' : 'Show crawlways', () => {
@@ -1393,9 +1408,20 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
       if (sim.state.ai.objection) order({ type: 'captain.override' });
       return;
     }
+    if (action === 'chart') {
+      if (chart) openChart(!chartOpen);
+      return;
+    }
+    if (action === 'jump') {
+      if (sim.state.fight && !sim.state.fight.over) order({ type: 'ship.jump' });
+      else if (chart) chart.jump();
+      return;
+    }
     if (action !== 'back') return;
     if (sim.state.ai.objection) order({ type: 'captain.standDown' });
     else if (sheet) openSheet(sheet);
+    else if (chartOpen && chart.selected) chart.select(null);
+    else if (chartOpen) openChart(false);
     else if (movingCrate) movingCrate = null;
     else if (selectedWeapon !== null) selectWeapon(null);
     else if (selectedCrew) selectCrew(null);
@@ -1444,12 +1470,32 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
         debug && button('btn-dbg-hit', 'Hit us', () => order({ type: 'debug.hit', at: 'us', room: selected?.kind === 'room' ? selected.id : null, weapon: heaviestGun(), force: true }), 'btn--debug'),
         debug && button('btn-dbg-fight', 'Fight', () => order({ type: 'debug.fight', enemy: sim.state.fight ? null : sim.catalog.enemies[0] }), 'btn--debug'),
         debug && button('btn-dbg-menu', 'More', () => openSheet('debug'), 'btn--debug'),
+        sim.state.run && (nodes.chartButton = button('btn-chart', 'Chart', () => openChart(!chartOpen))),
         button('btn-back', 'Back', onBack),
       ),
     );
     nodes.bottom = el('div', { class: 'shipdock' }, nodes.sheet, nodes.ai, buildFightBar(), el('div', { class: 'shipdock__row' }, nodes.status, nodes.pause), buildPower());
-    root.replaceChildren(el('section', { class: 'ship' }, nodes.top, nodes.bottom, nodes.info, nodes.intercom));
+    chart = sim.state.run ? createChart({ sim, order, onClose: () => openChart(false) }) : null;
+    root.replaceChildren(el('section', { class: 'ship' }, nodes.top, nodes.bottom, nodes.info, nodes.intercom, chart?.node));
+    if (chart) chart.node.hidden = !chartOpen;
     buildPanel();
+  }
+
+  /** Put the route chart up on the monitor, or take it down. The ship carries on underneath. */
+  function openChart(open) {
+    if (!chart) return;
+    chartOpen = open;
+    chart.node.hidden = !open;
+    chart.reset();
+    nodes.chartButton?.classList.toggle('is-on', open);
+    nodes.chartButton?.setAttribute('aria-pressed', String(open));
+    if (open) {
+      selectedCrew = null;
+      selectedWeapon = null;
+      movingCrate = null;
+      nodes.info.hidden = true;
+      chart.update();
+    }
   }
 
   let lastClock = '';
@@ -1571,7 +1617,10 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
       updateRoster();
       updateVoice();
       updateObjection();
+      if (chartOpen) chart.update();
     },
+    /** Open or fold the route chart (the title's New run opens it). */
+    openChart: (open = true) => openChart(open),
     /** Say why the game just paused itself. Shown on the pause button until play resumes. */
     announce(text) {
       notice = text;
@@ -1600,6 +1649,12 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
       },
       get sheet() {
         return sheet;
+      },
+      get chartOpen() {
+        return chartOpen;
+      },
+      get chartSelected() {
+        return chart?.selected ?? null;
       },
       counts,
       get view() {

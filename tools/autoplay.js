@@ -23,6 +23,11 @@
 //              S2.1's target practice), and fights off boarders (S2.4)
 //   boarding   every crewed enemy again, with the bot sending its own boarding
 //              party once their shields are down (S2.4)
+//   crossings  a run's sector chart from origin to the drop (S3.1): the bot plots
+//              the cheapest course a lane at a time, sometimes turns off it for a
+//              port, waits for the fix and jumps; if the pursuer catches it, it
+//              fights back in a simple way and escapes down the next lane of its
+//              course as soon as the fix allows
 //
 // Chaos: the bot sends three crew around the ship to deal with whatever is
 // worst, suits them up for breaches, works doors, airlocks and lights, routes
@@ -40,6 +45,7 @@ import { JOB_SECONDS } from '../src/sim/hold.js';
 import { DEBUG_ACTIONS, OUTCOMES, chargeOf, enemyOf, ourCrew } from '../src/sim/combat.js';
 import { resolvedRooms, signature } from '../src/sim/senses.js';
 import { MANUAL_DOOR_SECONDS, TICK_RATE, TICK_SECONDS, checkInvariants, createSim } from '../src/sim/sim.js';
+import { cheapestRoute, laneBetween, neighbours, nodeOf, whyNoCourseJump } from '../src/sim/sector.js';
 import { writeFileSync } from 'node:fs';
 
 import { readContentFiles } from './lib/load-content.js';
@@ -65,6 +71,7 @@ const roster = content.all('crew').map(({ id, name, engineer }) => ({ id, name, 
 const lines = content.all('ai-lines');
 const weapons = content.all('weapons');
 const ships = content.all('ships');
+const sectorDef = content.require('sectors', 'the-reach');
 
 /** The longest anyone should stand still with somewhere to be: a hand-worked door, with a wide margin. */
 const MAX_STILL_TICKS = 200;
@@ -663,6 +670,105 @@ function playDuel(seed, enemyId, { boarding = false, dark = false } = {}) {
   };
 }
 
+const CROSSING_MINUTES = 30;
+/** The chance the crossing bot turns off its route for a port a lane away, when it can spare the fuel and the jump. */
+const DETOUR_CHANCE = 0.3;
+
+/**
+ * A crossing: the sector chart from the origin to the drop. Throws on any failure, including a chart
+ * with no way across, a bot that cannot get a fix, or a crossing still going after CROSSING_MINUTES.
+ */
+function playCrossing(seed) {
+  const sim = createSim({ seed, ship, crew: roster, lines, weapons, ships, sector: sectorDef });
+  const bot = createRng(`crossing:${seed}`);
+  const { run } = sim.state;
+  const end = CROSSING_MINUTES * 60 * TICK_RATE;
+  const tally = { caught: 0, escapes: 0, detours: 0, sighted: 0, fightTicks: 0, lines: 0, outcomes: {} };
+  sim.events.on('pursuit.caught', () => (tally.caught += 1));
+  sim.events.on('pursuit.sighted', () => (tally.sighted += 1));
+  sim.events.on('ai.line', (event) => event.trigger && ['sector.jumped', 'course.ready', 'pursuit.sighted', 'contract.late', 'sector.delivered', 'fuel.out', 'pursuit.ended'].includes(event.trigger) && (tally.lines += 1));
+  sim.events.on('fight.over', (event) => {
+    tally.outcomes[event.outcome] = (tally.outcomes[event.outcome] ?? 0) + 1;
+    if (event.outcome === 'escaped') tally.escapes += 1;
+  });
+  const give = (command) => !sim.whyNot(command) && sim.enqueue(command);
+  /** Where to go next: the cheapest way on, or now and then a port a lane off it if that still leaves the drop in reach. */
+  function nextStop() {
+    const route = cheapestRoute(run.map, run.at, run.map.delivery);
+    const ahead = route.path[1];
+    if (!bot.chance(DETOUR_CHANCE)) return ahead;
+    const ports = neighbours(run.map, run.at).filter((id) => id !== ahead && nodeOf(run.map, id).kind === 'port' && !run.visited.includes(id));
+    for (const id of ports) {
+      const on = cheapestRoute(run.map, id, run.map.delivery);
+      if (laneBetween(run.map, run.at, id).fuel + on.fuel <= run.fuel && run.jumps + 1 + on.jumps <= run.deadline) {
+        tally.detours += 1;
+        return id;
+      }
+    }
+    return ahead;
+  }
+  let lost = false;
+  while (!run.delivered && sim.state.tick < end) {
+    const fight = sim.state.fight;
+    if (fight?.over) {
+      if (fight.over.outcome === 'lost') {
+        lost = true;
+        break;
+      }
+      give({ type: 'fight.dismiss' });
+    } else if (fight) {
+      tally.fightTicks += 1;
+      // A short fight: answer the hail by shooting, take a surrender, run dark, strip the doors, medbay and core
+      // for guns and shields, brace when it can, aim at their shields and then their guns in volleys, and go
+      // the moment the fix allows. Fleeing alone does not work: every hit shakes the fix (D-087).
+      if (fight.phase === 'hail') give({ type: 'fight.engage' });
+      if (fight.offer) give({ type: 'fight.accept' });
+      give({ type: 'lights.all', on: false });
+      const systems = sim.state.systems;
+      for (const id of ['doors', 'medbay', 'ai_core']) if (systems[id].power > 0) give({ type: 'power.add', system: id, delta: -1 });
+      for (const id of ['weapons', 'shields']) give({ type: 'power.add', system: id, delta: 1 });
+      give({ type: 'ship.brace' });
+      const enemy = enemyOf(sim).state;
+      const known = resolvedRooms(sim);
+      const shieldsDown = enemy.systems.shields.absent || enemy.systems.shields.damage >= enemy.systems.shields.level;
+      const wanted = shieldsDown && enemy.rooms.weapons ? 'weapons' : enemy.rooms.shields ? 'shields' : null;
+      const aim = known.includes(wanted) ? wanted : (known[0] ?? null);
+      const guns = sim.state.weapons.map((slot, index) => ({ slot, index })).filter(({ slot }) => slot.powered);
+      const volley = guns.length > 0 && guns.every(({ index }) => chargeOf(sim, index) >= 1);
+      for (const { slot, index } of guns) if (slot.target !== (volley ? aim : null)) give({ type: 'weapon.target', slot: index, room: volley ? aim : null });
+      if (!run.plot) give({ type: 'course.plot', to: cheapestRoute(run.map, run.at, run.map.delivery).path[1] });
+      give({ type: 'ship.jump' });
+    } else if (!run.plot) {
+      if (run.fuel < Math.min(...run.map.lanes.filter((l) => l.a === run.at || l.b === run.at).map((l) => l.fuel))) break; // stranded: ports refuel from S3.4
+      give({ type: 'course.plot', to: nextStop() });
+    } else if (!whyNoCourseJump(sim)) give({ type: 'course.jump' });
+    sim.step();
+    if (sim.state.tick % 20 === 0) {
+      const problems = checkInvariants(sim);
+      if (problems.length) throw new Error(`invariant broken at tick ${sim.state.tick}: ${problems[0]}`);
+    }
+  }
+  if (!run.delivered && !lost && sim.state.tick >= end) throw new Error(`still crossing after ${CROSSING_MINUTES} minutes, at ${run.at} with ${run.fuel} fuel`);
+  const bad = findBadNumbers(sim.state);
+  if (bad.length) throw new Error(`non-finite numbers at ${bad.join(', ')}`);
+  return {
+    ...tally,
+    nodes: run.map.nodes.length,
+    lanes: run.map.lanes.length,
+    cheapest: cheapestRoute(run.map, run.map.start, run.map.delivery).jumps,
+    deadline: run.deadline,
+    followed: Boolean(run.pursuit),
+    delivered: run.delivered,
+    late: run.late,
+    lost,
+    stranded: !run.delivered && !lost,
+    jumps: run.jumps,
+    fuelLeft: run.fuel,
+    minutes: sim.state.tick / TICK_RATE / 60,
+    hash: hashState(sim.snapshot()),
+  };
+}
+
 const started = performance.now();
 const failures = [];
 const totals = { orders: 0, refused: 0, dropped: 0, doorMoves: 0, pauses: 0, powerMoves: 0, brownouts: 0, darkTicks: 0, fires: 0, spreads: 0, firesOut: 0, scorched: 0, jettisons: 0, airlessTicks: 0, moves: 0, arrivals: 0, blocked: 0, deaths: 0, firesFought: 0, patches: 0, repairs: 0, fights: 0, shots: 0, hits: 0, absorbed: 0, missed: 0, kills: 0, boarded: 0, boardedUs: 0, melee: 0, captured: 0, said: 0, argued: 0, margoRefused: 0, overrides: 0, stoodDown: 0, lapsed: 0, crewRefused: 0, scares: 0, lamps: 0 };
@@ -672,8 +778,17 @@ const chaosEndings = {};
 const enemyIds = ships.filter((item) => item.enemy === true).map((item) => item.id);
 const crewedIds = ships.filter((item) => item.enemy === true && item.crew?.length).map((item) => item.id);
 const underFire = [];
+const crossings = [];
 for (let i = 1; i <= runs; i++) {
   const seed = `${baseSeed}-${i}`;
+  try {
+    const first = playCrossing(seed);
+    const second = playCrossing(seed);
+    if (first.hash !== second.hash) failures.push({ seed, reason: `crossing replay mismatch (${first.hash} vs ${second.hash})` });
+    crossings.push(first);
+  } catch (err) {
+    failures.push({ seed, reason: `crossing: ${err.message}` });
+  }
   try {
     const first = playRun(seed);
     const second = playRun(seed);
@@ -724,7 +839,7 @@ const pct = (n, of) => (of ? `${Math.round((100 * n) / of)}%` : 'n/a');
 
 const out = [];
 out.push('Cold Manifest autoplay');
-out.push(`  runs:              ${runs} (seeds ${baseSeed}-1 to ${baseSeed}-${runs}), each played as chaos, as a hazard scenario, under fire and as a duel with every enemy, each twice`);
+out.push(`  runs:              ${runs} (seeds ${baseSeed}-1 to ${baseSeed}-${runs}), each played as chaos, as a hazard scenario, under fire, as a duel with every enemy and as a sector crossing, each twice`);
 out.push(`  ship:              ${ship.name}, crew of ${roster.length}, ${lines.length} AI lines`);
 out.push(`  crashed or bad:    ${failures.length}`);
 out.push('');
@@ -842,10 +957,21 @@ for (const dark of [false, true]) {
 }
 out.push(`  her trust:         ${mean(scenarios.map((s) => s.trust)).toFixed(0)} of 100 at the end of a hazard scenario, ${mean(underFire.map((s) => s.trust)).toFixed(0)} under fire (it starts at 50)`);
 out.push('');
+const followed = crossings.filter((c) => c.followed);
+const crossOutcomes = {};
+for (const c of crossings) for (const [k, n] of Object.entries(c.outcomes)) crossOutcomes[k] = (crossOutcomes[k] ?? 0) + n;
+out.push(`Crossings (S3.1): the run's sector chart from the origin to the drop, a lane at a time`);
+out.push(`  charts:            ${mean(crossings.map((c) => c.nodes)).toFixed(1)} points and ${mean(crossings.map((c) => c.lanes)).toFixed(1)} lanes on average (${Math.min(...crossings.map((c) => c.nodes))} to ${Math.max(...crossings.map((c) => c.nodes))} points); cheapest way across ${mean(crossings.map((c) => c.cheapest)).toFixed(1)} jumps, deadline ${mean(crossings.map((c) => c.deadline)).toFixed(1)}`);
+out.push(`  delivered:         ${crossings.filter((c) => c.delivered).length} of ${crossings.length}, ${crossings.filter((c) => c.late).length} late; ship lost ${crossings.filter((c) => c.lost).length}, stranded ${crossings.filter((c) => c.stranded).length}`);
+out.push(`  jumps:             ${mean(crossings.map((c) => c.jumps)).toFixed(1)} per crossing, ${mean(crossings.map((c) => c.detours)).toFixed(1)} of them detours to a port; ${mean(crossings.map((c) => c.fuelLeft)).toFixed(1)} fuel left; ${mean(crossings.map((c) => c.minutes)).toFixed(1)} game minutes`);
+out.push(`  followed:          ${followed.length} of ${crossings.length}; Margo saw the pursuer in ${pct(followed.filter((c) => c.sighted > 0).length, followed.length)} of those; it caught us ${followed.reduce((n, c) => n + c.caught, 0)} times (${pct(followed.filter((c) => c.caught > 0).length, followed.length)} of followed crossings)`);
+out.push(`  pursuit fights:    ${Object.entries(crossOutcomes).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${OUTCOMES[k].toLowerCase()} ${n}`).join(', ') || 'none'}`);
+out.push(`  Margo on the chart: ${mean(crossings.map((c) => c.lines)).toFixed(1)} lines a crossing`);
+out.push('');
 out.push(`  wall time:         ${seconds.toFixed(2)}s`);
 const verdict = failures.length
   ? `FAILED: ${failures.length} problem(s).`
-  : 'PASSED: no crashes, no stuck doors, no crew stuck on a path, power never over supply, no fire without air, no fight left hanging, nothing moved while paused, every run replays from its seed.';
+  : 'PASSED: no crashes, no stuck doors, no crew stuck on a path, power never over supply, no fire without air, no fight left hanging, no crossing left unfinished, nothing moved while paused, every run replays from its seed.';
 
 console.log(out.join('\n'));
 const reportPath = option('report', null);

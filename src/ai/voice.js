@@ -88,6 +88,14 @@ export const TRIGGERS = Object.freeze({
   // The crew saying no, and the crew putting the lamps back on (memory.js).
   'crew.refused': { category: 'crew_conflict', priority: 3, ttl: 10, cooldown: 25, chance: 0.7, own: true, slots: crewAndRoom },
   'crew.lit': { category: 'crew_conflict', priority: 2, ttl: 10, cooldown: 40, chance: 0.7, own: true, slots: crewAndRoom },
+  // The chart (S3.1): a plotted course, the jump, fuel, the pursuer and the deadline.
+  'course.ready': { category: 'jump', priority: 2, ttl: 10, cooldown: 20, chance: 0.4, own: true },
+  'sector.jumped': { category: 'jump', priority: 2, ttl: 10, chance: 0.5, own: true },
+  'fuel.out': { category: 'jump', priority: 4, ttl: 20, own: true },
+  'pursuit.sighted': { category: 'contract', priority: 3, ttl: 15, cooldown: 30, own: true },
+  'pursuit.ended': { category: 'contract', priority: 3, ttl: 15, own: true },
+  'contract.late': { category: 'contract', priority: 3, ttl: 20, own: true },
+  'sector.delivered': { category: 'contract', priority: 3, ttl: 20, own: true },
 });
 
 export function newVoiceState() {

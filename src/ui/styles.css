@@ -466,7 +466,7 @@ body {
   flex-direction: column;
   gap: 8px;
   box-shadow: 0 6px 0 #05070b;
-  z-index: 3;
+  z-index: 5; /* over the route chart too */
 }
 
 .sheet[hidden] {
@@ -543,7 +543,7 @@ body {
   align-items: center;
   gap: 10px;
   width: 160px;
-  min-width: 0;
+  min-width: var(--tap); /* a crowded bar (a fight, with the debug buttons and the chart) squeezes them down to a tap and no less */
   min-height: var(--tap);
   padding: 6px 10px 6px 8px;
   border-left-width: 2px;
@@ -1311,4 +1311,331 @@ body {
 .sheet--debug {
   max-height: min(420px, 55vh);
   overflow-y: auto;
+}
+
+/* ---------- Margo's route chart (S3.1, D-106) ---------- */
+
+/* Up on the monitor, over the schematic: fixed, so it sits in canvas pixels like the monitor itself. */
+.chart {
+  position: fixed;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 2px solid var(--amber-dim);
+  background:
+    repeating-linear-gradient(180deg, rgba(0, 0, 0, 0) 0 2px, rgba(0, 0, 0, 0.16) 2px 3px),
+    linear-gradient(90deg, rgba(255, 179, 71, 0.05) 1px, transparent 1px) 0 0 / 48px 48px,
+    linear-gradient(0deg, rgba(255, 179, 71, 0.05) 1px, transparent 1px) 0 0 / 48px 48px,
+    #0a0d12;
+  pointer-events: auto;
+}
+
+.chart[hidden] {
+  display: none;
+}
+
+.chart__head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.chart__title {
+  margin-right: auto;
+}
+
+.chart__stat {
+  font-size: 0.82em;
+  color: var(--amber);
+  white-space: nowrap;
+}
+
+.chart__stat.is-low,
+.chart__stat.is-late,
+.chart__stat.is-warn {
+  color: var(--alarm);
+}
+
+.chart__stat.is-late::before,
+.chart__stat.is-low::before,
+.chart__stat.is-warn::before {
+  content: '▲ ';
+}
+
+.chart__jump.is-ready {
+  border-left-color: var(--sodium);
+  color: var(--sodium);
+}
+
+.chart__body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: 12px;
+}
+
+.chart__plot {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  margin: 30px 56px 34px 46px;
+}
+
+.chart__lanes {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.chart__lane {
+  stroke: #4b4130;
+  stroke-width: 2;
+}
+
+.chart__lane.is-long {
+  stroke-dasharray: 6 5;
+}
+
+.chart__lane.is-open {
+  stroke: var(--amber-dim);
+  stroke-width: 3;
+}
+
+.chart__lane.is-plotted {
+  stroke: var(--sodium);
+  stroke-width: 4;
+  stroke-dasharray: 10 6;
+  animation: chart-march 0.9s linear infinite;
+}
+
+@keyframes chart-march {
+  to {
+    stroke-dashoffset: -16;
+  }
+}
+
+.chart__points {
+  position: absolute;
+  inset: 0;
+}
+
+.chart__fuel {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  padding: 0 3px;
+  font-size: 0.66em;
+  color: var(--amber-dim);
+  background: #0a0d12;
+  pointer-events: none;
+}
+
+/* A point: a 44 px button round a glyph whose shape, letter and colour all say what it is. */
+.chartnode {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  width: var(--tap);
+  height: var(--tap);
+  padding: 0;
+  display: grid;
+  place-items: center;
+  font: inherit;
+  color: var(--paper);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.chartnode__glyph {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  font-size: 0.78em;
+  font-weight: 700;
+  color: #0a0d12;
+  background: var(--amber-dim);
+  border: 2px solid var(--amber-dim);
+}
+
+.chartnode--port .chartnode__glyph {
+  background: var(--amber);
+  border-color: var(--amber);
+}
+
+.chartnode--empty .chartnode__glyph {
+  width: 16px;
+  height: 16px;
+  color: var(--amber-dim);
+  background: #0a0d12;
+  border-radius: 50%;
+}
+
+.chartnode--hazard .chartnode__glyph {
+  width: 30px;
+  height: 28px;
+  padding-top: 8px;
+  background: var(--sodium);
+  border: 0;
+  clip-path: polygon(50% 0, 100% 100%, 0 100%);
+}
+
+.chartnode--derelict .chartnode__glyph {
+  color: var(--paper);
+  background: #0a0d12;
+  border: 2px dashed var(--paper);
+}
+
+.chartnode--checkpoint .chartnode__glyph {
+  width: 22px;
+  height: 22px;
+  color: var(--paper);
+  background: #2a3442;
+  border-color: var(--paper);
+  transform: rotate(45deg);
+}
+
+.chartnode--checkpoint .chartnode__glyph {
+  font-size: 0;
+}
+
+.chartnode--checkpoint .chartnode__glyph::after {
+  content: 'C';
+  font-size: 12px;
+  transform: rotate(-45deg);
+}
+
+.chartnode__name {
+  position: absolute;
+  top: calc(100% - 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 0.62em;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  color: #8b93a1;
+  pointer-events: none;
+}
+
+.chartnode.is-visited .chartnode__glyph {
+  opacity: 0.55;
+}
+
+.chartnode.is-next .chartnode__name,
+.chartnode.is-selected .chartnode__name,
+.chartnode.is-here .chartnode__name {
+  color: var(--amber);
+}
+
+.chartnode.is-next::before,
+.chartnode.is-here::before,
+.chartnode.is-selected::before,
+.chartnode.is-plotted::before {
+  content: '';
+  position: absolute;
+  inset: 2px;
+  border: 2px solid var(--amber-dim);
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.chartnode.is-next::before {
+  border-style: dotted;
+}
+
+.chartnode.is-here::before {
+  border-color: var(--amber);
+  border-style: solid;
+  inset: -2px;
+}
+
+.chartnode.is-plotted::before {
+  border-color: var(--sodium);
+  border-style: dashed;
+}
+
+.chartnode.is-selected::before {
+  border-color: var(--paper);
+  border-style: solid;
+}
+
+.chartnode__tag {
+  position: absolute;
+  bottom: calc(100% - 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 0 4px;
+  font-size: 0.6em;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: #0a0d12;
+  background: var(--amber);
+  pointer-events: none;
+}
+
+.chartnode__tag--drop {
+  background: var(--paper);
+}
+
+/* The pursuer: where Margo last had it. Solid while she can see it, pulsing and dashed once she cannot. */
+.chart__contact {
+  position: absolute;
+  transform: translate(-50%, 70%);
+  padding: 1px 5px;
+  font-size: 0.6em;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--alarm);
+  border: 1px dashed var(--alarm);
+  background: rgba(10, 13, 18, 0.9);
+  pointer-events: none;
+  animation: chart-pulse 1.6s ease-in-out infinite;
+}
+
+.chart__contact::before {
+  content: '◆ ';
+}
+
+.chart__contact.is-seen {
+  border-style: solid;
+  animation: none;
+}
+
+@keyframes chart-pulse {
+  50% {
+    opacity: 0.45;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chart__lane.is-plotted,
+  .chart__contact {
+    animation: none;
+  }
+}
+
+.chart__card {
+  width: 250px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-left: 2px solid var(--hull-edge);
+  font-size: 0.86em;
+}
+
+.chart__card .btn {
+  margin-top: auto;
+}
+
+.btn.is-on {
+  border-color: var(--amber);
+  color: var(--paper);
 }

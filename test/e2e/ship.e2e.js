@@ -1576,11 +1576,125 @@ async function margoTests(browser) {
   await second.close();
 }
 
+async function chartTests(browser) {
+  console.log('iPad and desktop: Margo\'s route chart, a course, the fix and the jump (S3.1)');
+  const context = await browser.newContext({ ...devices['iPad (gen 7) landscape'] });
+  const page = await context.newPage();
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  await page.goto(`http://localhost:${PORT}/?seed=E2E-CHART&autopause=0&debug=1`);
+  await page.waitForFunction(() => window.coldManifest?.machine.state === 'title');
+  const shots = process.env.E2E_SHOTS;
+  const run = () => game(page, () => JSON.parse(JSON.stringify(window.coldManifest.sim.state.run)));
+  const nextFrom = (r) => r.map.lanes.filter((l) => l.a === r.at || l.b === r.at).map((l) => (l.a === r.at ? l.b : l.a));
+
+  await check('New run puts the chart up on the monitor, with every point a big enough target and the ship still running under it', async () => {
+    await page.tap('#btn-new-run');
+    await page.waitForFunction(() => window.coldManifest.machine.state === 'ship' && window.coldManifest.shipView.debug.chartOpen);
+    assert.equal(await page.isVisible('#chart'), true);
+    const r = await run();
+    assert.ok(r.map.nodes.length >= 15 && r.map.nodes.length <= 25);
+    assert.equal(await page.locator('.chartnode').count(), r.map.nodes.length);
+    const sizes = await page.$$eval('.chartnode', (list) => list.map((b) => ({ id: b.id, w: b.getBoundingClientRect().width, h: b.getBoundingClientRect().height })));
+    for (const size of sizes) assert.ok(size.w >= 44 && size.h >= 44, `${size.id} is ${size.w}x${size.h}`);
+    assert.match(await page.textContent('#chart-fuel'), /Fuel 10\/12/);
+    assert.match(await page.textContent('#btn-chart-jump'), /Plot a course/);
+    assert.equal(await page.isDisabled('#btn-chart-jump'), true);
+    const t0 = await tick(page);
+    await page.waitForFunction((t) => window.coldManifest.sim.state.tick > t + 5, t0);
+    assert.equal(await page.textContent('#chart').then((text) => text.includes('null')), false);
+  });
+
+  await check('tap a point a lane away, plot the course, watch the fix build, and jump: fuel and the jump count move', async () => {
+    const r = await run();
+    const to = nextFrom(r)[0];
+    await page.tap(`#node-${to}`);
+    assert.equal(await game(page, () => window.coldManifest.shipView.debug.chartSelected), to);
+    await page.tap('#btn-plot');
+    await page.waitForFunction((id) => window.coldManifest.sim.state.run.plot === id, to);
+    await page.waitForFunction(() => /Fix \d+%/.test(document.querySelector('#chart-jump-note').textContent), null, { timeout: 2000 });
+    if (shots) await page.screenshot({ path: `${shots}/s3-1-chart-ipad.png` });
+    await game(page, () => window.coldManifest.sim.enqueue({ type: 'debug.run', fix: true }));
+    await page.waitForFunction(() => !document.querySelector('#btn-chart-jump').disabled, null, { timeout: 3000 });
+    const lane = r.map.lanes.find((l) => (l.a === r.at && l.b === to) || (l.b === r.at && l.a === to));
+    await page.tap('#btn-chart-jump');
+    await page.waitForFunction((id) => window.coldManifest.sim.state.run.at === id, to, { timeout: 2000 });
+    const after = await run();
+    assert.equal(after.fuel, r.fuel - lane.fuel);
+    assert.equal(after.jumps, 1);
+    assert.match(await page.textContent('#chart-jumps'), /Jump 1/);
+    assert.equal(await page.isVisible(`#node-${to} .chartnode__tag`), true, 'Here moved');
+  });
+
+  await check('a point with no lane from here cannot be plotted, and says why', async () => {
+    const r = await run();
+    const near = new Set(nextFrom(r));
+    const far = r.map.nodes.find((n) => n.id !== r.at && !near.has(n.id));
+    await page.tap(`#node-${far.id}`);
+    assert.equal(await page.isDisabled('#btn-plot'), true);
+    assert.match(await page.textContent('#btn-plot'), /no lane runs there/);
+  });
+
+  await check('the pursuer shows on the chart where Margo saw it, and catching up starts a fight', async () => {
+    await page.tap('#btn-dbg-menu');
+    await page.tap('#btn-dbg-caught');
+    await page.waitForFunction(() => window.coldManifest.sim.state.fight?.pursuer === true, null, { timeout: 2000 });
+    if (await page.isVisible('#sheet')) await page.tap('#btn-dbg-menu');
+    await page.waitForSelector('#sheet', { state: 'hidden', timeout: 2000 });
+    if (!(await game(page, () => window.coldManifest.shipView.debug.chartOpen))) await page.tap('#btn-chart');
+    await page.waitForSelector('#chart-contact', { timeout: 2000 });
+    assert.match(await page.textContent('#chart-contact'), /Contact|Last seen/);
+    assert.match(await page.textContent('#btn-chart-jump'), /Escape|Fix|No/);
+  });
+
+  await check('the Ship button and Escape fold the chart; the schematic is tappable again', async () => {
+    await page.tap('#btn-chart-close');
+    assert.equal(await page.isVisible('#chart'), false);
+    await page.tap('#btn-chart');
+    assert.equal(await page.isVisible('#chart'), true);
+    await page.keyboard.press('Escape');
+    await page.keyboard.press('Escape');
+    assert.equal(await page.isVisible('#chart'), false);
+  });
+
+  await check('no page errors', async () => assert.deepEqual(errors, []));
+  await context.close();
+
+  // Desktop at 1024x768: M for the chart, J to jump.
+  const desk = await browser.newContext({ viewport: { width: 1024, height: 768 } });
+  const pd = await desk.newPage();
+  const deskErrors = [];
+  pd.on('pageerror', (e) => deskErrors.push(e.message));
+  await pd.goto(`http://localhost:${PORT}/?seed=E2E-CHART-DESK&autopause=0`);
+  await pd.waitForFunction(() => window.coldManifest?.machine.state === 'title');
+  await pd.click('#btn-ship');
+  await pd.waitForFunction(() => window.coldManifest.machine.state === 'ship');
+  await check('desktop: M opens the chart, a click plots, J jumps once the fix is in, and the chart fits 1024x768', async () => {
+    await pd.keyboard.press('KeyM');
+    assert.equal(await pd.isVisible('#chart'), true);
+    const box = await pd.locator('#chart').boundingBox();
+    assert.ok(box.x >= 0 && box.y >= 0 && box.x + box.width <= 1024 && box.y + box.height <= 768, JSON.stringify(box));
+    const r = await game(pd, () => JSON.parse(JSON.stringify(window.coldManifest.sim.state.run)));
+    const to = r.map.lanes.filter((l) => l.a === r.at || l.b === r.at).map((l) => (l.a === r.at ? l.b : l.a))[0];
+    const nodeBox = await pd.locator(`#node-${to}`).boundingBox();
+    assert.ok(nodeBox.x >= box.x && nodeBox.x + nodeBox.width <= box.x + box.width, 'point inside the chart');
+    await pd.click(`#node-${to}`);
+    await pd.click('#btn-plot');
+    await game(pd, () => window.coldManifest.sim.enqueue({ type: 'debug.run', fix: true }));
+    await pd.waitForFunction(() => !document.querySelector('#btn-chart-jump').disabled, null, { timeout: 3000 });
+    if (process.env.E2E_SHOTS) await pd.screenshot({ path: `${process.env.E2E_SHOTS}/s3-1-chart-1024.png` });
+    await pd.keyboard.press('KeyJ');
+    await pd.waitForFunction((id) => window.coldManifest.sim.state.run.at === id, to, { timeout: 2000 });
+  });
+  await check('desktop: no page errors', async () => assert.deepEqual(deskErrors, []));
+  await desk.close();
+}
+
 const server = await startServer();
 const browser = await chromium.launch(process.env.PW_CHROMIUM ? { executablePath: process.env.PW_CHROMIUM } : {});
 // E2E_ONLY=boarding (or a comma list of suite names) runs just those suites, for chasing one failure.
 const only = process.env.E2E_ONLY?.split(',');
-const suites = { touch: touchTests, desktop: desktopTests, voice: voiceTests, fight: fightTests, hit: hitTests, ending: endingTests, boarding: boardingTests, dark: darkTests, hold: holdTests, enemies: enemyTests, margo: margoTests };
+const suites = { touch: touchTests, desktop: desktopTests, voice: voiceTests, fight: fightTests, hit: hitTests, ending: endingTests, boarding: boardingTests, dark: darkTests, hold: holdTests, enemies: enemyTests, margo: margoTests, chart: chartTests };
 try {
   for (const [name, run] of Object.entries(suites)) if (!only || only.includes(name)) await run(browser);
 } finally {
