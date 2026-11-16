@@ -26,6 +26,8 @@ function collect(sim, type) {
 function fight(sim) {
   sim.enqueue({ type: 'debug.fight', enemy: 'target-drone' });
   sim.step();
+  sim.enqueue({ type: 'debug.combat', action: 'scan' }); // a perfect lock: these tests are about what a hit does
+  sim.step();
   return enemyOf(sim);
 }
 
@@ -223,7 +225,7 @@ test('a hit that takes the last hull point decides the fight', () => {
 });
 
 test('real shots: a stripped drone under fire burns, breaks and holes through the same code', () => {
-  const sim = newCrewedSim('practice');
+  const sim = newCrewedSim('range');
   const enemy = fight(sim);
   Object.assign(enemy.state.systems.shields, { power: 0 });
   Object.assign(enemy.state.systems.engines, { power: 0 });

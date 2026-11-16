@@ -12,6 +12,7 @@ import { createInput } from './engine/input.js';
 import { createRng, newRunSeed } from './engine/rng.js';
 import { createStateMachine } from './engine/state-machine.js';
 import { findCrew, ourCrew } from './sim/combat.js';
+import { unseen } from './sim/senses.js';
 import { TICK_SECONDS, createSim } from './sim/sim.js';
 import { createBackdrop } from './ui/backdrop.js';
 import { el, setPressBinder } from './ui/dom.js';
@@ -68,10 +69,13 @@ input.on('press', () => audio.play('click'));
 for (const [type, sound] of Object.entries(EVENT_SOUNDS)) {
   sim.events.on(type, (event) => {
     const name = typeof sound === 'function' ? sound(event) : sound;
-    if (name) audio.play(name);
+    // No alarm sounds for a fire or a hole nobody can see yet.
+    if (name && !(HIDDEN_ALARMS.has(type) && unseen(sim, event))) audio.play(name);
   });
 }
 clock.onChange(() => audio.play('pause'));
+
+const HIDDEN_ALARMS = new Set(['fire.started', 'breach.opened']);
 
 /** Screens where the sim is live. Everywhere else the clock does not run. */
 const LIVE_STATES = new Set(['ship']);
@@ -98,11 +102,13 @@ const AUTO_PAUSE_TEXT = {
   death: (event) => `${findCrew(sim, event.crew)?.member.name ?? 'Someone'} is dead`,
 };
 for (const item of AUTO_PAUSE) {
-  sim.events.on(item.event, (event) => {
+  const trip = (event) => {
     if (!settings.values.autoPause[item.id] || clock.paused) return;
     clock.pause(`auto:${item.id}`);
     shipView.announce(AUTO_PAUSE_TEXT[item.id](event));
-  });
+  };
+  sim.events.on(item.event, (event) => !(item.found && unseen(sim, event)) && trip(event));
+  if (item.found) sim.events.on(item.found, trip);
 }
 
 const machine = createStateMachine({

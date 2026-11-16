@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { validateContent } from '../src/engine/content-schema.js';
 import { hashState } from '../src/engine/hash.js';
-import { EVASION, SHIELD_RECHARGE_SECONDS, chargeOf, enemyOf, evasion, shieldLayers, weaponsPowered } from '../src/sim/combat.js';
+import { SHIELD_RECHARGE_SECONDS, chargeOf, enemyOf, shieldLayers, weaponsPowered } from '../src/sim/combat.js';
 import { buildLayout, validateLayout } from '../src/sim/ship.js';
 import { TICK_RATE, checkInvariants } from '../src/sim/sim.js';
 import { content, newCrewedSim, newSim, newTalkingSim, shipCopy } from './helpers.js';
@@ -27,6 +27,9 @@ function powerWeapons(sim, bars) {
 
 function fight(sim, enemy = DRONE) {
   sim.enqueue({ type: 'debug.fight', enemy });
+  sim.step();
+  // A perfect lock and a full scan, so these tests are about the guns (senses.test.js covers the sensors).
+  sim.enqueue({ type: 'debug.combat', action: 'scan' });
   sim.step();
   return enemyOf(sim);
 }
@@ -122,17 +125,6 @@ test('shields come up one layer at a time, as many as the bars routed to them', 
   assert.equal(shieldLayers(sim), 1, 'losing power drops the layer at once');
 });
 
-test('evasion needs engines, and is better with someone at the helm', () => {
-  const sim = newCrewedSim();
-  sim.step();
-  const piloted = evasion(sim); // Ilse starts on the bridge; engines have one bar
-  assert.ok(Math.abs(piloted - (EVASION.base + EVASION.perBar + EVASION.pilot)) < 1e-9);
-  assert.ok(Math.abs(evasion(newSim()) - (EVASION.base + EVASION.perBar)) < 1e-9, 'nobody aboard, nobody flying');
-  sim.enqueue({ type: 'power.add', system: 'engines', delta: -1 });
-  steps(sim, 2);
-  assert.equal(evasion(sim), 0, 'a ship that cannot move cannot dodge');
-});
-
 test('a fight brings a whole second ship alongside, and it runs on the same clock', () => {
   const sim = newSim();
   assert.equal(sim.whyNot({ type: 'weapon.target', slot: 0, room: 'reactor' }), 'there is nothing to shoot at');
@@ -215,25 +207,6 @@ test('with shields down a hit takes hull points and marks the room; at zero the 
   seconds(sim, 30);
   assert.equal(results.length, shots);
   assert.deepEqual(checkInvariants(sim), []);
-});
-
-test('a moving target is missed about as often as its evasion says', () => {
-  const sim = newSim('dodge');
-  powerWeapons(sim, 1);
-  const enemy = fight(sim);
-  enemy.state.systems.shields.power = 0;
-  enemy.state.shield.charge = 0;
-  enemy.state.hull.points = enemy.state.hull.max = 100000;
-  const chance = evasion(enemy);
-  assert.ok(Math.abs(chance - (EVASION.base + EVASION.perBar)) < 1e-9);
-  let hits = 0;
-  let misses = 0;
-  sim.events.on('shot.resolved', (e) => (e.result === 'miss' ? misses++ : hits++));
-  sim.enqueue({ type: 'weapon.target', slot: 0, room: 'core' });
-  seconds(sim, LASER.charge * 400);
-  const rate = misses / (hits + misses);
-  assert.ok(hits + misses >= 395);
-  assert.ok(Math.abs(rate - chance) < 0.05, `missed ${rate}, expected about ${chance}`);
 });
 
 test('nothing in a fight moves while the clock is stopped, and orders given then wait', () => {

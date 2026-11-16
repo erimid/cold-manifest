@@ -61,6 +61,11 @@ const crewTarget = async (page, id) => {
   return t;
 };
 const paused = (page) => game(page, () => window.coldManifest.clock.paused);
+/** The debug "Perfect lock": every room of theirs made out, and no shot goes wide for want of a lock. */
+const scan = async (page) => {
+  await game(page, () => window.coldManifest.sim.enqueue({ type: 'debug.combat', action: 'scan' }));
+  await page.waitForFunction(() => window.coldManifest.sim.state.contact?.pinned, null, { timeout: 2000 });
+};
 const infoText = (page) => game(page, () => window.coldManifest.shipView.debug.infoText);
 const doorIs = (page, id, state, openness) =>
   page.waitForFunction(([did, st, op]) => {
@@ -692,6 +697,8 @@ async function fightTests(browser) {
     await page.tap('#btn-dbg-fight');
     await page.waitForFunction(() => window.coldManifest.sim.state.fight, null, { timeout: 2000 });
     await page.waitForFunction(() => window.coldManifest.shipView.debug.foeTargets().length === 5, null, { timeout: 2000 });
+    // The scan has its own checks below (darkTests); here a perfect lock keeps these about the controls.
+    await scan(page);
     assert.equal(await page.isVisible('#fightbar'), true);
     assert.match(await page.textContent('#fight-foe'), /Gunnery drone\s*8\/8/);
     assert.match(await page.textContent('#fight-own'), /20\/20/);
@@ -823,6 +830,7 @@ async function fightTests(browser) {
     assert.equal(await game(pc, () => window.coldManifest.shipView.debug.selectedWeapon), null, 'no fight, nothing to aim');
     await game(pc, () => window.coldManifest.sim.enqueue({ type: 'debug.fight', enemy: 'target-drone' }));
     await pc.waitForFunction(() => window.coldManifest.shipView.debug.foeTargets().length === 5, null, { timeout: 2000 });
+    await scan(pc);
     await pc.keyboard.press('KeyS');
     assert.equal(await game(pc, () => window.coldManifest.shipView.debug.selectedWeapon), 1);
     await pc.keyboard.press('KeyA');
@@ -1112,11 +1120,135 @@ async function boardingTests(browser) {
   await context.close();
 }
 
+async function darkTests(browser) {
+  console.log('iPad: what we can see, running dark, and the scan');
+  const context = await browser.newContext({ ...devices['iPad (gen 7) landscape'] });
+  const page = await context.newPage();
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  await page.goto(`http://localhost:${PORT}/?seed=E2E-DARK&autopause=0&debug=1`);
+  await page.waitForFunction(() => window.coldManifest?.machine.state === 'title');
+  await page.tap('#btn-ship');
+  await page.waitForFunction(() => window.coldManifest.machine.state === 'ship');
+  const shots = process.env.E2E_SHOTS;
+  const seen = (id) => game(page, (rid) => ({ ...window.coldManifest.sim.state.seen[rid] }), id);
+  const contact = () => game(page, () => JSON.parse(JSON.stringify(window.coldManifest.sim.state.contact)));
+  const lit = () => game(page, () => Object.values(window.coldManifest.sim.state.rooms).filter((r) => r.lightsOn && !r.jettisoned).length);
+
+  await check('nothing selected: the panel shows the ship\'s signature and a Go dark button', async () => {
+    assert.match(await page.textContent('#status'), /Signature\s*\d+%/);
+    assert.match(await page.textContent('#status'), /Light/);
+    assert.match(await page.textContent('#status'), /Noise/);
+    assert.match(await page.textContent('#status'), /Heat/);
+    assert.equal(await page.textContent('#btn-dark'), 'Go dark');
+  });
+
+  let before = '';
+  await check('Go dark puts every lamp out and the signature falls; with sensors up we still see every room', async () => {
+    before = (await page.textContent('#status')).match(/Signature\s*(\d+)%/)[1];
+    assert.ok((await lit()) > 0);
+    await page.tap('#btn-dark');
+    await page.waitForFunction(() => Object.values(window.coldManifest.sim.state.rooms).every((r) => !r.lightsOn), null, { timeout: 2000 });
+    await page.waitForFunction(() => document.querySelector('#btn-dark').textContent === 'Lights up', null, { timeout: 2000 });
+    await page.waitForFunction((was) => Number(document.querySelector('#status').textContent.match(/Signature\s*(\d+)%/)?.[1]) < Number(was), before, { timeout: 4000 });
+    assert.equal((await seen('brig')).live, true);
+  });
+
+  await check('sensors off as well: an empty dark room goes to static, and a breach in it stays unknown', async () => {
+    for (let i = await power(page, 'sensors'); i > 0; i--) await page.tap('#btn-power-sensors-minus');
+    await powerIs(page, 'sensors', 0);
+    await page.waitForFunction(() => window.coldManifest.sim.state.seen.brig.live === false, null, { timeout: 3000 });
+    await game(page, () => window.coldManifest.sim.enqueue({ type: 'debug.room', room: 'brig', set: { breach: 0.6 } }));
+    await page.waitForFunction(() => window.coldManifest.sim.state.rooms.brig.breach > 0, null, { timeout: 2000 });
+    const t = await target(page, 'brig');
+    await page.touchscreen.tap(t.mx, t.my);
+    assert.equal(await page.textContent('#status-title'), 'Brig');
+    await page.waitForFunction(() => /No eyes in here/.test(document.querySelector('#status').textContent), null, { timeout: 2000 });
+    await sleep(600);
+    assert.equal((await seen('brig')).live, false);
+    assert.equal((await seen('brig')).breach, 0, 'what we remember has no hole in it');
+    assert.doesNotMatch(await page.textContent('#status'), /Breach\s*[1-9]/i, 'the panel does not give the breach away');
+    if (shots) await page.screenshot({ path: `${shots}/s2-7-dark-room-ipad.png` });
+  });
+
+  await check('sensors back on: the room is seen again and the breach is found', async () => {
+    const found = page.evaluate(() => new Promise((resolve, reject) => {
+      window.coldManifest.sim.events.on('breach.found', resolve);
+      setTimeout(() => reject(new Error('no breach.found in 4s')), 4000);
+    }));
+    found.catch(() => {});
+    await page.tap('#btn-power-sensors-plus');
+    assert.equal((await found).room, 'brig');
+    await page.waitForFunction(() => window.coldManifest.sim.state.seen.brig.live === true, null, { timeout: 2000 });
+    await page.waitForFunction(() => !/No eyes in here/.test(document.querySelector('#status').textContent), null, { timeout: 2000 });
+    await game(page, () => window.coldManifest.sim.enqueue({ type: 'debug.room', room: 'brig', set: { breach: 0, oxygen: 1 } }));
+  });
+
+  await check('Lights up puts the lamps back', async () => {
+    await page.touchscreen.tap(40, 200); // open space lets go of the room
+    await page.waitForSelector('#btn-dark', { timeout: 2000 });
+    await page.tap('#btn-dark');
+    await page.waitForFunction(() => Object.values(window.coldManifest.sim.state.rooms).filter((r) => !r.jettisoned).every((r) => r.lightsOn), null, { timeout: 2000 });
+    assert.equal(await page.textContent('#btn-dark'), 'Go dark');
+  });
+
+  await check('a fight: their ship starts as an unresolved return, with both locks on the fight bar', async () => {
+    await page.tap('#btn-pause');
+    await page.tap('#btn-dbg-fight');
+    await page.tap('#btn-pause');
+    await page.waitForFunction(() => window.coldManifest.sim.state.fight, null, { timeout: 2000 });
+    await page.tap('#btn-pause');
+    assert.equal(await paused(page), true);
+    await page.waitForFunction(() => window.coldManifest.shipView.debug.foeTargets().length === 5, null, { timeout: 2000 });
+    const c = await contact();
+    assert.ok(Object.values(c.rooms).some((r) => r.resolve < 1), 'not everything is made out at once');
+    const unresolved = Object.entries(c.rooms).find(([, r]) => r.resolve < 1)[0];
+    // The ships are refitted when the fight bar appears; let that frame pass before reading where things are.
+    await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
+    const t = await game(page, (rid) => window.coldManifest.shipView.debug.foeTargets().find((x) => x.id === rid), unresolved);
+    await page.touchscreen.tap(t.x + t.w / 2, t.y + t.h / 2);
+    assert.deepEqual(await selected(page), { kind: 'foe', id: unresolved });
+    assert.equal(await page.textContent('#status-title'), 'Unresolved return');
+    assert.match(await page.textContent('#status'), /Resolving: \d+%/);
+    assert.match(await page.textContent('#fight-own'), /Signature \d+%/);
+    assert.match(await page.textContent('#fight-foe-lock'), /lock/i);
+    assert.match(await page.textContent('#fight-own-lock'), /lock/i);
+    if (shots) await page.screenshot({ path: `${shots}/s2-7-unresolved-ipad.png` });
+  });
+
+  await check('the scan resolves their rooms one by one, and then a weapon can be aimed', async () => {
+    await page.tap('#btn-pause');
+    await page.waitForFunction(() => Object.values(window.coldManifest.sim.state.contact.rooms).every((r) => r.resolve >= 1), null, { timeout: 20000 });
+    await page.waitForFunction(() => document.querySelector('#status-title').textContent !== 'Unresolved return', null, { timeout: 2000 });
+    assert.equal((await contact()).locked, true);
+    await page.tap('#weapon-0');
+    const t = await game(page, () => window.coldManifest.shipView.debug.foeTargets().find((x) => x.id === 'shields'));
+    await page.touchscreen.tap(t.x + t.w / 2, t.y + t.h / 2);
+    await page.waitForFunction(() => window.coldManifest.sim.state.weapons[0].target === 'shields', null, { timeout: 2000 });
+    if (shots) await page.screenshot({ path: `${shots}/s2-7-resolved-ipad.png` });
+  });
+
+  await check('the Jump button counts the sensor fix, and says so when the sensors are off', async () => {
+    assert.match(await page.textContent('#jump-note'), /Fix \d+%|Ready|No pilot|No drive/);
+    for (let i = await power(page, 'sensors'); i > 0; i--) await page.tap('#btn-power-sensors-minus');
+    await powerIs(page, 'sensors', 0);
+    await page.waitForFunction(() => /No sensors|No pilot|No drive/.test(document.querySelector('#jump-note').textContent), null, { timeout: 2000 });
+  });
+
+  await check('every control is at least 44px tall and wide with the Go dark button up', async () => {
+    const small = await page.$$eval('.ship .btn', (nodes) => nodes.map((n) => ({ id: n.id, r: n.getBoundingClientRect() })).filter((n) => n.r.width > 0 && (n.r.width < 44 || n.r.height < 44)).map((n) => `${n.id} ${Math.round(n.r.width)}x${Math.round(n.r.height)}`));
+    assert.deepEqual(small, []);
+  });
+
+  await check('no page errors', async () => assert.deepEqual(errors, []));
+  await context.close();
+}
+
 const server = await startServer();
 const browser = await chromium.launch(process.env.PW_CHROMIUM ? { executablePath: process.env.PW_CHROMIUM } : {});
 // E2E_ONLY=boarding (or a comma list of suite names) runs just those suites, for chasing one failure.
 const only = process.env.E2E_ONLY?.split(',');
-const suites = { touch: touchTests, desktop: desktopTests, voice: voiceTests, fight: fightTests, hit: hitTests, ending: endingTests, boarding: boardingTests };
+const suites = { touch: touchTests, desktop: desktopTests, voice: voiceTests, fight: fightTests, hit: hitTests, ending: endingTests, boarding: boardingTests, dark: darkTests };
 try {
   for (const [name, run] of Object.entries(suites)) if (!only || only.includes(name)) await run(browser);
 } finally {

@@ -170,8 +170,6 @@ function stepTemperature(sim, seconds) {
     if (r.jettisoned) continue;
     const target = TEMP_NORMAL + TEMP_FIRE * r.fire + (isExposed(sim, room.id) ? TEMP_EXPOSED * (1 - r.oxygen) : 0);
     r.temperature += (target - r.temperature) * share;
-    // Fire is loud (the creature will listen for this in Stage 6).
-    r.noise = r.fire * 0.5;
   }
 }
 

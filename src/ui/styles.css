@@ -605,6 +605,21 @@ body {
   font-size: 0.85em;
 }
 
+/* The ship's own panel (nothing selected): the hint shares the row with the Go dark button and never drops under it. */
+.status__controls--row {
+  flex-wrap: nowrap;
+}
+
+.status__controls--row .btn {
+  flex: none;
+  min-width: 9.5em;
+}
+
+.status__controls--row .status__hint--inline {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
 /* ---------- power panel ---------- */
 
 .power {
@@ -983,6 +998,17 @@ body {
   display: block;
   height: 100%;
   background: #8be28b;
+}
+.fightside__line {
+  font-size: calc(11px * var(--text-scale));
+  white-space: nowrap;
+}
+.fightside__lock {
+  color: var(--sodium, #ff8a2b);
+  min-height: 1.2em;
+}
+.fightside__lock.is-good {
+  color: #8be28b;
 }
 .fightside.is-alarm .fightside__bar i {
   background: var(--alarm);

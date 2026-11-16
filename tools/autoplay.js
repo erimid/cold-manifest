@@ -37,6 +37,7 @@ import { createRng } from '../src/engine/rng.js';
 import { POWERED, used, supply } from '../src/sim/power.js';
 import { BOARD_SECONDS } from '../src/sim/boarding.js';
 import { DEBUG_ACTIONS, OUTCOMES, chargeOf, enemyOf, ourCrew } from '../src/sim/combat.js';
+import { resolvedRooms, signature } from '../src/sim/senses.js';
 import { MANUAL_DOOR_SECONDS, TICK_RATE, TICK_SECONDS, checkInvariants, createSim } from '../src/sim/sim.js';
 import { writeFileSync } from 'node:fs';
 
@@ -198,8 +199,10 @@ function playRun(seed) {
       order({ type: 'debug.system', system, damage: bot.chance(0.5) ? 0 : bot.between(0, sim.state.systems[system].level) });
     } else if (roll < 0.6) {
       order({ type: 'door.set', door: bot.pick(sim.layout.doors).id, state: bot.pick(['open', 'closed', 'locked']) });
-    } else if (roll < 0.85) {
+    } else if (roll < 0.83) {
       order({ type: 'room.lights', room: bot.pick(sim.layout.rooms).id, on: bot.chance(0.5) });
+    } else if (roll < 0.85) {
+      order({ type: 'lights.all', on: bot.chance(0.5) });
     } else if (roll < 0.95) {
       const door = bot.pick(sim.layout.doors).id;
       order({ type: 'debug.door', door, jammed: sim.state.doors[door].state !== 'jammed' });
@@ -214,19 +217,21 @@ function playRun(seed) {
 
   let pausedFor = 0;
   let pausedHash = null;
+  // The same data a snapshot holds, hashed in place: no copy is made for a check that runs every paused frame.
+  const liveHash = () => hashState({ state: sim.state, rng: sim.rng.getState() });
 
   // One frame per tick: the bot sees and acts exactly as often as the sim steps.
   while (sim.state.tick < ticks) {
     // The bot gives an order now and then, paused or not.
     if (bot.chance(0.05)) {
       act();
-      if (clock.paused) pausedHash = hashState(sim.snapshot()); // the queue may have grown; that is allowed
+      if (clock.paused) pausedHash = liveHash(); // the queue may have grown; that is allowed
     }
 
     if (clock.paused) {
       const ran = clock.advance(TICK_SECONDS);
       if (ran !== 0) throw new Error(`clock ran ${ran} tick(s) while paused`);
-      if (hashState(sim.snapshot()) !== pausedHash) throw new Error(`state changed while paused at tick ${sim.state.tick}`);
+      if (liveHash() !== pausedHash) throw new Error(`state changed while paused at tick ${sim.state.tick}`);
       if (--pausedFor <= 0) clock.resume();
       continue;
     }
@@ -249,7 +254,7 @@ function playRun(seed) {
     if (bot.chance(0.004)) {
       clock.pause('bot');
       pausedFor = bot.between(1, 60);
-      pausedHash = hashState(sim.snapshot());
+      pausedHash = liveHash();
       stats.pauses += 1;
     }
   }
@@ -402,34 +407,40 @@ function playScenario(seed, { incoming = false } = {}) {
 }
 
 const DUEL_MINUTES = 8;
-/** Rooms the duel bot keeps lit; the rest go dark to free a bar for shields (brief §6: lights draw power). */
-const DUEL_LIT = ['bridge', 'weapons', 'shields', 'engines', 'reactor'];
 
 /**
  * A duel: one enemy alongside, and a bot that fights it. It answers a hail
- * (mostly by shooting, sometimes by talking or paying), turns off the lights
- * it does not need, feeds guns, shields and engines, aims at their shields
- * and then their guns, keeps someone at the helm and sends the others to
- * trouble, takes most surrenders, and jumps out when the hull is low. Returns
+ * (mostly by shooting, sometimes by talking or paying), feeds air, sensors
+ * and guns, aims at their shields and then their guns once its sensors have
+ * made those rooms out, keeps someone at the helm and sends the others to
+ * trouble, takes most surrenders, and jumps out when the hull is low and the
+ * sensors have a fix. It fights one of two ways (S2.7, D-074):
+ *   lit   every lamp on and the drive burning, as a new player would
+ *   dark  every lamp off and the drive cold until it is time to leave, with
+ *         the spare power on shields
+ * Returns
  * how it ended, or throws on any failure, including a fight still going at
  * the end (the stalemate rule should make that impossible).
  */
-function playDuel(seed, enemyId, { boarding = false } = {}) {
+function playDuel(seed, enemyId, { boarding = false, dark = false } = {}) {
   const sim = createSim({ seed, ship, crew: roster, lines, weapons, ships });
-  const bot = createRng(`duel:${boarding ? 'board:' : ''}${enemyId}:${seed}`);
+  const bot = createRng(`duel:${boarding ? 'board:' : ''}${dark ? 'dark:' : ''}${enemyId}:${seed}`);
   const end = DUEL_MINUTES * 60 * TICK_RATE;
   const watch = stuckWatch(sim);
-  const tally = { shots: 0, hit: 0, shield: 0, miss: 0, incoming: 0, incomingHits: 0, offers: 0, hail: null, boarded: 0, boardedUs: 0, killedAboard: 0, lostAboard: 0, captured: 0 };
+  const tally = { shots: 0, hit: 0, shield: 0, miss: 0, incoming: 0, incomingHits: 0, incomingWide: 0, incomingBlind: 0, lockLost: 0, lockTicks: 0, signature: 0, battleTicks: 0, offers: 0, hail: null, boarded: 0, boardedUs: 0, killedAboard: 0, lostAboard: 0, captured: 0 };
+  sim.events.on('enemy.lock.lost', () => (tally.lockLost += 1));
   sim.events.on('crew.boarded', ({ onto }) => onto === 'enemy' && (tally.boarded += 1));
   sim.events.on('enemy.crew.boarded', ({ onto }) => onto === 'player' && (tally.boardedUs += 1));
   sim.events.on('enemy.crew.died', ({ cause }) => cause === 'melee' && (tally.killedAboard += 1));
   sim.events.on('crew.died', ({ cause }) => cause === 'melee' && (tally.lostAboard += 1));
   sim.events.on('crew.captured', () => (tally.captured += 1));
-  sim.events.on('shot.resolved', ({ side, result }) => {
+  sim.events.on('shot.resolved', ({ side, result, blind }) => {
     if (side === 'player') tally[result] += 1;
     else {
       tally.incoming += 1;
       if (result === 'hit') tally.incomingHits += 1;
+      if (result === 'miss') tally.incomingWide += 1;
+      if (blind) tally.incomingBlind += 1;
     }
   });
   sim.events.on('weapon.fired', ({ side }) => side === 'player' && (tally.shots += 1));
@@ -456,20 +467,30 @@ function playDuel(seed, enemyId, { boarding = false } = {}) {
         else order({ type: 'fight.engage' });
       }
       if (fight.offer) order({ type: bot.chance(0.75) ? 'fight.accept' : 'fight.refuse' });
-      // Lights out where nobody needs them, then guns, shields and engines.
-      for (const room of sim.layout.rooms) {
-        if (!DUEL_LIT.includes(room.id) && sim.state.rooms[room.id].lightsOn) order({ type: 'room.lights', room: room.id, on: false });
-      }
-      for (const id of ['sensors', 'doors', 'medbay', 'ai_core']) if (sim.state.systems[id].power > 0) order({ type: 'power.add', system: id, delta: -1 });
-      // One bar at a time, top of the list first: air, every gun, shields, then engines with what is left.
-      const want = ['life_support', 'weapons', 'shields', 'engines'].find((id) => !sim.whyNot({ type: 'power.add', system: id, delta: 1 }) || (sim.state.systems[id].power < sim.state.systems[id].level - sim.state.systems[id].damage && id !== 'engines'));
+      // Running: once the hull is low the drive gets a bar, whatever it costs the guns, and we go when the sensors have a fix.
+      const running = sim.state.hull.points <= sim.state.hull.max * 0.3;
+      // Dark: every lamp off (S2.7). Lit: every lamp left on.
+      if (dark && !sim.whyNot({ type: 'lights.all', on: false })) order({ type: 'lights.all', on: false });
+      const systems = sim.state.systems;
+      const room = (id) => systems[id].power < systems[id].level - systems[id].damage;
+      for (const id of ['doors', 'medbay', 'ai_core']) if (systems[id].power > 0) order({ type: 'power.add', system: id, delta: -1 });
+      if (dark && !running && systems.engines.power > 0) order({ type: 'power.add', system: 'engines', delta: -1 });
+      // One bar at a time, top of the list first: air, sensors (for a lock, and the fix to leave by), every gun, then shields, then the drive.
+      const wants = running ? ['life_support', 'sensors', 'engines', 'weapons', 'shields'] : ['life_support', 'sensors', 'weapons', 'shields', ...(dark ? [] : ['engines'])];
+      const want = wants.find((id) => (id === 'sensors' || id === 'engines' ? systems[id].power < 1 && room(id) : room(id)));
       if (want) {
-        if (sim.whyNot({ type: 'power.add', system: want, delta: 1 }) && want !== 'engines' && sim.state.systems.engines.power > 1) order({ type: 'power.add', system: 'engines', delta: -1 });
-        else order({ type: 'power.add', system: want, delta: 1 });
+        if (!sim.whyNot({ type: 'power.add', system: want, delta: 1 })) order({ type: 'power.add', system: want, delta: 1 });
+        else {
+          // Nothing spare: take a bar from further down the list.
+          const donor = [...wants.slice(wants.indexOf(want) + 1)].reverse().find((id) => systems[id].power > 0) ?? (!wants.includes('engines') && systems.engines.power > 0 ? 'engines' : null);
+          if (donor) order({ type: 'power.add', system: donor, delta: -1 });
+        }
       }
-      // Their shields first; once those are broken, their guns.
+      // Their shields first; once those are broken, their guns. Only what the sensors have resolved can be aimed at.
+      const known = resolvedRooms(sim);
       const shieldsDown = enemy.systems.shields.absent || enemy.systems.shields.damage >= enemy.systems.shields.level;
-      const aim = shieldsDown && enemy.rooms.weapons ? 'weapons' : enemy.rooms.shields ? 'shields' : bot.pick(Object.keys(enemy.rooms));
+      const wanted = shieldsDown && enemy.rooms.weapons ? 'weapons' : enemy.rooms.shields ? 'shields' : null;
+      const aim = known.includes(wanted) ? wanted : known.length ? bot.pick(known) : null;
       // Hold fire until every powered gun is charged, then fire them together.
       const guns = sim.state.weapons.map((slot, index) => ({ slot, index })).filter(({ slot }) => slot.powered);
       const volley = guns.length > 0 && guns.every(({ index }) => chargeOf(sim, index) >= 1);
@@ -478,7 +499,7 @@ function playDuel(seed, enemyId, { boarding = false } = {}) {
         if (slot.target !== want) order({ type: 'weapon.target', slot: index, room: want });
       }
       // Get out if it is going badly.
-      if (sim.state.hull.points <= sim.state.hull.max * 0.3) order({ type: 'ship.jump' });
+      if (running) order({ type: 'ship.jump' });
       // Crew: the first stays at the helm, the others go to the worst trouble: boarders first.
       const crew = ourCrew(sim).filter(({ member }) => member.alive);
       const spots = sim.layout.rooms.filter((room) => trouble(room) > 0).sort((a, b) => trouble(b) - trouble(a));
@@ -515,6 +536,13 @@ function playDuel(seed, enemyId, { boarding = false } = {}) {
     const problems = checkInvariants(sim);
     if (problems.length) throw new Error(`tick ${sim.state.tick}: ${problems.join('; ')}`);
     watch();
+    const now = sim.state.fight;
+    // Sampled once a second: how loud we were, and whether they had us.
+    if (now && !now.over && now.phase === 'battle' && sim.state.tick % TICK_RATE === 0) {
+      tally.battleTicks += 1;
+      tally.signature += signature(sim).total;
+      if (now.enemy.contact.locked) tally.lockTicks += 1;
+    }
   }
   const bad = findBadNumbers(sim.state);
   if (bad.length) throw new Error(`non-finite numbers at ${bad.join(', ')}`);
@@ -529,6 +557,7 @@ function playDuel(seed, enemyId, { boarding = false } = {}) {
     ourHull: sim.state.hull.points,
     alive: Object.values(sim.state.crew).filter((member) => member.alive && member.owner === 'player').length,
     boarding,
+    dark,
     hash: hashState(sim.snapshot()),
   };
 }
@@ -573,8 +602,10 @@ for (let i = 1; i <= runs; i++) {
     for (const boarding of crewedIds.includes(enemyId) ? [false, true] : [false]) {
       const label = `${boarding ? 'boarding duel' : 'duel'} with ${enemyId}`;
       try {
-        const first = playDuel(seed, enemyId, { boarding });
-        const second = playDuel(seed, enemyId, { boarding });
+        // Odd seeds fight lit, even seeds run dark, so the report can set the two side by side.
+        const dark = i % 2 === 0;
+        const first = playDuel(seed, enemyId, { boarding, dark });
+        const second = playDuel(seed, enemyId, { boarding, dark });
         if (first.hash !== second.hash) failures.push({ seed, reason: `${label}: replay mismatch (${first.hash} vs ${second.hash})` });
         duels.push(first);
       } catch (err) {
@@ -649,6 +680,24 @@ for (const [enemyId, boarding] of enemyIds.flatMap((id) => (crewedIds.includes(i
   out.push(`    their shots:    ${mean(mine.map((d) => d.incoming)).toFixed(1)} per fight, ${mean(mine.map((d) => d.incomingHits)).toFixed(1)} hit; our hull at the end ${mean(mine.map((d) => d.ourHull)).toFixed(1)} of ${ship.hullPoints}, crew alive ${mean(mine.map((d) => d.alive)).toFixed(2)} of ${roster.length}`);
   if (crewedIds.includes(enemyId)) out.push(`    boarding:       ${mean(mine.map((d) => d.boardedUs)).toFixed(1)} of theirs crossed to us, ${mean(mine.map((d) => d.boarded)).toFixed(1)} of ours to them per fight; ${mine.reduce((n, d) => n + d.killedAboard, 0)} of theirs and ${mine.reduce((n, d) => n + d.lostAboard, 0)} of ours killed hand to hand, ${mine.reduce((n, d) => n + d.captured, 0)} captured`);
   if (Object.keys(hails).length) out.push(`    hails answered: ${Object.entries(hails).map(([k, n]) => `${k} ${n}`).join(', ')}; ${mine.reduce((n, d) => n + d.offers, 0)} surrender offers made`);
+}
+out.push('');
+out.push('Running dark (S2.7): the same duels, split by how the bot fought. Odd seeds lit (every lamp on, drive burning), even seeds dark (lamps off, drive cold)');
+for (const enemyId of enemyIds) {
+  const name = ships.find((item) => item.id === enemyId).name;
+  for (const dark of [false, true]) {
+    const mine = duels.filter((d) => d.enemy === enemyId && d.dark === dark);
+    const shots = mine.reduce((n, d) => n + d.incoming, 0);
+    const battle = mine.reduce((n, d) => n + d.battleTicks, 0);
+    const won = mine.filter((d) => ['destroyed', 'crew-dead', 'surrendered'].includes(d.outcome)).length;
+    const lost = mine.filter((d) => d.outcome === 'lost').length;
+    if (!shots) {
+      out.push(`  ${name}, ${dark ? 'dark' : 'lit '}: ${mine.length} fights; it never fired. Our signature ${pct(mine.reduce((n, d) => n + d.signature, 0), battle)} on average`);
+      continue;
+    }
+    out.push(`  ${name}, ${dark ? 'dark' : 'lit '}: ${mine.length} fights; their shots ${pct(mine.reduce((n, d) => n + d.incomingHits, 0), shots)} hit, ${pct(mine.reduce((n, d) => n + d.incomingWide, 0), shots)} went wide, ${pct(mine.reduce((n, d) => n + d.incomingBlind, 0), shots)} were fired blind`);
+    out.push(`    ${' '.repeat(name.length)}      our signature ${pct(mine.reduce((n, d) => n + d.signature, 0), battle)} on average; they held a lock ${pct(mine.reduce((n, d) => n + d.lockTicks, 0), battle)} of the fight and lost it ${mean(mine.map((d) => d.lockLost)).toFixed(1)} times; we won ${pct(won, mine.length)}, lost the ship ${pct(lost, mine.length)}, hull left ${mean(mine.map((d) => d.ourHull)).toFixed(1)}`);
+  }
 }
 out.push('');
 out.push(`  wall time:         ${seconds.toFixed(2)}s`);

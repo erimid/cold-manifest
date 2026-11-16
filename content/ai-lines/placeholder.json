@@ -81,6 +81,31 @@
     { "id": "ph.combat_progress.015", "category": "combat_progress", "placeholder": true, "conditions": { "trigger": "crew.boarded" }, "text": "{crew_name} is through the tube. Bring them back in one piece, please."},
     { "id": "ph.combat_end.010", "category": "combat_end", "placeholder": true, "conditions": { "trigger": "crew.captured" }, "text": "The ones left aboard have put their hands up. The brig isn't ready for guests, so I've locked them in a cupboard."},
     { "id": "ph.combat_end.011", "category": "combat_end", "placeholder": true, "conditions": { "trigger": "crew.captured" }, "text": "Their boarders have surrendered. Their ship didn't wait for them."},
-    { "id": "ph.combat_end.012", "category": "combat_end", "placeholder": true, "conditions": { "trigger": "crew.captured" }, "text": "We have prisoners. Nobody asked me where to put them, so I've chosen somewhere cold." }
+    { "id": "ph.combat_end.012", "category": "combat_end", "placeholder": true, "conditions": { "trigger": "crew.captured" }, "text": "We have prisoners. Nobody asked me where to put them, so I've chosen somewhere cold." },
+
+    { "id": "ph.fire_found.001", "category": "hazard", "placeholder": true, "conditions": { "trigger": "fire.found" }, "text": "There's a fire in a room I wasn't watching. It has had a head start." },
+    { "id": "ph.fire_found.002", "category": "hazard", "placeholder": true, "conditions": { "trigger": "fire.found" }, "text": "Found a fire. It didn't announce itself, so I'm doing it now." },
+    { "id": "ph.fire_found.003", "category": "hazard", "placeholder": true, "conditions": { "trigger": "fire.found" }, "text": "Something has been burning where I couldn't see. I can see it now." },
+    { "id": "ph.breach_found.001", "category": "hazard", "placeholder": true, "conditions": { "trigger": "breach.found" }, "text": "There's a hole in the hull I didn't know about. I'd like to say it's new." },
+    { "id": "ph.breach_found.002", "category": "hazard", "placeholder": true, "conditions": { "trigger": "breach.found" }, "text": "I've found a breach. I can't tell you how long it has been there, which is the worrying part." },
+    { "id": "ph.breach_found.003", "category": "hazard", "placeholder": true, "conditions": { "trigger": "breach.found" }, "text": "We've been leaking somewhere I had no eyes. Found it." },
+    { "id": "ph.rooms_hidden.001", "category": "sensor_uncertain", "placeholder": true, "conditions": { "trigger": "rooms.hidden" }, "text": "I've lost sight of part of the ship. What I'm showing you there is the last thing I saw." },
+    { "id": "ph.rooms_hidden.002", "category": "sensor_uncertain", "placeholder": true, "conditions": { "trigger": "rooms.hidden" }, "text": "Some of my screens just went to static. I'll hold the last picture up and we can both pretend." },
+    { "id": "ph.rooms_hidden.003", "category": "sensor_uncertain", "placeholder": true, "conditions": { "trigger": "rooms.hidden" }, "text": "I can't see into every room any more. Lights, or sensors, or send somebody. Your choice." },
+    { "id": "ph.lights_all.001", "category": "order_confirm", "placeholder": true, "conditions": { "trigger": "lights.all" }, "text": "Lights out. I'll keep my voice down." },
+    { "id": "ph.lights_all.003", "category": "order_confirm", "placeholder": true, "conditions": { "trigger": "lights.all" }, "text": "Dark ship. The cameras see nothing now, and neither does anyone looking at us." },
+    { "id": "ph.lights_all.002", "category": "order_confirm", "placeholder": true, "conditions": { "trigger": "lights.all" }, "text": "Every lamp is off. I hope nobody was reading." },
+    { "id": "ph.enemy_lock_gained.001", "category": "combat_progress", "placeholder": true, "conditions": { "trigger": "enemy.lock.gained" }, "text": "They have a lock on us. We're too bright." },
+    { "id": "ph.enemy_lock_gained.002", "category": "combat_progress", "placeholder": true, "conditions": { "trigger": "enemy.lock.gained" }, "text": "Their fire control has found us. Something aboard is giving us away." },
+    { "id": "ph.enemy_lock_gained.003", "category": "combat_progress", "placeholder": true, "conditions": { "trigger": "enemy.lock.gained" }, "text": "They can see us well enough to aim now." },
+    { "id": "ph.enemy_lock_lost.001", "category": "combat_progress", "placeholder": true, "conditions": { "trigger": "enemy.lock.lost" }, "text": "They've lost their lock. They are shooting at where we were." },
+    { "id": "ph.enemy_lock_lost.002", "category": "combat_progress", "placeholder": true, "conditions": { "trigger": "enemy.lock.lost" }, "text": "We've gone dark enough. Their guns are guessing." },
+    { "id": "ph.enemy_lock_lost.003", "category": "combat_progress", "placeholder": true, "conditions": { "trigger": "enemy.lock.lost" }, "text": "Their fire control just let go of us. Nobody make any noise." },
+    { "id": "ph.lock_lost.001", "category": "combat_progress", "placeholder": true, "conditions": { "trigger": "lock.lost" }, "text": "I've lost our lock on them. I'm aiming at a rumour." },
+    { "id": "ph.lock_lost.003", "category": "combat_progress", "placeholder": true, "conditions": { "trigger": "lock.lost" }, "text": "They've slipped my lock. Our guns will fire, but I wouldn't bet on where." },
+    { "id": "ph.lock_lost.002", "category": "combat_progress", "placeholder": true, "conditions": { "trigger": "lock.lost" }, "text": "I can't hold a firing solution. Power to sensors would help." },
+    { "id": "ph.fix_ready.001", "category": "combat_progress", "placeholder": true, "conditions": { "trigger": "fix.ready" }, "text": "I have a fix. Say the word and we're gone." },
+    { "id": "ph.fix_ready.002", "category": "combat_progress", "placeholder": true, "conditions": { "trigger": "fix.ready" }, "text": "Sensors have a fix on the way out. The drive needs a bar and a pilot, and then we can leave." },
+    { "id": "ph.fix_ready.003", "category": "combat_progress", "placeholder": true, "conditions": { "trigger": "fix.ready" }, "text": "Fix is good. We can jump whenever you've had enough." }
   ]
 }

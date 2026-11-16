@@ -16,7 +16,14 @@
 //
 // A charged weapon with a target fires by itself and starts charging again.
 // The shot is in the air for the weapon's flight time, then lands: it misses
-// (the target's evasion), is stopped by a shield layer, or hits.
+// (the shooter's lock was poor: senses.js, D-074), is stopped by a shield
+// layer, or hits. A gun fired with no lock at all goes wide: it is aimed at
+// nothing, and comes down wherever it comes down. Firing lights the ship up
+// for a few seconds, which is what the other side locks on to.
+//
+// Jumping away (S2.7) needs a sensor fix, not a charged drive: sensors with
+// power and someone at the helm take the fix, every hit we take and every gun
+// we fire knocks it back, and the drive needs a bar when the moment comes.
 //
 // A hit (S2.2) takes hull points and wears the room it lands in. Then, rolled
 // on the `combat` stream: it breaks a bar of the room's system for every point
@@ -48,11 +55,10 @@ import { FIRE_CATCH_O2, FIRE_START, harmCrew, killCrew } from './atmosphere.js';
 import { airlockRooms, everyone, moveAboard, sendAcross, stepBoarding, whyNotCross } from './boarding.js';
 import { CREW_COMMANDS, isHome } from './crew.js';
 import { stepPower } from './power.js';
+import { FLARE, NOISE, bang, contactView, flare, missChance, newContact, stepContact } from './senses.js';
 import { THINK_SECONDS, planOf, think } from './tactics.js';
 
 export const SHIELD_RECHARGE_SECONDS = 6;
-/** Chance a shot misses: nothing with the engines off, then a base, more per engine bar, more with someone at the helm. */
-export const EVASION = Object.freeze({ base: 0.05, perBar: 0.06, pilot: 0.08, max: 0.45 });
 /** An unpowered weapon loses charge this many times faster than it gained it. */
 export const DISCHARGE_RATE = 2;
 /** How much of a room's hull integrity one point of damage takes. */
@@ -68,8 +74,11 @@ export const HAIL_SECONDS = 30;
 export const OFFER_SECONDS = 30;
 /** Seconds of shooting with no hull damage on either side before the fight is called off. */
 export const STALEMATE_SECONDS = 90;
-/** A jump drive needs this many engine-bar seconds: 60 s on one bar, 30 s on two. And someone at the helm. */
-export const JUMP_CHARGE = 60;
+/**
+ * A jump needs a sensor fix (D-074): `seconds` of sensors with one bar and someone at the helm, quicker with more bars.
+ * A hit on the ship knocks `hit` off the fix and each gun it fires `shot`; with the sensors dark or the helm empty it drains away.
+ */
+export const FIX = Object.freeze({ seconds: 25, hit: 0.25, shot: 0.1, drain: 0.05 });
 /** Stand-in for the crew's negotiating skill and our reputation until crew skills (S4.1) and factions (Stage 7) exist (DF-06). */
 export const NEGOTIATION_PLACEHOLDER = 0.5;
 /** Money aboard at the start, until runs and contracts set it (Stage 3). */
@@ -103,13 +112,6 @@ export function hasPilot(ship) {
   return Boolean(helm) && Object.values(ship.state.crew).some((member) => member.alive && member.room === helm.id && isHome(ship, member) && member.task !== 'crossing');
 }
 
-/** The chance, 0 to 1, that a shot at this ship misses. */
-export function evasion(ship) {
-  const bars = ship.state.systems.engines.power;
-  if (bars === 0) return 0;
-  return Math.min(EVASION.max, EVASION.base + EVASION.perBar * bars + (hasPilot(ship) ? EVASION.pilot : 0));
-}
-
 /** Which weapons have their bars, by slot: the weapons system's power is dealt out in hardpoint order. */
 export function weaponsPowered(ship) {
   let budget = ship.state.systems.weapons.power;
@@ -121,10 +123,19 @@ export function weaponsPowered(ship) {
   });
 }
 
-/** Can this ship charge its jump drive right now? Engines powered and someone at the helm. */
-export const canCharge = (ship) => ship.state.systems.engines.power > 0 && hasPilot(ship);
-/** The jump drive's charge as a fraction, 0 to 1. */
-export const jumpCharge = (ship) => Math.min(1, ship.state.jump / JUMP_CHARGE);
+/** Sensor bars working on a fix: a ship built without a sensors room has a fixed navigation set worth one. */
+const fixBars = (ship) => (ship.state.systems.sensors.absent ? 1 : ship.state.systems.sensors.power);
+/** Can this ship take a sensor fix right now? Sensors running and someone at the helm. */
+export const canFix = (ship) => fixBars(ship) > 0 && hasPilot(ship);
+/** The sensor fix as a fraction, 0 to 1. */
+export const fixOf = (ship) => Math.min(1, ship.state.fix);
+/** Why this ship cannot jump this instant, or null: the fix, the helm, then the drive. */
+export function whyNoJump(ship) {
+  if (fixOf(ship) < 1) return fixBars(ship) > 0 ? `the sensor fix is at ${Math.floor(fixOf(ship) * 100)}%` : 'the sensors have no power to take a fix';
+  if (!hasPilot(ship)) return 'nobody is at the helm';
+  if (ship.state.systems.engines.power < 1) return 'the engines have no power';
+  return null;
+}
 /** A ship's own crew, alive and aboard it. */
 export const livingCrew = (ship) => Object.values(ship.state.crew).filter((member) => member.alive && isHome(ship, member));
 /** Everyone of `owner`'s crew still alive, on either ship: 'player' or 'enemy'. */
@@ -166,7 +177,7 @@ export function newCombatState(layout, systems) {
     hull: { points: layout.hullPoints, max: layout.hullPoints },
     shield: { charge: systems.shields.power }, // a ship that starts with shields powered starts with them up
     weapons: layout.weapons.map((id) => ({ id, charge: 0, target: null, powered: false })),
-    jump: 0, // engine-bar seconds toward a jump (JUMP_CHARGE)
+    fix: 0, // the sensor fix a jump needs, 0 to 1 (FIX)
   };
 }
 
@@ -196,7 +207,7 @@ export function enemyOf(sim) {
 }
 
 /** Debug actions that lead to each ending (brief §7). */
-export const DEBUG_ACTIONS = Object.freeze(['cripple', 'killCrew', 'surrender', 'flee', 'chargeJump', 'stalemate', 'sinkUs', 'money', 'boardUs']);
+export const DEBUG_ACTIONS = Object.freeze(['cripple', 'killCrew', 'surrender', 'flee', 'chargeJump', 'stalemate', 'sinkUs', 'money', 'boardUs', 'scan']);
 
 const inHail = (sim) => (!sim.state.fight || sim.state.fight.over ? 'there is no fight' : sim.state.fight.phase !== 'hail' ? 'the shooting has already started' : null);
 
@@ -209,7 +220,7 @@ export function startFight(sim, enemyId, newShipState) {
   const layout = sim.catalog.layout(enemyId);
   const plan = planOf(layout);
   const { tick } = sim.state;
-  sim.state.jump = 0; // the drive is charged for this fight, from nothing
+  sim.state.fix = 0; // a fix is taken for this fight, from nothing
   // Their people may share an id with ours; two ships' crews can mix, so theirs give way.
   const roster = layout.crew.map((person) => (sim.state.crew[person.id] ? { ...person, id: `foe-${person.id}` } : person));
   sim.state.fight = {
@@ -227,6 +238,10 @@ export function startFight(sim, enemyId, newShipState) {
     engaged: tick, // when the shooting started (or will have: set again when a hail ends)
     over: null, // { outcome, tick, ... } once it is decided (OUTCOMES)
   };
+  // Neither ship knows the other yet: no lock, and nothing of its rooms made out.
+  const enemy = enemyOf(sim);
+  sim.state.contact = newContact(enemy);
+  enemy.state.contact = newContact(sim);
   sim.events.emit('fight.started', { enemy: layout.id, name: layout.name, hailing: Boolean(plan.hail), tick });
   if (plan.hail) sim.events.emit('fight.hail', { enemy: layout.id, name: layout.name, text: plan.hail.text, bribe: plan.hail.bribe, tick });
 }
@@ -266,6 +281,8 @@ export function endFight(sim) {
   settleBoarders(sim, 'recalled'); // anyone still across (after our hull went, say) goes home
   clearTargets(sim);
   sim.state.fight = null;
+  sim.state.contact = null;
+  sim.state.fix = 0;
   sim.events.emit('fight.ended', { tick: sim.state.tick });
 }
 
@@ -392,6 +409,7 @@ export function combatCommands(newShipState) {
         const room = fight.enemy.rooms[cmd.room];
         if (!room) return `no room "${cmd.room}" on their ship`;
         if (room.jettisoned) return 'that section is gone';
+        if (!contactView(sim, cmd.room)?.resolved) return 'the sensors have not made that part of them out yet';
         return null;
       },
       apply(sim, cmd) {
@@ -456,14 +474,14 @@ export function combatCommands(newShipState) {
         sim.events.emit('fight.refused', { tick: sim.state.tick });
       },
     },
-    // Jump away once the drive is charged.
+    // Jump away once the sensors have a fix.
     'ship.jump': {
       check(sim) {
         const fight = sim.state.fight;
         if (!fight) return 'there is nowhere to jump to yet'; // the sector map arrives in Stage 3
         if (fight.over) return 'the fight is over';
-        if (jumpCharge(sim) < 1) return `the jump drive is at ${Math.floor(jumpCharge(sim) * 100)}%`;
-        if (!hasPilot(sim)) return 'nobody is at the helm';
+        const problem = whyNoJump(sim);
+        if (problem) return problem;
         const away = ourCrew(sim).find(({ member, ship }) => member.alive && (ship !== sim || member.task === 'crossing'));
         if (away) return `${away.member.name} is still aboard them`;
         return null;
@@ -546,9 +564,14 @@ export function combatCommands(newShipState) {
         if (cmd.action === 'flee') {
           engage(sim, 'debug');
           fight.fleeing = true;
-          enemy.state.jump = JUMP_CHARGE;
+          enemy.state.fix = 1;
         }
-        if (cmd.action === 'chargeJump') sim.state.jump = JUMP_CHARGE;
+        if (cmd.action === 'chargeJump') sim.state.fix = 1;
+        if (cmd.action === 'scan') {
+          // Our sensors have all they could want, and keep it: a perfect lock, and every room of theirs made out.
+          Object.assign(sim.state.contact, { lock: 1, locked: true, pinned: true });
+          for (const entry of Object.values(sim.state.contact.rooms)) entry.resolve = 1;
+        }
         if (cmd.action === 'stalemate') {
           engage(sim, 'debug');
           fight.lastHarm = tick - STALEMATE_SECONDS * 20;
@@ -593,8 +616,18 @@ function stepWeapons(sim, ship, side, dt) {
     // Nobody fires while they talk, and they hold their fire while offering to give up.
     if (fight.phase !== 'battle' || (side === 'enemy' && fight.offer)) return;
     slot.charge = 0;
-    const shot = { id: fight.nextShot++, side, slot: index, weapon: slot.id, room: slot.target, born: sim.state.tick, lands: sim.state.tick + Math.max(1, Math.round(weapon.flight * 20)) };
+    // With no lock the gun is aimed at nothing: the shot goes wherever it goes. The dice are thrown either way.
+    const foe = side === 'player' ? enemyOf(sim) : sim;
+    const standing = foe.layout.rooms.filter((room) => !foe.state.rooms[room.id].jettisoned);
+    const stray = sim.rng.stream('combat').pick(standing.length ? standing : foe.layout.rooms).id;
+    const blind = !ship.state.contact?.locked;
+    const shot = { id: fight.nextShot++, side, slot: index, weapon: slot.id, room: blind ? stray : slot.target, blind, born: sim.state.tick, lands: sim.state.tick + Math.max(1, Math.round(weapon.flight * 20)) };
     fight.shots.push(shot);
+    // A gun going off is loud aboard, lights the ship up for the other side, and shakes the sensor fix.
+    const gunRoom = ship.layout.roomOfSystem('weapons');
+    if (gunRoom) bang(ship, gunRoom.id, NOISE.gun);
+    flare(ship, FLARE.perBar * weapon.power);
+    ship.state.fix = Math.max(0, ship.state.fix - FIX.shot);
     sim.events.emit('weapon.fired', { ...shot, tick: sim.state.tick });
     if (side === 'enemy') slot.target = null; // their captain picks a fresh room for every shot
   });
@@ -614,6 +647,8 @@ export function applyHit(sim, ship, roomId, weapon) {
   hull.points = Math.max(0, hull.points - weapon.damage);
   if (sim.state.fight && weapon.damage > 0) sim.state.fight.lastHarm = tick;
   room.hull = Math.max(0, room.hull - ROOM_HULL_PER_DAMAGE * weapon.damage);
+  bang(ship, roomId, NOISE.hit);
+  ship.state.fix = Math.max(0, ship.state.fix - FIX.hit); // the sensors lose their place
 
   // The room's system loses a bar for each point of damage.
   const systemId = ship.layout.room(roomId).system;
@@ -661,18 +696,23 @@ function land(sim, shot, { force = false } = {}) {
   const room = target.state.rooms[shot.room];
   let result = 'hit';
   let effects = null;
-  const dodged = sim.rng.stream('combat').chance(evasion(target));
-  if (!room || room.jettisoned || (dodged && !force)) result = 'miss';
+  const shooter = shot.side === 'player' ? sim : enemyOf(sim);
+  const wide = sim.rng.stream('combat').chance(shooter ? missChance(shooter) : 0); // a debug shot with nobody alongside has no gunner to miss
+  if (!room || room.jettisoned || (wide && !force)) result = 'miss';
   else if (shieldLayers(target) > weapon.pierce && !force) {
     result = 'shield';
     target.state.shield.charge = Math.max(0, target.state.shield.charge - 1);
   } else effects = applyHit(sim, target, shot.room, weapon);
-  sim.events.emit('shot.resolved', { id: shot.id, side: shot.side, slot: shot.slot, weapon: shot.weapon, room: shot.room, result, damage: result === 'hit' ? weapon.damage : 0, effects, tick: sim.state.tick });
+  sim.events.emit('shot.resolved', { id: shot.id, side: shot.side, slot: shot.slot, weapon: shot.weapon, room: shot.room, blind: Boolean(shot.blind), result, damage: result === 'hit' ? weapon.damage : 0, effects, tick: sim.state.tick });
   if (fight && target.state.hull.points === 0) decide(sim, shot.side === 'player' ? 'destroyed' : 'lost');
 }
 
-function stepJump(ship, dt) {
-  if (canCharge(ship)) ship.state.jump = Math.min(JUMP_CHARGE, ship.state.jump + dt * ship.state.systems.engines.power);
+/** The sensors work on a fix while they have power and someone is at the helm; otherwise it slips away. */
+function stepFix(ship, dt) {
+  const before = ship.state.fix;
+  ship.state.fix = canFix(ship) ? Math.min(1, before + (dt * fixBars(ship)) / FIX.seconds) : Math.max(0, before - FIX.drain * dt);
+  if (before < 1 && ship.state.fix >= 1) ship.events.emit('fix.ready', { tick: ship.state.tick });
+  if (before >= 1 && ship.state.fix < 1) ship.events.emit('fix.lost', { tick: ship.state.tick });
 }
 
 /** The enemy captain's turn, and the rules that end a fight without a last shot. */
@@ -698,10 +738,10 @@ function stepFight(sim, enemy, dt) {
       sim.events.emit('fight.fleeing', { enemy: fight.enemy.ship, tick });
     }
   }
-  if (fight.fleeing) stepJump(enemy, dt);
+  if (fight.fleeing) stepFix(enemy, dt);
 
   if (crewed && !alive) decide(sim, 'crew-dead');
-  else if (fight.fleeing && enemy.state.jump >= JUMP_CHARGE && hasPilot(enemy)) decide(sim, 'fled');
+  else if (fight.fleeing && !whyNoJump(enemy)) decide(sim, 'fled');
   else if (fight.phase === 'battle' && !fight.offer && tick - fight.lastHarm >= STALEMATE_SECONDS * 20) decide(sim, 'stalemate');
 }
 
@@ -712,7 +752,11 @@ export function stepCombat(sim, dt) {
   stepWeapons(sim, sim, 'player', dt);
   if (!enemy) return;
   const fight = sim.state.fight;
-  if (!fight.over) stepJump(sim, dt);
+  if (!fight.over) {
+    stepFix(sim, dt);
+    stepContact(sim, enemy, dt);
+    stepContact(enemy, sim, dt);
+  }
   stepShield(enemy, dt);
   stepWeapons(sim, enemy, 'enemy', dt);
   const flying = [];
@@ -734,7 +778,7 @@ export function checkCombatInvariants(ship, foe = null) {
   const { hull, shield, weapons, systems } = ship.state;
   if (!Number.isInteger(hull.points) || hull.points < 0 || hull.points > hull.max) problems.push(`hull is ${hull.points} of ${hull.max}`);
   if (!(shield.charge >= 0 && shield.charge <= systems.shields.level + EPS)) problems.push(`shield charge is ${shield.charge} with a level ${systems.shields.level} system`);
-  if (!(ship.state.jump >= 0 && ship.state.jump <= JUMP_CHARGE + EPS)) problems.push(`jump charge is ${ship.state.jump}`);
+  if (!(ship.state.fix >= 0 && ship.state.fix <= 1 + EPS)) problems.push(`the sensor fix is ${ship.state.fix}`);
   if (weapons.length > ship.layout.hardpoints.length) problems.push(`${weapons.length} weapons on ${ship.layout.hardpoints.length} hardpoints`);
   weapons.forEach((slot, index) => {
     const weapon = ship.catalog.weapon(slot.id);

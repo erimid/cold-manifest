@@ -38,6 +38,10 @@ export const PATCHES = Object.freeze({
 export const EVENT_SOUNDS = Object.freeze({
   'fire.started': 'alarm',
   'breach.opened': 'klaxon',
+  'fire.found': 'alarm',
+  'breach.found': 'klaxon',
+  'fix.ready': 'chirp',
+  'enemy.lock.gained': 'tick',
   'fire.out': 'hiss',
   'breach.sealed': 'chirp',
   'system.repaired': 'chirp',

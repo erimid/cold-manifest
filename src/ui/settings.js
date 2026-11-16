@@ -13,8 +13,9 @@ export function defaultSettings({ touch = false } = {}) {
 export const AUTO_PAUSE = Object.freeze([
   { id: 'fight', label: 'A fight starts', event: 'fight.started' },
   { id: 'boarded', label: 'Boarders get aboard', event: 'enemy.crew.boarded' },
-  { id: 'fire', label: 'A fire starts', event: 'fire.started' },
-  { id: 'breach', label: 'The hull is breached', event: 'breach.opened' },
+  // A fire or a breach in a room nobody can see into pauses nothing until it is found (senses.js).
+  { id: 'fire', label: 'A fire starts', event: 'fire.started', found: 'fire.found' },
+  { id: 'breach', label: 'The hull is breached', event: 'breach.opened', found: 'breach.found' },
   { id: 'death', label: 'A crew member dies', event: 'crew.died' },
 ]);
 
