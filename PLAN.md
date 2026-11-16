@@ -69,18 +69,25 @@ Session counts are estimates. A stage is done when its exit checks pass, not whe
 
 **Exit checks:** green gate; autoplay v1 at 100 seeded hazard scenarios with no crash, no NaN state, no crew stuck on a path; 60 fps with a fire in the frame on the dev machine with CPU throttled 4×; Eric plays 10 minutes on his iPad from the PR preview link.
 
-### Stage 2: Combat  (≈5 sessions)
+### Stage 2: Combat and identity  (≈10 sessions)
 **Depends on:** Stage 1 (clock, power, damage, crew).
+
+**Why this stage grew (2026-11-16, D-070):** after S2.3, Eric found the build "almost exactly like FTL": a top-down row of rooms, a power-bar strip, the enemy cutaway on the right, and FTL's exact shield, evasion, charge and jump rules. Brief §3 rules that out. Sessions S2.6 to S2.10 rebuild the view, the controls and the fight rules so the game reads as a haunted cargo hauler seen through Margo's monitor, and bring Margo's pushback and crew refusal forward so the first runs already feel unlike FTL. S2.5 (enemy types and balance) moves after them so it balances the new rules. Run order: S2.4, S2.6, S2.7, S2.8, S2.9, S2.5, S2.10. Departures from the brief are D-070 to D-078.
 
 | Session | Work | Done when |
 |---|---|---|
 | S2.1 Weapons and layout | Weapon data (charge time, power, damage, effects), 2 to 4 hardpoints, shields as hit absorption, evasion from engines + pilot. Split view with the enemy ship cutaway on the right. Targeting UI: tap a weapon, tap an enemy room (works paused). | Player can charge and fire at a dummy target ship. |
 | S2.2 Hits and effects | Shot resolution (miss / shield / hit), system damage, fires and breaches from hits, crew injury. Placeholder screen shake and impact flash. Auto-pause on fight start. | Fires and breaches from hits use the exact Stage 1 hazard code. |
 | S2.3 Enemy AI and fight endings | Enemy power and targeting by archetype. Surrender offers (cargo, money, info), escape by jumping when engines charge, pre-fight hail (talk/bribe stub driven by money and a placeholder negotiation skill). Stalemate rule so no fight can run forever. | Every ending in brief §7 is reachable from the debug panel. |
-| S2.4 Boarding | Enemy teleport/dock boarding, hand-to-hand resolution in rooms, player crew boarding the enemy, win by killing their crew. | Boarding fights resolve with no stuck crew in 100 bot fights. |
-| S2.5 Four enemy types + bot | Glass cannon, boarders, shield tank, drone carrier (with a simple drone mechanic). Autoplay v2. | Stage exit checks. |
+| S2.4 Boarding | Enemy boarding by docking clamp or umbilical through an airlock (never by teleporter, D-077), hand-to-hand resolution in rooms, player crew boarding the enemy, win by killing their crew. | Boarding fights resolve with no stuck crew in 100 bot fights. |
+| S2.6 Decks and Margo's monitor | Ship drawn **side-on as stacked decks** (D-071): new layout format with decks, ladders and a powered lift; the *Margin of Error* redrawn as a hauler that is mostly cargo hold, keeping room ids where it can. **Service crawlways** (D-072) through the whole ship: engineers and the creature only, plus a few creature-only ducts; they replace the vent graph and are drawn on the schematic. Screen rebuilt as **Margo's monitor** (D-073): a cheap company CRT schematic with her portrait and voice at the centre; the enemy as a sensor-return inset that you still target room by room. Room codes painted on floors replaced by faded company stencils, crates and pipes. Touch targets stay 44 px or larger on decks. | Crew path by corridor, ladder, lift and (engineers) crawlway; every Stage 1 and S2.1 to S2.4 test passes on the new layout; ship and inset readable at 1024×768 on iPad. |
+| S2.7 Visibility and running dark | One **signature model** for both ships (D-074): light, noise, heat and engine burn per room and per ship. Fog on our own ship: unlit, unmanned rooms out of sensor cover show last-known state behind static. Enemy rooms resolve as our sensors scan them (clears DF-32's "everything visible"). **Running dark** replaces evasion: a lower signature makes their shots miss or lose lock. **Jump needs a sensor fix** instead of a charge meter. | Bot report shows running dark changing hit rates; a scripted test shows a dark room hiding its state; the creature stage can read the same model. |
+| S2.8 Brace, ammo and the hold | **Capacitor shields** (D-075): shield power charges a capacitor that the player dumps as a brace to soak a volley, and bracing spikes the signature. **Hand-loaded heavy guns** (D-076): the slug thrower and lance take ammo crates a crew member carries from the hold; the laser needs none. **Playable cargo hold**: crates drawn in the hold, opened, moved and jettisoned (hiding in compartments stays with S7.3). | A fight can be won with brace timing and ammo runs; the bot can fetch ammo; no crew stuck on an ammo run. |
+| S2.9 Breaker board and intercom | **Breaker board** (D-078) replaces the bottom power strip: cheap company hardware with breakers per system, 44 px targets, Q-row keys kept, opened on demand so the bottom of the screen is free outside a fight. **Intercom orders**: still tap a crew member, then a room; crew answer in their own short spoken line (placeholder crew lines), nothing waits on the reply. Minor systems may be merged if the board needs fewer breakers (logged if done). | Routing works by touch, mouse and keyboard on the board; every order gets a crew reply; browser tests updated. |
+| S2.5 Four enemy types + bot | Glass cannon, boarders, shield tank, drone carrier (with a simple drone mechanic), built and balanced on the S2.6 to S2.9 rules. Autoplay v2. | Each enemy type has a visibly different win rate and fight length. |
+| S2.10 Margo pushes back, crew refuse | Pulled forward from S5.1, S5.3, S4.3 and S4.5 (D-070). Margo's personality file and **50-line voice sample, approved by Eric first**. AI trust value; risk detector for risky orders (venting or jettisoning an occupied room, cutting life support with crew in a breach, sending someone into fire); Margo argues on the intercom, refuses a few times per run, one-tap captain's override that costs trust. A small **memory log** (hard-coded event types for now) and crew who refuse an order with a reason that names a remembered event. | Stage exit checks; each behaviour reachable from the debug panel and seen in bot runs. |
 
-**Exit checks:** green gate; 200 seeded bot fights (50 per enemy type) with no crashes or endless fights; each enemy type has a visibly different win rate and fight length in the report.
+**Exit checks:** green gate; 200 seeded bot fights (50 per enemy type) with no crashes or endless fights; each enemy type has a visibly different win rate and fight length in the report; Margo argues and crew refuse at non-zero, non-dominant rates; Eric plays a fight on his iPad and it no longer reads as FTL (brief §3).
 
 ### Stage 3: Run structure  (≈7 sessions)
 **Depends on:** Stage 2.
@@ -89,7 +96,7 @@ Session counts are estimates. A stage is done when its exit checks pass, not whe
 |---|---|---|
 | S3.1 Sector map | Map generation (15 to 25 nodes: ports, empty space, hazards, derelicts, checkpoints), map UI, jumps cost fuel, deadlines in jumps, a pursuit-pressure hook. | Seeded maps are always connected and always have a reachable delivery. |
 | S3.2 Screens | All screens from brief §18 as working stubs and navigation: title, meta hub, contract board, map, ship view, port, event view, scene view (empty), run summary. | You can click through a whole run loop, even if most screens are thin. |
-| S3.3 Condition/effect DSL and events | The shared condition/effect language (see §1.4), event data format with choices, requirement labels like "[Ilse, Medicine]", outcomes that can start combat, a scene, or the threat (hooks only). Event view UI. | Content checker validates every condition and effect and every reference. |
+| S3.3 Condition/effect DSL and events | The shared condition/effect language (see §1.4), event data format with choices, requirement labels like "[Ilse, Medicine]", outcomes that can start combat, a scene, or the threat (hooks only). Event view UI. Port S2.10's hard-coded memory types and refusal rules into the DSL. | Content checker validates every condition and effect and every reference. |
 | S3.4 Contracts and basic ports | Contract format; **Smuggling, Courier, Salvage claim** as the first 3 types; delivery, failure, pay, reputation change; a basic inspection; ports with refuel, repair, sell contract cargo, hire (stub). | A full contract can be completed or failed. |
 | S3.5 First content | **30 events**, 5 factions as stubs (provisional names, see DECISIONS D-012), ~18 named ports, 10 contract templates. | Checker: 30/150 events, no broken references. |
 | S3.6 Save, end, summary | Autosave at every port and jump, versioned schema with migrations, export/import as a text string, meta-profile skeleton. Run end conditions (destroyed, all dead, retire; mutiny wired in Stage 4). Run event log and a first run summary. Career: continue or retire after delivery. | Save at a port, reload in a new tab, export, import on another browser: identical state. |
@@ -102,11 +109,11 @@ Session counts are estimates. A stage is done when its exit checks pass, not whe
 
 | Session | Work | Done when |
 |---|---|---|
-| S4.1 Crew generation and traits | Name, background, look and voice pools in `content/crew/`; skills that improve with use; **30+ traits** as data with behavior hooks (not just stat modifiers). | Every trait changes at least one behavior that the bot report can count. |
+| S4.1 Crew generation and traits | Name, background, look and voice pools in `content/crew/`; skills that improve with use (engineering skill or a trait decides who may use the service crawlways, replacing S2.6's flag); **30+ traits** as data with behavior hooks (not just stat modifiers). | Every trait changes at least one behavior that the bot report can count. |
 | S4.2 Needs and stress | Rest, food, safety, morale; stress sources; freeze / panic / lash out / break (break adds a lasting negative trait); lasting injuries. | Unit tests per break state. |
-| S4.3 Memory and opinions | Memory log from bus events with emotional weight, decay, strong memories that stick; opinions of captain, each crew member, and the AI, from hatred to devotion; memory text templates ("Captain left {crew_name} behind on {location}"). | Crew panel shows each member's top memories with names and places. |
+| S4.3 Memory and opinions | Extend S2.10's memory log: memory log from bus events with emotional weight, decay, strong memories that stick; opinions of captain, each crew member, and the AI, from hatred to devotion; memory text templates ("Captain left {crew_name} behind on {location}"). | Crew panel shows each member's top memories with names and places. |
 | S4.4 Relationships | Pair relationships (friendship, rivalry, romance, mentorship, grudge), same-room bonuses and friction, fights. Crew panel: portraits (placeholder), health, stress, mood icon, traits, skills, relationships. | Relationship changes trace back to specific memories. |
-| S4.5 Refusal, mutiny, prisoners | Order refusal with a reason built from memories ("Dace won't go back into the hold. She remembers what happened to Petrov."), mutiny meter with warning signs, brig, mutiny event that can end the run. **Prisoner transport** contract (4th type). **+10 crew-driven events.** | Refusal and mutiny both appear in bot runs at non-zero, non-dominant rates. |
+| S4.5 Refusal, mutiny, prisoners | Widen S2.10's order refusal: reasons built from memories ("Dace won't go back into the hold. She remembers what happened to Petrov."), mutiny meter with warning signs, brig, mutiny event that can end the run. **Prisoner transport** contract (4th type). **+10 crew-driven events.** | Refusal and mutiny both appear in bot runs at non-zero, non-dominant rates. |
 | S4.6 Bot v4 and balance | Bot reports mutiny rate, refusals, breaks, deaths by cause. Tune. | Stage exit checks. |
 
 **Exit checks:** green gate; 100 runs; mutiny rate between roughly 5% and 25% for the bot's default strategy (tunable target, logged in DECISIONS); no crew can be permanently stuck in a refused state.
@@ -116,9 +123,9 @@ Session counts are estimates. A stage is done when its exit checks pass, not whe
 
 | Session | Work | Done when |
 |---|---|---|
-| S5.1 Voice and tooling | AI personality file (`content/ai-lines/_personality.md`) for M.A.R.G.O. ("Margo"): history, voice rules, do's and don'ts, 50 sample lines across categories. Line schema (id, category, conditions, weight, slots, priority). Slot system with fallbacks. Near-duplicate checker that treats slot variants as one line (slot-normalized n-gram similarity plus edit distance). | **Eric approves the voice sample before any bulk writing.** Checker flags a planted near-duplicate. |
+| S5.1 Voice and tooling | (Personality file and 50-line sample are done in S2.10; review them here.) AI personality file (`content/ai-lines/_personality.md`) for M.A.R.G.O. ("Margo"): history, voice rules, do's and don'ts, 50 sample lines across categories. Line schema (id, category, conditions, weight, slots, priority). Slot system with fallbacks. Near-duplicate checker that treats slot variants as one line (slot-normalized n-gram similarity plus edit distance). | **Eric approves the voice sample before any bulk writing.** Checker flags a planted near-duplicate. |
 | S5.2 Selector | Triggers from bus events, condition matching, weights, no-repeat tracking (hard rule: never within a run; prefer unheard, then heard longest ago, across the meta-profile), priority queue with stale-drop, calm-period pacing (one line per 30 to 90 seconds), no talking over important events. When nothing eligible is left, stay silent rather than repeat. | Unit tests for every selection rule. |
-| S5.3 Trust and behavior | AI trust and opinions; arguing before risky orders (risk detector: venting an occupied room, jettisoning crew, etc.); limited refusals per run; captain's override (hits trust and crew opinion); withholding and lying hooks (low trust, protecting a liked crew member, damaged core); glitch rendering for a damaged core. | Each behavior reachable via debug panel and seen in bot runs. |
+| S5.3 Trust and behavior | Builds on S2.10 (trust, risk detector, arguing, refusals and override already exist): AI opinions of each crew member; override effects on crew opinion; withholding and lying hooks (low trust, protecting a liked crew member, damaged core); glitch rendering for a damaged core. | Each behavior reachable via debug panel and seen in bot runs. |
 | S5.4 to S5.7 Lines, 1,000 | Four writing sessions of about 250 lines each, in batches of 50 to 100 per category, running the checker after every batch. Allocation in §3. Remove all Stage 1 placeholder lines. | Checker shows the S5 column of §3 met, zero near-duplicates, zero placeholders. |
 | S5.8 Bot v5 | Bot reports repeated AI lines within a run (must be 0), across runs, and lines per minute in calm vs crisis. | Stage exit checks. |
 
@@ -129,10 +136,10 @@ Session counts are estimates. A stage is done when its exit checks pass, not whe
 
 | Session | Work | Done when |
 |---|---|---|
-| S6.1 Creature agent | Vent network finalized in ship data; creature moves through rooms and vents; states (hiding, stalking, hunting, feeding, fleeing); senses (noise, light, movement, heat) read from room state; door breaking (weak doors). | Debug view shows creature state and what it currently senses. |
+| S6.1 Creature agent | Creature moves through rooms, the S2.6 service crawlways (shared with engineers) and creature-only ducts; states (hiding, stalking, hunting, feeding, fleeing); senses (noise, light, movement, heat) read from S2.7's signature model; door breaking (weak doors). | Debug view shows creature state and what it currently senses. |
 | S6.2 Types and sources | **3 creature types** as data (sound hunter that hates light; mimic of a crew member; infection spreader). Sources: specimen breach, port/derelict stowaway, infected survivor or crew transformation, crawl-in through a breach. About half of runs get a threat. | Bot report shows threat rate near 50% and each type appearing. |
-| S6.3 Fighting back | Locking and channeling, cutting lights, venting, noise lures, vent grilles, fire flush, jettison; crew reactions by trait and stress (hunt, hide, panic, refuse); crew killed or taken. | Each countermeasure can end or contain a threat in a scripted test. |
-| S6.4 Information | Creature only visible to crew sight, sensors, or AI report; pulsing last-seen marker, sensor static; AI reports that can be uncertain or wrong (sensor damage, trust, core damage). Placeholder flicker, heartbeat, vent scratching patches. Auto-pause on sighting. | A player can catch the AI being wrong by cross-checking sensors. |
+| S6.3 Fighting back | Locking and channeling, cutting lights, venting, noise lures, crawlway hatches (block the creature and engineers alike), fire flush, jettison; crew reactions by trait and stress (hunt, hide, panic, refuse); crew killed or taken. | Each countermeasure can end or contain a threat in a scripted test. |
+| S6.4 Information | Creature only visible to crew sight, sensors, or AI report, using S2.7's fog and static; pulsing last-seen marker, sensor static; AI reports that can be uncertain or wrong (sensor damage, trust, core damage). Placeholder flicker, heartbeat, vent scratching patches. Auto-pause on sighting. | A player can catch the AI being wrong by cross-checking sensors. |
 | S6.5 Specimens and content | **Specimen haul** contract (5th type). **+15 threat events.** AI lines: 150 creature, 60 sensor, 20 arguments, 20 contract-specific. | Checker shows S6 column met. |
 | S6.6 Bot v6 and perf | Bot reports threat frequency and how threats end. Performance check: full ship + all crew + fire + active creature. | Stage exit checks. |
 
@@ -145,7 +152,7 @@ Session counts are estimates. A stage is done when its exit checks pass, not whe
 |---|---|---|
 | S7.1 Goods and markets | **20+ goods**, per-port supply and demand, drifting prices, market UI, cargo space shared with contract cargo and survivors. | Buying low and selling high is possible and visible. |
 | S7.2 Market events and money | Outbreak, blockade and war effects on prices and bans; black markets; contraband by controlling faction; crew wages (unpaid crew lose morale and remember it). | Bot report shows event-driven price swings. |
-| S7.3 Inspections | Hidden compartments (upgrade), bribes, negotiation (crew skill), fighting; checkpoints on the map. | All four inspection outcomes reachable. |
+| S7.3 Inspections | Hiding crates in the S2.8 hold, hidden compartments (upgrade), bribes, negotiation (crew skill), fighting; checkpoints on the map. | All four inspection outcomes reachable. |
 | S7.4 Factions and memory | Full faction writeups (names, look, values, buys/bans, smuggler policy, ship types, voice); reputation plus deed records; per-port memory (dockmaster, bar); rep effects on prices, contracts offered, inspections, patrol hostility, recruits, dialogue. Shipyard with the full upgrade list from brief §6. | Two runs with opposite rep get visibly different ports. |
 | S7.5 Content | **+25 events.** AI lines: 60 port arrival, 60 trade, 60 cargo, 40 contract-specific. Faction and port greeting variants. | Checker shows S7 column met. |
 | S7.6 Bot v7 | Money and reputation curves; compare a "trader" bot strategy against a "contracts only" one to prove the economy changes outcomes. | Stage exit checks. |
@@ -193,7 +200,7 @@ Session counts are estimates. A stage is done when its exit checks pass, not whe
 
 | Session | Work |
 |---|---|
-| S11.1 Look | Worn metal, company stencils, cables, condensation, flickering panels; fire, smoke, sparks, frost; animated crew silhouettes; subtle scanlines/CRT glow with an off switch. |
+| S11.1 Look | Finish the look S2.6 started (monitor frame, stencils): worn metal, company stencils, cables, condensation, flickering panels; fire, smoke, sparks, frost; animated crew silhouettes; subtle scanlines/CRT glow with an off switch. |
 | S11.2 Sound | Real sound design of the patch library: hum, alarms, UI, AI voice blip, creature, music pads. One short session max per sound. |
 | S11.3 Juice and accessibility | Screen shake, impact flashes, pulsing alarm borders, heartbeat vignette; text size, reduce flicker/shake, colorblind-safe alarms (shape + icon), pause always available. |
 | S11.4 Tutorial | A short guided first contract that teaches pause, power, doors, crew, map, port. |
@@ -276,7 +283,7 @@ The content checker and autoplay bot exist from S1.1 and gain a capability every
 | 3 | DSL validation, event/contract/port/faction references | Full runs end to end | 100 runs |
 | 4 | Traits, crew pools, memory templates | Runs with crew behavior; mutiny and refusal metrics | 100 runs |
 | 5 | AI line schema, slots, coverage report, near-duplicate detection | AI repeat counts in and across runs; lines per minute | 100 runs |
-| 6 | Creature types, vent graph validity | Threat frequency and outcomes; creature stuck detection | 100 runs |
+| 6 | Creature types, crawlway and duct graph validity | Threat frequency and outcomes; creature stuck detection | 100 runs |
 | 7 | Goods, markets, faction bans | Money and rep curves; two strategies compared | 100 runs × 2 |
 | 8 | Scenes (graph validity, unreachable nodes) | Scene availability coverage; traitor rate | 100 runs |
 | 9 | Unlocks, meta-profile schema | Chained runs on one profile | 100 chained runs |
@@ -311,10 +318,10 @@ S1 ship sim ─► S2 combat ─► S3 run structure ─┬─► S4 crew depth 
 | iPad performance discovered too late | Perf check at the end of Stages 1, 6 and 11 against a throttled profile, plus real-device checks by Eric. |
 | Pause semantics leak (something moves while paused) | Unit test on the paused state hash from S1.2, extended every time a system is added. |
 | Saves break between stages | Versioned schema and migrations from S3.6; a saved fixture from each stage is replayed in tests. |
-| Looking like another game | Brief §3 anti-goals reviewed at every stage note; no borrowed names, UI layouts or exact rules. |
+| Looking like another game | Brief §3 anti-goals reviewed at every stage note; no borrowed names, UI layouts or exact rules. Stage 2 was rebuilt for this after S2.3 (D-070). |
 
 ---
 
 ## 7. Rough size
 
-About 75 sessions in total: Stage 1 (7), 2 (5), 3 (7), 4 (6), 5 (8), 6 (6), 7 (6), 8 (6), 9 (4), 10 (13), 11 (7). Stages 1 to 3 (about 19 sessions) give a playable run loop; Stages 1 to 6 (about 39) give the full core experience with placeholder art and sound.
+About 80 sessions in total: Stage 1 (7), 2 (10), 3 (7), 4 (6), 5 (8), 6 (6), 7 (6), 8 (6), 9 (4), 10 (13), 11 (7). Stages 1 to 3 (about 24 sessions) give a playable run loop; Stages 1 to 6 (about 44) give the full core experience with placeholder art and sound.
