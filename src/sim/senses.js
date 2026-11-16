@@ -30,7 +30,7 @@
 
 import { isHome } from './crew.js';
 import { liftRuns } from './power.js';
-import { rating, reactorLoad, running } from './stations.js';
+import { loadOf, rating, reactorLoad, running } from './stations.js';
 
 export { reactorLoad };
 
@@ -140,9 +140,11 @@ function steadyNoise(ship, room, people, load) {
   if (system && !system.lost) {
     if (room.system === 'reactor') level = Math.max(level, NOISE.reactor * load);
     else if (running(ship, room.system)) {
-      level = Math.max(level, NOISE.hum);
+      // A station Margo runs quiet hums quieter, and one she pushes louder (H.5, D-189).
+      const manner = loadOf(ship, room.system);
+      level = Math.max(level, Math.min(1, NOISE.hum * manner));
       if (room.system === 'engines') level = Math.max(level, NOISE.drive * burn(ship));
-      if (room.system === 'sensors') level = Math.max(level, NOISE.sensors);
+      if (room.system === 'sensors') level = Math.max(level, Math.min(1, NOISE.sensors * manner));
     }
   }
   if (room.kind === 'lift' && liftRuns(ship)) level = Math.max(level, NOISE.lift);
@@ -176,7 +178,7 @@ export function sense(ship, roomId, people = living(ship, roomId), load = reacto
   const system = room.system ? ship.state.systems[room.system] : null;
   let heat = Math.max(0, r.temperature - 20) / 200 + 0.15 * people.length;
   if (system && !system.lost) {
-    if (room.system !== 'reactor' && running(ship, room.system)) heat += 0.12;
+    if (room.system !== 'reactor' && running(ship, room.system)) heat += 0.12 * loadOf(ship, room.system);
     if (room.system === 'reactor') heat += 0.5 * load;
     if (room.system === 'engines') heat += 0.5 * burn(ship);
   }

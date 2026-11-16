@@ -55,7 +55,7 @@ import { eventView } from '../src/narrative/events.js';
 import { findBadNumbers, hashState } from '../src/engine/hash.js';
 import { createRng } from '../src/engine/rng.js';
 import { OUTPUT_LEVELS } from '../src/sim/power.js';
-import { POSTS, STATION_IDS, rating, running } from '../src/sim/stations.js';
+import { COVER_IDS, MANNER_IDS, MANNER_STATIONS, POSTS, STATION_IDS, rating, running } from '../src/sim/stations.js';
 import { gunSlot, ourCrew } from '../src/sim/combat.js';
 import { roundsInHold } from '../src/sim/hold.js';
 import { MANUAL_DOOR_SECONDS, TICK_RATE, TICK_SECONDS, checkInvariants, createSim } from '../src/sim/sim.js';
@@ -104,7 +104,7 @@ const MAX_DOOR_TICKS = Math.ceil(MANUAL_DOOR_SECONDS * TICK_RATE) + 3;
 
 /** Play one run to the end. Returns its stats, or throws on any failure. */
 function playRun(seed) {
-  const sim = createSim({ seed, ship, crew: roster, watches: 2, lines, weapons, rules: ruleSet, encounters: encounterDefs });
+  const sim = createSim({ seed, ship, crew: roster, watches: 2, margo: 'own', lines, weapons, rules: ruleSet, encounters: encounterDefs });
   const clock = createClock({ sim, tickSeconds: TICK_SECONDS });
   // The bot's own dice, kept apart from the sim's so its choices are not part of the game state.
   const bot = createRng(`bot:${seed}`);
@@ -235,12 +235,15 @@ function playRun(seed) {
       } else {
         // The switches and the watch bill (H.4): stand a station down or to, post someone, turn the reactor up or down.
         const pick = bot.next();
-        if (pick < 0.5) order({ type: 'station.stand', station: bot.pick(STATION_IDS), down: bot.chance(0.45) });
-        else if (pick < 0.7) order({ type: 'crew.post', crew: bot.pick(ourCrew(sim)).member.id, station: bot.chance(0.15) ? null : bot.pick(POSTS) });
-        else if (pick < 0.8) order({ type: 'power.output', level: bot.pick(OUTPUT_LEVELS) });
-        else if (pick < 0.86) order({ type: 'power.lift', on: bot.chance(0.6) });
-        else if (pick < 0.9) order({ type: 'roster.watches', count: bot.pick([1, 2, 3]) });
-        else if (pick < 0.95) order({ type: 'crew.watch', crew: bot.pick(ourCrew(sim)).member.id, watch: bot.between(0, 2) });
+        // Margo's say over a station (H.5): hand it to her, keep it for the crew, or tell her how to run it.
+        if (pick < 0.45) order({ type: 'station.stand', station: bot.pick(STATION_IDS), down: bot.chance(0.45) });
+        else if (pick < 0.62) order({ type: 'crew.post', crew: bot.pick(ourCrew(sim)).member.id, station: bot.chance(0.15) ? null : bot.pick(POSTS) });
+        else if (pick < 0.7) order({ type: 'station.cover', station: bot.pick(POSTS), cover: bot.pick(COVER_IDS) });
+        else if (pick < 0.78) order({ type: 'station.order', station: bot.pick(MANNER_STATIONS), manner: bot.chance(0.3) ? null : bot.pick(MANNER_IDS) });
+        else if (pick < 0.85) order({ type: 'power.output', level: bot.pick(OUTPUT_LEVELS) });
+        else if (pick < 0.89) order({ type: 'power.lift', on: bot.chance(0.6) });
+        else if (pick < 0.92) order({ type: 'roster.watches', count: bot.pick([1, 2, 3]) });
+        else if (pick < 0.96) order({ type: 'crew.watch', crew: bot.pick(ourCrew(sim)).member.id, watch: bot.between(0, 2) });
         else order({ type: 'roster.muster' });
       }
     } else if (roll < 0.32) {
@@ -285,7 +288,9 @@ function playRun(seed) {
     if (clock.paused) {
       const ran = clock.advance(TICK_SECONDS);
       if (ran !== 0) throw new Error(`clock ran ${ran} tick(s) while paused`);
-      if (liveHash() !== pausedHash) throw new Error(`state changed while paused at tick ${sim.state.tick}`);
+      // Checked every eighth paused frame and on the last one before it resumes (DF-15: hashing every frame was
+      // a sixth of the bot's time); anything that moved while paused is still moved by then.
+      if ((pausedFor % 8 === 0 || pausedFor <= 1) && liveHash() !== pausedHash) throw new Error(`state changed while paused at tick ${sim.state.tick}`);
       if (--pausedFor <= 0) clock.resume();
       continue;
     }
@@ -381,7 +386,7 @@ const INCOMING_SECONDS = 120;
  * leaves the doors alone. A mended system runs again by itself (H.4). Returns how it went, or throws on any failure.
  */
 function playScenario(seed, { incoming = false } = {}) {
-  const sim = createSim({ seed, ship, crew: roster, watches: 2, lines, weapons, rules: ruleSet });
+  const sim = createSim({ seed, ship, crew: roster, watches: 2, margo: 'own', lines, weapons, rules: ruleSet });
   const bot = createRng(`${incoming ? 'incoming' : 'scenario'}:${seed}`);
   const watch = stuckWatch(sim);
   const rooms = bot.shuffle(sim.layout.rooms.map((room) => room.id));
@@ -484,6 +489,8 @@ function playScenario(seed, { incoming = false } = {}) {
 }
 
 const CROSSING_MINUTES = 30;
+/** Who runs the ship on a crossing, in turn (H.5): the crew; Margo, her way; the crew again; Margo, ordered by the book. */
+const MARGO_MODES = Object.freeze(['crew', 'margo', 'crew', 'book']);
 /** The chance the crossing bot turns off its route for a port a lane away, when it can spare the fuel and the jump. */
 const DETOUR_CHANCE = 0.3;
 
@@ -495,12 +502,24 @@ function playCrossing(seed, index) {
   // The board for this seed, and the contract of the type whose turn it is (S3.4).
   const offers = boardOffers(contractTemplates, { seed });
   const offer = offers[index % offers.length];
-  const sim = createSim({ seed, ship, crew: roster, watches: 2, lines, weapons, rules: ruleSet, events: transitEvents, sector: sectorDef, contract: offer.template, ports, encounters: encounterDefs, run: { pursuit: offer.followed } });
+  const sim = createSim({ seed, ship, crew: roster, watches: 2, margo: 'own', lines, weapons, rules: ruleSet, events: transitEvents, sector: sectorDef, contract: offer.template, ports, encounters: encounterDefs, run: { pursuit: offer.followed } });
   const bot = createRng(`crossing:${seed}`);
+  // Who runs the ship (H.5): the crew at their posts on half the crossings; on the other half every station is
+  // handed to Margo, left to her own way on one quarter and ordered run by the book on the last.
+  const crewMode = MARGO_MODES[index % MARGO_MODES.length];
+  if (crewMode !== 'crew') {
+    for (const station of POSTS) sim.enqueue({ type: 'station.cover', station, cover: 'hers' });
+    if (crewMode === 'book') for (const station of MANNER_STATIONS) sim.enqueue({ type: 'station.order', station, manner: 'book' });
+    // Every other by-the-book crossing starts with her trust low, to see her run things her own way.
+    if (crewMode === 'book' && index % (2 * MARGO_MODES.length) >= MARGO_MODES.length) sim.enqueue({ type: 'debug.ai', trust: 30 });
+  }
   const { run } = sim.state;
   const contract = run.contract;
   const end = CROSSING_MINUTES * 60 * TICK_RATE;
-  const tally = { caught: 0, escapes: 0, detours: 0, sighted: 0, lines: 0, outcomes: {}, events: 0, lapsed: 0, eventContacts: 0, shots: 0, braces: 0, tolls: 0, hooks: 0, met: {}, picked: {}, locked: 0, offered: 0, inspections: 0, seized: 0, fuelBought: 0, fuelSpent: 0, repairSpent: 0, claimLeft: false, contacts: {}, contactKinds: {}, boardings: {}, staff: { crew: 0, margo: 0, dark: 0, well: 0, samples: 0 }, tired: 0, watchChanges: 0 };
+  const tally = { caught: 0, escapes: 0, detours: 0, sighted: 0, lines: 0, outcomes: {}, events: 0, lapsed: 0, eventContacts: 0, shots: 0, braces: 0, tolls: 0, hooks: 0, met: {}, picked: {}, locked: 0, offered: 0, inspections: 0, seized: 0, fuelBought: 0, fuelSpent: 0, repairSpent: 0, claimLeft: false, contacts: {}, contactKinds: {}, boardings: {}, staff: { crew: 0, margo: 0, dark: 0, well: 0, samples: 0 }, tired: 0, watchChanges: 0, mode: crewMode, margo: { quiet: 0, book: 0, push: 0, rating: 0, held: 0, samples: 0, hunted: 0, found: 0, stretched: 0, ownWay: 0, doubt: 0, changes: 0 } };
+  sim.events.on('margo.own_way', () => (tally.margo.ownWay += 1));
+  sim.events.on('margo.doubt', () => (tally.margo.doubt += 1));
+  sim.events.on('margo.manner', (event) => event.why !== 'order' && (tally.margo.changes += 1));
   sim.events.on('watch.changed', () => (tally.watchChanges += 1));
   sim.events.on('cargo.seized', () => (tally.seized += 1));
   sim.events.on('port.refueled', (event) => {
@@ -660,7 +679,18 @@ function playCrossing(seed, index) {
         tally.staff[by === null ? 'dark' : by === 'margo' ? 'margo' : 'crew'] += 1;
         if (rating(sim, id) > 1) tally.staff.well += 1;
         tally.staff.samples += 1;
+        // How Margo ran what she held (H.5).
+        if (by === 'margo' && MANNER_STATIONS.includes(id)) {
+          tally.margo[sim.state.stations[id].runs] += 1;
+          tally.margo.rating += rating(sim, id);
+          tally.margo.held += 1;
+        }
       }
+      const { ai } = sim.state;
+      tally.margo.samples += 1;
+      if (ai.alert === 'hunted') tally.margo.hunted += 1;
+      if (ai.alert === 'found') tally.margo.found += 1;
+      if (ai.stretched) tally.margo.stretched += 1;
       tally.tired = Math.max(tally.tired, ...ourCrew(sim).map(({ member }) => (member.alive ? member.fatigue : 0)));
     }
   }
@@ -678,6 +708,8 @@ function playCrossing(seed, index) {
     late: run.late,
     lost,
     crewDead,
+    dead: ourCrew(sim).filter(({ member }) => !member.alive).length,
+    trust: sim.state.ai.trust,
     stranded: !run.delivered && !lost && !crewDead,
     type: contract.type,
     status: contract.status,
@@ -709,7 +741,7 @@ const TACTICS = Object.freeze(['nothing', 'quiet', 'run', 'flare', 'crate', 'blu
  *   pay   pay a toll when one is called; otherwise sit tight (a party's price at the lock is the boardings' bribe)
  */
 function playEncounter(seed, def, tactic) {
-  const sim = createSim({ seed, ship, crew: roster, watches: 2, lines, weapons, rules: ruleSet, encounters: encounterDefs });
+  const sim = createSim({ seed, ship, crew: roster, watches: 2, margo: 'own', lines, weapons, rules: ruleSet, encounters: encounterDefs });
   const bot = createRng(`encounter:${def.id}:${tactic}:${seed}`);
   const end = ENCOUNTER_MINUTES * 60 * TICK_RATE;
   const give = (command) => !sim.whyNot(command) && sim.enqueue(command);
@@ -823,7 +855,7 @@ const ANSWERS = Object.freeze(['nothing', 'bribe', 'yield', 'hide', 'fight', 've
  * still aboard after its demand, its stay and its leaving are all up.
  */
 function playBoarding(seed, def, answer) {
-  const sim = createSim({ seed, ship, crew: roster, watches: 2, lines, weapons, rules: ruleSet, encounters: encounterDefs });
+  const sim = createSim({ seed, ship, crew: roster, watches: 2, margo: 'own', lines, weapons, rules: ruleSet, encounters: encounterDefs });
   sim.state.money = 500;
   // Something for an inspection to find.
   const smuggled = Object.values(sim.state.crates).find((crate) => crate.label.includes('7731-D'));
@@ -984,7 +1016,7 @@ out.push(`  incoming per run:  ${per(totals.incoming)} rounds and zaps at us: ${
 out.push(`  boarders per run:  ${per(totals.boardedUs)} came aboard, ${per(totals.melee)} killed hand to hand`);
 out.push(`  contact endings:   ${Object.keys(ENDINGS).map((k) => `${ENDINGS[k].toLowerCase()} ${chaosEndings[k] ?? 0}`).join(', ')}`);
 out.push(`  AI lines per run:  ${per(totals.said)} (about one every ${totals.said ? Math.round((runs * minutes * 60) / totals.said) : 0} seconds)`);
-out.push(`  pauses per run:    ${per(totals.pauses)} (state checked every paused frame)`);
+out.push(`  pauses per run:    ${per(totals.pauses)} (state checked every eighth paused frame and the last)`);
 out.push('');
 out.push(`Hazard scenarios (${SCENARIO_MINUTES} game minutes each): fires and breaches at once, and a bot trying to save the ship`);
 out.push(`  completed:         ${scenarios.length} of ${runs}`);
@@ -1085,6 +1117,25 @@ for (const tactic of TACTICS) {
   out.push(`Stations and shifts (H.4): two watches on the crossings, ${POSTS.length} stations for ${roster.length} crew`);
   out.push(`  who had them:      crew ${pct(staff.crew, staff.samples)}, Margo ${pct(staff.margo, staff.samples)}, dark ${pct(staff.dark, staff.samples)} of station time; run better than the book ${pct(staff.well, staff.samples)}`);
   out.push(`  the watch:         ${mean(crossings.map((c) => c.watchChanges)).toFixed(1)} changes a crossing; the most tired hand reached ${Math.round(100 * mean(crossings.map((c) => c.tired)))}% on average (worst ${Math.round(100 * Math.max(...crossings.map((c) => c.tired)))}%)`);
+}
+{
+  // Margo runs what nobody mans (H.5): the crossings side by side, by who ran the ship, and what she did with it.
+  out.push(`Margo runs what nobody mans (H.5): the crossings by who ran the ship`);
+  for (const mode of ['crew', 'margo', 'book']) {
+    const of = crossings.filter((c) => c.mode === mode);
+    if (!of.length) continue;
+    const met = of.reduce((n, c) => n + Object.values(c.contacts).reduce((a, b) => a + b, 0), 0);
+    const docked = of.reduce((n, c) => n + (c.contacts.docked ?? 0), 0);
+    const label = { crew: 'crew at posts', margo: 'all to Margo', book: 'Margo, by book' }[mode];
+    out.push(`  ${label.padEnd(17)}  ${of.length} crossings: delivered ${pct(of.filter((c) => c.delivered).length, of.length)}, ship lost ${of.filter((c) => c.lost).length}; ${mean(of.map((c) => c.minutes)).toFixed(1)} min and ${mean(of.map((c) => c.jumps)).toFixed(1)} jumps; ${met} contacts, ${pct(docked, met)} docked with us; ${mean(of.map((c) => c.dead)).toFixed(1)} crew dead; trust ends at ${mean(of.map((c) => c.trust)).toFixed(0)}`);
+  }
+  const her = crossings.reduce((sum, c) => {
+    for (const key of Object.keys(sum)) sum[key] += c.margo[key];
+    return sum;
+  }, { quiet: 0, book: 0, push: 0, rating: 0, held: 0, samples: 0, hunted: 0, found: 0, stretched: 0, ownWay: 0, doubt: 0, changes: 0 });
+  out.push(`  her choices:       of the station time she held, quiet ${pct(her.quiet, her.held)}, by the book ${pct(her.book, her.held)}, pushed ${pct(her.push, her.held)}; her stations ran at ${(her.rating / Math.max(1, her.held)).toFixed(2)} on average`);
+  out.push(`  her picture:       something hunting us ${pct(her.hunted, her.samples)} and on us ${pct(her.found, her.samples)} of the time; more to watch than she could ${pct(her.stretched, her.samples)}; ${(her.changes / Math.max(1, crossings.length)).toFixed(1)} changes of her own a crossing`);
+  out.push(`  her orders:        on the by-the-book crossings (half of them begun at trust 30) she ran a station her own way ${crossings.reduce((n, c) => n + c.margo.ownWay, 0)} times and said she would not ${crossings.reduce((n, c) => n + c.margo.doubt, 0)} times`);
 }
 out.push(`Guns as deterrents (H.3): the same encounters, by what was fired and what it did`);
 for (const def of encounterDefs) {

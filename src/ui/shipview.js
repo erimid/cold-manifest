@@ -30,7 +30,7 @@ import { BLUFFS, ENDINGS, bluffChance, findContact, scopeView, whyNoHail, whyNoP
 import { describeJob, magazineOf, pickHand, roundsInHold } from '../sim/hold.js';
 import { nerveWord, topMemory } from '../sim/memory.js';
 import { OUTPUT, OUTPUT_LEVELS, POWERED, aiCoreStatus, litRooms, outputLimit } from '../sim/power.js';
-import { POSTS, STATIONS, STATION_IDS, holderOf, rating, reactorLoad, roomOfStation, running, stationOfRoom } from '../sim/stations.js';
+import { COVERS, COVER_IDS, MANNERS, MANNER_IDS, MANNER_STATIONS, POSTS, STATIONS, STATION_IDS, holderOf, margoLoad, rating, reactorLoad, roomOfStation, running, stationOfRoom } from '../sim/stations.js';
 import { onWatch, tiredWord, watchLeft, watchName } from '../sim/watches.js';
 import { roomView, sensorsUp, signature, unseen } from '../sim/senses.js';
 import { SPACE, SYSTEMS } from '../sim/systems.js';
@@ -427,11 +427,20 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
       const who = el('span', { class: 'station__who' });
       const rate = el('span', { class: 'station__rating' });
       const stand = el('button', { class: 'btn station__stand', type: 'button', id: `btn-stand-${id}`, 'aria-label': `Stand ${STATIONS[id].name} down or to`, press: () => order({ type: 'station.stand', station: id, down: !sim.state.stations[id].down }) }, 'On');
-      const node = el('div', { class: 'station', id: `station-${id}`, title: STATIONS[id].blurb }, el('div', { class: 'station__name' }, STATIONS[id].name), el('div', { class: 'station__line' }, who, rate), stand);
+      // The name picks the station for Margo's row above (H.5): who runs it with nobody on it, and how she runs it.
+      // The name and the line under it are one button, so the tile is no taller than it was.
+      const pick = el('button', { class: 'station__pick', type: 'button', id: `btn-station-${id}`, 'aria-pressed': 'false', 'aria-label': `${STATIONS[id].name}: what Margo does with it`, press: () => pickStation(id) }, el('span', { class: 'station__name' }, STATIONS[id].name), el('span', { class: 'station__line' }, who, rate));
+      const node = el('div', { class: 'station', id: `station-${id}`, title: STATIONS[id].blurb }, pick, stand);
       const lamp = el('i', { class: 'pip' });
       const mini = el('div', { class: 'power__mini', id: `power-mini-${id}` }, el('span', {}, STATIONS[id].system ? SYSTEMS[STATIONS[id].system].code : 'HLM'), el('span', { class: 'power__minipips' }, lamp));
-      return { id, node, who, rate, stand, lamp, mini };
+      return { id, node, pick, who, rate, stand, lamp, mini };
     });
+    // Margo's row (H.5, D-187, D-189): for the picked station, who runs it with nobody on it, and her standing order.
+    const margoName = el('span', { class: 'stencil power__rowname', id: 'margo-station' }, 'Margo');
+    const covers = COVER_IDS.map((cover) => ({ cover, node: button(`btn-cover-${cover}`, COVERS[cover].name, () => power.picked && order({ type: 'station.cover', station: power.picked, cover })) }));
+    const manners = [null, ...MANNER_IDS].map((manner) => ({ manner, node: button(`btn-manner-${manner ?? 'own'}`, manner ? MANNERS[manner].name : 'Her way', () => power.picked && order({ type: 'station.order', station: power.picked, manner })) }));
+    const margoNote = el('div', { class: 'power__margonote', id: 'margo-note' });
+    const margoRow = el('div', { class: 'power__row power__margo', id: 'switch-margo' }, margoName, covers.map((c) => c.node), el('span', { class: 'power__gap' }), manners.map((m) => m.node), margoNote);
     const watchNote = el('div', { class: 'power__watch', id: 'watch-note' });
     const watches = [1, 2, 3].map((count) => ({ count, node: button(`btn-watches-${count}`, count === 1 ? 'All hands' : `${count} watches`, () => order({ type: 'roster.watches', count })) }));
     const muster = button('btn-muster', 'To stations', () => order({ type: 'roster.muster' }));
@@ -445,11 +454,12 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
         el('div', { class: 'power__row', id: 'switch-output' }, el('span', { class: 'stencil power__rowname' }, 'Reactor'), outputs.map((o) => o.node)),
         el('div', { class: 'power__row', id: 'switch-lights' }, el('span', { class: 'stencil power__rowname' }, 'Lights'), decks.map((d) => d.node), allLights, lift),
         el('div', { class: 'power__row', id: 'switch-watch' }, el('span', { class: 'stencil power__rowname' }, 'Watch'), watches.map((w) => w.node), muster),
+        margoRow,
       ),
       el('div', { class: 'power__stations', id: 'stations' }, tiles.map((t) => t.node)),
     );
     const folded = el('div', { class: 'power__folded', id: 'breakers-folded' }, tiles.map((t) => t.mini));
-    power = { summary, lights, load, outputs, decks, allLights, lift, tiles, watchNote, watches, muster, toggle, board, folded, open: false, node: null };
+    power = { summary, lights, load, outputs, decks, allLights, lift, tiles, watchNote, watches, muster, toggle, board, folded, margoRow, margoName, covers, manners, margoNote, picked: null, open: false, node: null };
     power.node = el(
       'div',
       { class: 'panel power breakers is-closed', id: 'power' },
@@ -471,12 +481,33 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
     setText(power.toggle.firstChild, open ? 'Fold' : 'Switches');
   }
 
+  /** Pick the station the Margo row is about; picked again, the row folds away. */
+  function pickStation(id) {
+    power.picked = power.picked === id ? null : id;
+    updatePower();
+  }
+
   /** Who has a station, in a word or two. */
   function holderText(id) {
     const by = holderOf(sim, id);
-    if (by === null) return sim.state.stations[id].down ? 'Stood down' : 'Dark';
+    if (by === null) return sim.state.stations[id].down ? 'Stood down' : sim.state.stations[id].cover === 'crew' ? 'Crew only' : 'Dark';
     if (id === 'ai_core') return 'Margo';
-    return by === 'margo' ? 'Margo' : (sim.state.crew[by]?.name ?? by);
+    if (by !== 'margo') return sim.state.crew[by]?.name ?? by;
+    const runs = sim.state.stations[id].runs;
+    return MANNER_STATIONS.includes(id) && runs !== 'book' ? `Margo, ${MANNERS[runs].say}` : 'Margo';
+  }
+
+  /** Why Margo is running a station the way she is, in a sentence. */
+  const WHY = { air: 'the air is thin somewhere', hurt: 'someone hurt is in the medbay', boarded: 'there are boarders aboard', hunted: 'something out there is looking for us', found: 'something out there has found us', calm: 'nothing is coming, so she keeps it cool' };
+  function margoText(id) {
+    const entry = sim.state.stations[id];
+    const by = holderOf(sim, id);
+    const order = entry.order ? `Her order: ${MANNERS[entry.order].say}.` : 'Left to her.';
+    if (by !== 'margo') return `${order} ${by ? 'A hand is on it: it runs their way.' : entry.cover === 'crew' ? 'Kept for the crew: dark with nobody on it.' : 'It is dark.'}`;
+    const how = `Running it ${MANNERS[entry.runs].say}`;
+    if (entry.against === 'own') return `${order} ${how}, her own way: ${WHY[entry.why] ?? 'she has her reasons'}.`;
+    if (entry.against === 'doubt') return `${order} ${how}, as ordered, though she would not.`;
+    return `${order} ${how}${entry.why && entry.why !== 'order' ? `: ${WHY[entry.why]}` : ''}.`;
   }
 
   function updatePower() {
@@ -530,6 +561,33 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
       node.classList.toggle('is-on', roster.watches === count);
       node.setAttribute('aria-pressed', String(roster.watches === count));
     }
+    // Margo's row, for the picked station: only while one is picked, so the panel is no taller than it need be.
+    const picked = power.picked;
+    for (const tile of power.tiles) {
+      tile.node.classList.toggle('is-picked', tile.id === picked);
+      tile.pick.setAttribute('aria-pressed', String(tile.id === picked));
+    }
+    power.margoRow.hidden = !picked;
+    if (!picked) return;
+    const entry = sim.state.stations[picked];
+    const load = margoLoad(sim);
+    setText(power.margoName, `Margo · ${STATIONS[picked].name}`);
+    for (const { cover, node } of power.covers) {
+      node.classList.toggle('is-on', entry.cover === cover);
+      node.setAttribute('aria-pressed', String(entry.cover === cover));
+      const why = entry.cover === cover ? null : sim.whyNot({ type: 'station.cover', station: picked, cover });
+      node.classList.toggle('is-blocked', Boolean(why));
+      node.title = why ? sentence(why) : COVERS[cover].blurb;
+    }
+    const mannered = MANNER_STATIONS.includes(picked);
+    for (const { manner, node } of power.manners) {
+      node.hidden = !mannered;
+      node.classList.toggle('is-on', entry.order === manner);
+      node.setAttribute('aria-pressed', String(entry.order === manner));
+      node.title = manner ? MANNERS[manner].blurb : 'Leave it to her judgement.';
+    }
+    const stretched = load.held > load.attention ? ` She has ${load.held} stations and attention for ${Math.floor(load.attention)}.` : '';
+    setText(power.margoNote, `${picked === 'ai_core' ? 'Her own core.' : mannered ? margoText(picked) : 'She keeps the reactor at its output.'}${stretched}`);
   }
 
   // A weapon order names a room on their ship, which may share an id with one of ours.

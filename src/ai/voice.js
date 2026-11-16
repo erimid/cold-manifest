@@ -48,6 +48,17 @@ export const TRIGGERS = Object.freeze({
   // over, and when the reactor drops back from hard because nobody is on it.
   'station.taken': { category: 'order_confirm', priority: 1, ttl: 6, cooldown: 45, chance: 0.6, slots: crewAndRoom },
   'watch.changed': { category: 'idle', priority: 1, ttl: 10 },
+  // Running what nobody mans (H.5, ai/margo.js): a station handed to her or kept from her, the stations she goes
+  // quiet on or pushes on her own judgement, an order she would not have given, one she will not follow, and too
+  // many jobs at once.
+  'station.handed': { category: 'order_confirm', priority: 2, ttl: 8, cooldown: 8, own: true, slots: crewAndRoom },
+  'station.kept': { category: 'order_confirm', priority: 2, ttl: 8, cooldown: 8, own: true, slots: crewAndRoom },
+  'margo.hush': { category: 'order_confirm', priority: 3, ttl: 10, cooldown: 40, own: true, slots: crewAndRoom },
+  'margo.push': { category: 'order_confirm', priority: 3, ttl: 10, cooldown: 30, own: true, slots: crewAndRoom },
+  'margo.easy': { category: 'order_confirm', priority: 1, ttl: 8, cooldown: 60, chance: 0.6, own: true, slots: crewAndRoom },
+  'margo.doubt': { category: 'argument', priority: 3, ttl: 10, cooldown: 30, own: true, slots: crewAndRoom, when: (event) => event.speak },
+  'margo.own_way': { category: 'argument', priority: 4, ttl: 12, cooldown: 20, own: true, slots: crewAndRoom },
+  'margo.stretched': { category: 'order_confirm', priority: 2, ttl: 10, cooldown: 90, own: true },
   'power.output': { category: 'order_confirm', priority: 2, ttl: 8, cooldown: 20, when: (event) => event.reason === 'unmanned' },
   'crew.hurt': { category: 'crew_injury', priority: 3, ttl: 12, cooldown: 15, slots: crewName },
   // A fire or a hole in a room she cannot see into is not news until someone looks (senses.js): then it is "found".

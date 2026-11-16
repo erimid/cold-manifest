@@ -949,6 +949,47 @@ body {
   text-overflow: ellipsis;
 }
 
+/* The name is a button: it picks the station for Margo's row (H.5). */
+.station__pick {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  min-height: var(--tap);
+  min-width: 0;
+  padding: 0;
+  background: none;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.station.is-picked {
+  border-color: var(--amber);
+}
+
+.station.is-picked .station__pick {
+  border-bottom-color: var(--amber);
+}
+
+/* Margo's row: who runs the picked station with nobody on it, her standing order, and what she is doing. */
+.power__gap {
+  width: 8px;
+}
+
+.power__margo[hidden] {
+  display: none;
+}
+
+.power__margonote {
+  flex: 1 1 160px;
+  color: #aab2bf;
+  font-size: 0.8em;
+}
+
 .station__line {
   display: flex;
   justify-content: space-between;

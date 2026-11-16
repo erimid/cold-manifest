@@ -33,7 +33,8 @@ import { ATMOSPHERE_COMMANDS, checkAtmosphereInvariants, stepAtmosphere } from '
 import { COMBAT_COMMANDS, START_MONEY, checkCombatInvariants, newCombatState, stepCombat } from './combat.js';
 import { CREW_COMMANDS, checkCrewInvariants, newCrewState, sendTo, stepCrew } from './crew.js';
 import { POWER_COMMANDS, checkPowerInvariants, newPowerState, newSystemsState, stepPower, whyNoLights } from './power.js';
-import { checkStationInvariants, newStationState, rating, roomOfStation, running, stationCommands, stepStations } from './stations.js';
+import { checkStationInvariants, closeStationTable, newStationState, rating, roomOfStation, running, stationCommands, stepStations } from './stations.js';
+import { attachMargo, checkMargoInvariants, newMargoState, stepMargo } from '../ai/margo.js';
 import { checkWatchInvariants, dealWatches, newRosterState, stepWatches, watchCommands } from './watches.js';
 import { checkSenseInvariants, newSenseState, stepSenses } from './senses.js';
 import { HOLD_COMMANDS, checkHoldInvariants, newHoldState, stepHold } from './hold.js';
@@ -338,8 +339,10 @@ function stepLights(sim) {
 // The guns come after the ship: a round lands on the ship as it now stands.
 // The scope comes after the chart: a jump clears it before any contact moves again.
 // A boarding party (H.2) decides what to do next after the crew have moved, with the ship as it now stands.
+// Margo decides how she runs the stations she holds (ai/margo.js) once they are settled; what she changes
+// takes hold when they are settled again at the end of the tick.
 const WATCH_HOOKS = { send: (sim, member, room) => sendTo(sim, member, room, 'watch'), postRoom: roomOfStation };
-const SYSTEMS = [(sim) => stepCrew(sim, TICK_SECONDS), (sim) => stepWatches(sim, TICK_SECONDS, WATCH_HOOKS), (sim) => stepHold(sim, TICK_SECONDS), (sim) => stepAtmosphere(sim, TICK_SECONDS), stepPower, stepStations, stepDoors, stepLights, (sim) => stepNerve(sim, TICK_SECONDS), (sim) => stepSenses(sim, TICK_SECONDS), (sim) => stepCombat(sim, TICK_SECONDS), (sim) => stepSector(sim, TICK_SECONDS), (sim) => stepEncounters(sim, TICK_SECONDS), (sim) => stepBoarders(sim, TICK_SECONDS), stepPower, stepStations, stepJudgement, stepVoice];
+const SYSTEMS = [(sim) => stepCrew(sim, TICK_SECONDS), (sim) => stepWatches(sim, TICK_SECONDS, WATCH_HOOKS), (sim) => stepHold(sim, TICK_SECONDS), (sim) => stepAtmosphere(sim, TICK_SECONDS), stepPower, stepStations, stepMargo, stepDoors, stepLights, (sim) => stepNerve(sim, TICK_SECONDS), (sim) => stepSenses(sim, TICK_SECONDS), (sim) => stepCombat(sim, TICK_SECONDS), (sim) => stepSector(sim, TICK_SECONDS), (sim) => stepEncounters(sim, TICK_SECONDS), (sim) => stepBoarders(sim, TICK_SECONDS), stepPower, stepStations, stepJudgement, stepVoice];
 
 /**
  * Create a simulation.
@@ -361,8 +364,11 @@ const SYSTEMS = [(sim) => stepCrew(sim, TICK_SECONDS), (sim) => stepWatches(sim,
  *           nothing does, except through the debug command in tests that pass their own
  *   watches how many watches the crew stands (H.4): 1 all hands, 2 or 3. Without it no watch bill is kept:
  *           nobody is walked to a post or a bunk and nobody tires (a bare test sim)
+ *   margo   'own' (H.5): Margo runs the stations nobody is on in her own way, with only so much attention to
+ *           go round. 'book', the default: she runs them all by the book or as ordered, as in H.4 (a bare test sim)
  */
-export function createSim({ seed, ship, crew = [], lines = [], weapons = [], sector = null, run = {}, rules = {}, events = [], contract = null, ports = [], encounters = [], watches = 0 }) {
+export function createSim({ seed, ship, crew = [], lines = [], weapons = [], sector = null, run = {}, rules = {}, events = [], contract = null, ports = [], encounters = [], watches = 0, margo = 'book' }) {
+  if (margo !== 'own' && margo !== 'book') throw new Error(`margo must be 'own' or 'book', not "${margo}"`);
   const layout = buildLayout(ship);
   const weaponById = new Map(weapons.map((item) => [item.id, item]));
   const catalog = {
@@ -403,7 +409,7 @@ export function createSim({ seed, ship, crew = [], lines = [], weapons = [], sec
       reputation: {}, // standing with each faction by id, -10 to 10 (contracts.js); 0 when not there
       cargo: [], // what we have been handed: { name, qty, from }; it also comes aboard as crates (hold.js). Goods become content in Stage 7
       intel: [], // things we have been told: { text, from, tick }
-      ai: newVoiceState(),
+      ai: { ...newVoiceState(), ...newMargoState(margo) }, // her voice, her judgement, and how she runs what nobody mans (ai/margo.js)
       helm: newHelmState(), // our heading, the drive and our velocity (encounters.js)
       scope: newScopeState(), // the contacts around us, and our decoys (encounters.js)
       roster: newRosterState(watches), // the watch bill (watches.js)
@@ -439,6 +445,7 @@ export function createSim({ seed, ship, crew = [], lines = [], weapons = [], sec
     step() {
       const { state } = sim;
       state.tick += 1;
+      sim.stepping = true;
       const orders = state.commands;
       state.commands = [];
       for (const command of orders) {
@@ -457,6 +464,8 @@ export function createSim({ seed, ship, crew = [], lines = [], weapons = [], sec
         sim.events.emit('command.applied', { command, tick: state.tick });
       }
       for (const system of SYSTEMS) system(sim);
+      closeStationTable(sim);
+      sim.stepping = false;
     },
 
     /** Game time in seconds. */
@@ -472,6 +481,7 @@ export function createSim({ seed, ship, crew = [], lines = [], weapons = [], sec
       if (snap.state.ship !== layout.id) throw new Error(`Save is for ship "${snap.state.ship}", not "${layout.id}"`);
       for (const key of Object.keys(sim.state)) delete sim.state[key];
       Object.assign(sim.state, structuredClone(snap.state));
+      sim.stationTable = null; // worked out for another moment (stations.js)
       sim.rng.setState(snap.rng);
     },
   };
@@ -485,6 +495,7 @@ export function createSim({ seed, ship, crew = [], lines = [], weapons = [], sec
   if (watches) dealWatches(sim);
   attachVoice(sim);
   attachJudgement(sim);
+  attachMargo(sim);
   attachMemory(sim);
   attachSector(sim);
   attachEvents(sim);
@@ -530,6 +541,6 @@ function shipProblems(ship) {
 export function checkInvariants(sim) {
   const problems = [];
   if (!Number.isInteger(sim.state.tick) || sim.state.tick < 0) problems.push(`tick is ${sim.state.tick}`);
-  problems.push(...shipProblems(sim), ...checkVoiceInvariants(sim), ...checkJudgementInvariants(sim), ...checkRunInvariants(sim), ...checkEventInvariants(sim), ...checkContractInvariants(sim), ...checkEncounterInvariants(sim), ...checkBoarderInvariants(sim), ...checkStationInvariants(sim), ...checkWatchInvariants(sim));
+  problems.push(...shipProblems(sim), ...checkVoiceInvariants(sim), ...checkJudgementInvariants(sim), ...checkMargoInvariants(sim), ...checkRunInvariants(sim), ...checkEventInvariants(sim), ...checkContractInvariants(sim), ...checkEncounterInvariants(sim), ...checkBoarderInvariants(sim), ...checkStationInvariants(sim), ...checkWatchInvariants(sim));
   return problems;
 }
