@@ -281,6 +281,56 @@ async function touchTests(browser) {
     await doorIs(page, 'd_ai_core', before.state, before.openness);
   });
 
+  await check('venting: opening the airlock from the panel empties the room, closing it lets the air back', async () => {
+    const t = await target(page, 'airlock_cargo');
+    await page.touchscreen.tap(t.mx, t.my);
+    await page.tap('#btn-door-open');
+    await page.waitForFunction(() => window.coldManifest.sim.state.rooms.cargo.oxygen < 0.1, null, { timeout: 8000 });
+    assert.ok((await room(page, 'aft_corridor')).oxygen > 0.9, 'the corridor behind the shut door keeps its air');
+    await page.tap('#btn-door-close');
+    await doorIs(page, 'airlock_cargo', 'closed', 0);
+    const low = (await room(page, 'cargo')).oxygen;
+    await sleep(1500);
+    assert.ok((await room(page, 'cargo')).oxygen > low, 'life support is refilling it');
+  });
+
+  await check('jettison: the first press arms, the second cuts the room loose for good', async () => {
+    // An earlier check left the brig door open; seal the room first.
+    const brigDoor = await target(page, 'd_brig');
+    await page.touchscreen.tap(brigDoor.mx, brigDoor.my);
+    await doorIs(page, 'd_brig', 'closed', 0);
+    const t = await target(page, 'brig');
+    await page.touchscreen.tap(t.mx, t.my);
+    await page.tap('#btn-jettison');
+    await sleep(250);
+    assert.equal((await room(page, 'brig')).jettisoned, false, 'one press does nothing yet');
+    assert.equal(await page.textContent('#btn-jettison'), 'Confirm jettison');
+    assert.match(await page.textContent('#status'), /Everything inside will be lost/);
+    await page.tap('#btn-jettison');
+    await page.waitForFunction(() => window.coldManifest.sim.state.rooms.brig.jettisoned, null, { timeout: 2000 });
+    assert.equal(await page.isDisabled('#btn-jettison'), true);
+    assert.equal(await page.isDisabled('#btn-lights'), true);
+    const d = await target(page, 'd_brig');
+    await page.touchscreen.tap(d.mx, d.my);
+    await sleep(300);
+    assert.deepEqual(await door(page, 'd_brig'), { state: 'locked', openness: 0, sealed: true });
+    assert.match(await page.textContent('#status'), /Welded shut/);
+  });
+
+  await check('jettison: an unsealed room refuses and says why', async () => {
+    const d = await target(page, 'd_door_control');
+    await page.touchscreen.tap(d.mx, d.my);
+    await doorIs(page, 'd_door_control', 'open', 1);
+    const t = await target(page, 'door_control');
+    await page.touchscreen.tap(t.mx, t.my);
+    await page.tap('#btn-jettison');
+    await sleep(200);
+    assert.equal(await page.textContent('#btn-jettison'), 'Jettison');
+    assert.match(await page.textContent('#status'), /Seal it first/);
+    await page.touchscreen.tap(d.mx, d.my);
+    await doorIs(page, 'd_door_control', 'closed', 0);
+  });
+
   await check('tapping open space clears the selection', async () => {
     await page.touchscreen.tap(40, 200);
     assert.equal(await selected(page), null);
@@ -390,14 +440,17 @@ async function desktopTests(browser) {
     await page.click('#btn-dbg-air');
     await page.waitForFunction(() => window.coldManifest.sim.state.rooms.reactor.oxygen < 0.3, null, { timeout: 2000 });
     const r = await room(page, 'reactor');
-    assert.deepEqual([r.fire, r.breach], [0.7, 0.6]);
-    assert.ok(r.oxygen >= 0.2 && r.oxygen < 0.3, `life support is slowly refilling from 20%, got ${r.oxygen}`);
+    assert.ok(r.fire >= 0.7 && r.fire < 0.8, `the fire is live and growing from 70%, got ${r.fire}`);
+    assert.equal(r.breach, 0.6);
+    assert.ok(r.oxygen < 0.3, `the breach and the fire keep the air thin, got ${r.oxygen}`);
     const text = await page.textContent('#status');
-    assert.match(text, /Fire\s*70%/);
+    assert.match(text, /Fire\s*7\d%/);
     assert.match(text, /Breach\s*60%/);
     assert.equal(await page.locator('.stat.is-alarm').count(), 3);
+    assert.equal(await page.locator('#btn-jettison').count(), 0, 'the reactor cannot be jettisoned');
     await page.click('#btn-dbg-reset');
     await page.waitForFunction(() => window.coldManifest.sim.state.rooms.reactor.fire === 0, null, { timeout: 2000 });
+    await game(page, () => window.coldManifest.sim.enqueue({ type: 'debug.system', system: 'reactor', damage: 0 }));
   });
 
   await check('debug: a jammed door refuses the panel and taps', async () => {

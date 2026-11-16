@@ -3,7 +3,8 @@
 // the sim and renderer use. Pure and DOM-free.
 //
 // Layouts are drawn on a grid of square tiles:
-//   rooms   rectangles { id, name, x, y, w, h, kind?, system? } in whole tiles
+//   rooms   rectangles { id, name, x, y, w, h, kind?, system?, jettison? } in whole
+//           tiles. `jettison: true` marks a section that can be cut loose.
 //   doors   { id, a, b, x, y, vertical } where (x, y) is the middle of the
 //           doorway on the wall the two rooms share, and `vertical` says the
 //           wall runs up and down. `b` may be "space" for an airlock.
@@ -82,6 +83,7 @@ export function validateLayout(data) {
       problems.push(`${label}: x, y, w, h must be whole tiles, at least 1 wide and tall`);
       continue;
     }
+    if (room.jettison !== undefined && typeof room.jettison !== 'boolean') problems.push(`${label}: "jettison" must be true or false`);
     if (room.system !== undefined && !SYSTEM_IDS.includes(room.system)) problems.push(`${label}: unknown system "${room.system}"`);
     for (const other of rooms.values()) {
       if (overlaps(room, other)) problems.push(`${label}: overlaps room "${other.id}"`);

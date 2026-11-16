@@ -516,6 +516,17 @@ body {
   border-left-color: var(--infect);
 }
 
+.btn--danger {
+  color: var(--alarm);
+  border-left-color: var(--alarm);
+}
+
+.btn--danger.is-armed {
+  color: var(--space);
+  background: repeating-linear-gradient(135deg, var(--alarm) 0 14px, #ff7a45 14px 28px);
+  border-color: var(--alarm);
+}
+
 .btn--pause {
   min-width: 210px;
   min-height: 88px;

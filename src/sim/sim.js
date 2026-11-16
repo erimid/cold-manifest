@@ -8,14 +8,16 @@
 // Together these make pause exact (the clock simply stops calling step) and
 // let the autoplay bot use the same interface as a player.
 //
-// S1.4: the ship has power. The reactor's bars are routed between systems
-// (power.js), lights draw from the same pool, doors need the door control
-// system or a pair of hands, and life support keeps the air up. Air flow,
-// fire and breaches are S1.5; crew are S1.6.
+// The ship has power (power.js): the reactor's bars are routed between
+// systems, lights draw from the same pool, and doors need the door control
+// system or a pair of hands. It has air (atmosphere.js): oxygen flows through
+// doors, fire burns it, breaches and airlocks lose it, and a sealed room can
+// be jettisoned. Crew are S1.6.
 
 import { createEventBus } from '../engine/events.js';
 import { createRngSet } from '../engine/rng.js';
-import { POWER_COMMANDS, checkPowerInvariants, isPowered, lightsNeedPower, newSystemsState, stepLifeSupport, stepPower } from './power.js';
+import { ATMOSPHERE_COMMANDS, checkAtmosphereInvariants, stepAtmosphere } from './atmosphere.js';
+import { POWER_COMMANDS, checkPowerInvariants, isPowered, lightsNeedPower, newSystemsState, stepPower } from './power.js';
 import { buildLayout } from './ship.js';
 
 /** Sim ticks per second (DECISIONS D-002). */
@@ -51,6 +53,9 @@ function newRoomState() {
     hull: 1, // 0 to 1 integrity
     fire: 0, // 0 to 1 intensity
     breach: 0, // 0 to 1 size of the hole
+    scorch: 0, // 0 to 1 progress of a fire toward breaking the next bar of the room's system
+    burning: false, // whether the current fire has been announced
+    jettisoned: false, // cut loose and gone for good
   };
 }
 
@@ -78,6 +83,7 @@ const COMMANDS = {
       const door = sim.state.doors[cmd.door];
       if (!door) return `no door "${cmd.door}"`;
       if (!['open', 'closed', 'locked'].includes(cmd.state)) return `a door cannot be set to "${cmd.state}"`;
+      if (door.sealed) return 'that section is gone';
       if (door.state === 'jammed') return 'the door is jammed';
       if (door.state === cmd.state || isPowered(sim, 'doors')) return null;
       // Door control is dark (brief §6): locks stay as they are, and a door moves only if someone is there to move it.
@@ -97,6 +103,7 @@ const COMMANDS = {
     check(sim, cmd) {
       if (!sim.state.rooms[cmd.room]) return `no room "${cmd.room}"`;
       if (typeof cmd.on !== 'boolean') return 'needs on: true or false';
+      if (sim.state.rooms[cmd.room].jettisoned) return 'that section is gone';
       if (cmd.on && !sim.state.rooms[cmd.room].lightsOn && lightsNeedPower(sim)) return 'no spare power for more lights';
       return null;
     },
@@ -111,6 +118,7 @@ const COMMANDS = {
   'debug.room': {
     check(sim, cmd) {
       if (!sim.state.rooms[cmd.room]) return `no room "${cmd.room}"`;
+      if (sim.state.rooms[cmd.room].jettisoned) return 'that section is gone';
       for (const [field, value] of Object.entries(cmd.set ?? {})) {
         const range = ROOM_FIELDS[field];
         if (!range) return `cannot set "${field}"`;
@@ -126,6 +134,7 @@ const COMMANDS = {
     check(sim, cmd) {
       if (!sim.state.doors[cmd.door]) return `no door "${cmd.door}"`;
       if (typeof cmd.jammed !== 'boolean') return 'needs jammed: true or false';
+      if (sim.state.doors[cmd.door].sealed) return 'that section is gone';
       return null;
     },
     apply(sim, cmd) {
@@ -139,6 +148,7 @@ const COMMANDS = {
     },
   },
   ...POWER_COMMANDS,
+  ...ATMOSPHERE_COMMANDS,
 };
 
 function stepDoors(sim) {
@@ -162,7 +172,8 @@ function stepLights(sim) {
 }
 
 /** Everything that happens each tick, in order. Later sessions add systems here. */
-const SYSTEMS = [stepPower, stepDoors, stepLights, (sim) => stepLifeSupport(sim, TICK_SECONDS)];
+// Order matters: fire can break a system, so power is settled after the air and before anything reads it.
+const SYSTEMS = [(sim) => stepAtmosphere(sim, TICK_SECONDS), stepPower, stepDoors, stepLights];
 
 /**
  * Create a simulation.
@@ -275,7 +286,7 @@ export function checkInvariants(sim) {
     if (!['open', 'closed', 'locked', 'jammed'].includes(d.state)) problems.push(`${door.id}.state is ${d.state}`);
     if (!in01(d.openness)) problems.push(`${door.id}.openness is ${d.openness}`);
   }
-  problems.push(...checkPowerInvariants(sim));
+  problems.push(...checkPowerInvariants(sim), ...checkAtmosphereInvariants(sim));
   if (Object.keys(state.rooms).length !== layout.rooms.length) problems.push('room states do not match the layout');
   if (Object.keys(state.doors).length !== layout.doors.length) problems.push('door states do not match the layout');
   return problems;

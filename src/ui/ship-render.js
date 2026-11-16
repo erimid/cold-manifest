@@ -263,6 +263,33 @@ export function createShipRenderer(layout) {
     const h = room.h * s;
     const art = roomArt.get(room.id);
 
+    // Cut loose: nothing there but the scar where it was bolted on.
+    if (r.jettisoned) {
+      ctx.fillStyle = 'rgba(5, 8, 13, 0.94)';
+      ctx.fillRect(x, y, w, h);
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(x, y, w, h);
+      ctx.clip();
+      ctx.strokeStyle = 'rgba(255, 65, 54, 0.28)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      for (let d = -h; d < w; d += 16) {
+        ctx.moveTo(x + d, y + h);
+        ctx.lineTo(x + d + h, y);
+      }
+      ctx.stroke();
+      ctx.restore();
+      ctx.fillStyle = 'rgba(233, 220, 195, 0.75)';
+      ctx.font = `700 ${Math.max(9, Math.min(13, s * 0.36))}px ui-monospace, Menlo, Consolas, monospace`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('JETTISONED', x + w / 2, y + h / 2);
+      ctx.textAlign = 'start';
+      ctx.textBaseline = 'alphabetic';
+      return;
+    }
+
     // Lamp light: a warm pool, strongest in the middle.
     if (r.light > 0) {
       const pool = ctx.createRadialGradient(x + w / 2, y + h / 2, 0, x + w / 2, y + h / 2, Math.max(w, h) * 0.7);

@@ -86,6 +86,13 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, debug 
     return true;
   }
 
+  /** Check an order without giving it; shows the reason if the ship would refuse. */
+  function wouldRefuse(command) {
+    const problem = sim.whyNot(command);
+    if (problem) refusal = { text: sentence(problem), until: performance.now() + 2600 };
+    return Boolean(problem);
+  }
+
   /** The last refusal, while it is still fresh. Wall-clock time, so it also fades while paused. */
   function refusalText() {
     if (refusal && performance.now() > refusal.until) refusal = null;
@@ -186,6 +193,18 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, debug 
       const lights = button('btn-lights', 'Lights off', () => order({ type: 'room.lights', room: room.id, on: !sim.state.rooms[room.id].lightsOn }));
       const note = el('span', { class: 'status__note' });
       const controls = [lights];
+      let jettison = null;
+      if (room.jettison) {
+        // Two presses: the first arms it for a few seconds, the second cuts the room loose.
+        jettison = button('btn-jettison', 'Jettison', () => {
+          const command = { type: 'room.jettison', room: room.id };
+          if (panel.armedUntil > performance.now()) {
+            panel.armedUntil = 0;
+            order(command);
+          } else panel.armedUntil = wouldRefuse(command) ? 0 : performance.now() + 4000;
+        }, 'btn--danger');
+        controls.push(jettison);
+      }
       if (debug) {
         const set = (values) => () => order({ type: 'debug.room', room: room.id, set: values });
         controls.push(
@@ -208,7 +227,7 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, debug 
         el('div', { class: 'status__stats' }, Object.values(stats).map((s) => s.node)),
         el('div', { class: 'status__controls' }, controls),
       );
-      panel = { kind: 'room', id: room.id, sys, stats, lights, note };
+      panel = { kind: 'room', id: room.id, sys, stats, lights, jettison, armedUntil: 0, note };
     } else {
       const door = layout.door(selected.id);
       const stats = { state: stat('State'), opening: stat('Opening') };
@@ -266,13 +285,31 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, debug 
         panel.stats.system.node.classList.toggle('is-alarm', system.damage > 0);
       }
       setText(panel.lights, r.lightsOn ? 'Lights off' : 'Lights on');
-      setText(panel.note, queuedFor('room', panel.id) ? 'Order queued' : refusalText());
+      panel.lights.disabled = r.jettisoned;
+      const armed = panel.armedUntil > performance.now();
+      if (panel.jettison) {
+        setText(panel.jettison, r.jettisoned ? 'Jettisoned' : armed ? 'Confirm jettison' : 'Jettison');
+        panel.jettison.disabled = r.jettisoned;
+        panel.jettison.classList.toggle('is-armed', armed && !r.jettisoned);
+      }
+      let note = refusalText();
+      if (r.jettisoned) note = 'This section was cut loose. It is gone.';
+      else if (queuedFor('room', panel.id)) note = 'Order queued';
+      else if (armed) note = 'Everything inside will be lost. Press again to confirm.';
+      setText(panel.note, note);
     } else {
       const d = sim.state.doors[panel.id];
       setText(panel.stats.state.value, d.state);
       setText(panel.stats.opening.value, percent(d.openness));
       panel.stats.state.node.classList.toggle('is-alarm', d.state === 'jammed');
       const jammed = d.state === 'jammed';
+      if (d.sealed) {
+        setText(panel.stats.state.value, 'sealed');
+        for (const node of Object.values(panel.buttons)) node.disabled = true;
+        if (panel.jam) panel.jam.disabled = true;
+        setText(panel.note, 'Welded shut. There is nothing on the other side.');
+        return;
+      }
       // Buttons stay pressable when door control is dark, so a press can say why nothing moved.
       for (const [state, node] of Object.entries(panel.buttons)) node.disabled = jammed || d.state === state;
       const dark = sim.state.systems.doors.power === 0;
@@ -299,7 +336,7 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, debug 
       // Tapping a door works it. Airlocks and locked doors are deliberate: use the panel.
       const door = layout.door(target.id);
       const { state } = sim.state.doors[door.id];
-      if (!door.airlock && (state === 'open' || state === 'closed')) order({ type: 'door.set', door: door.id, state: state === 'open' ? 'closed' : 'open' });
+      if (!door.airlock && !sim.state.doors[door.id].sealed && (state === 'open' || state === 'closed')) order({ type: 'door.set', door: door.id, state: state === 'open' ? 'closed' : 'open' });
     }
   }
 
