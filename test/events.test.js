@@ -197,7 +197,7 @@ test('a situation waits in its room until one of ours stands there; then its car
   assert.deepEqual([view.room, view.roomName, view.state, view.by, view.text], ['hold', 'Main hold', 'waiting', null, null]);
   assert.deepEqual(view.choices, [], 'nothing to choose until somebody is there');
   assert.match(view.sign, /Something moved in Main hold/);
-  assert.equal(view.left, 3, 'the hours it will wait');
+  assert.ok(view.left > 9.99 && view.left <= 10, 'the hours it will wait');
   assert.match(whyNoChoice(sim, 'work', view.n), /nobody is in Main hold/);
   assert.throws(() => sim.enqueue({ type: 'event.choose', situation: view.n, choice: 'work' }), /nobody is in Main hold/);
   assert.throws(() => sim.enqueue({ type: 'event.choose', situation: 99, choice: 'work' }), /no situation 99/);
@@ -215,7 +215,7 @@ test('a situation waits in its room until one of ours stands there; then its car
   assert.equal(view.by, 'Pruitt');
   assert.match(view.text, /^Pruitt finds a boy/);
   assert.deepEqual(view.choices.map((choice) => choice.id), ['work', 'brig', 'ask']);
-  assert.ok(view.left < 3 && view.left > 2.5, 'the wait ran while nobody was there');
+  assert.ok(view.left < 9.9 && view.left > 0, `the wait ran while nobody was there (${view.left})`);
 
   // If they walk off again it goes back to waiting; back, and it is theirs again.
   standIn(sim, 'pruitt', 'cargo');

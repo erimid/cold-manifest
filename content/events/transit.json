@@ -7,7 +7,7 @@
       "place": { "room": "helm" },
       "title": "{place}: {hazard}",
       "sign": "The lane ahead runs straight through {hazard}. I would like somebody on the bridge before it does.",
-      "lapse": { "hours": 1.5, "text": "Nobody took her through {hazard} by hand. Something the size of a fist goes through the outer skin and keeps going.", "effects": [{ "do": "breach", "room": "random", "size": 0.3 }, { "do": "hull", "add": -1 }] },
+      "lapse": { "hours": 6, "text": "Nobody took her through {hazard} by hand. Something the size of a fist goes through the outer skin and keeps going.", "effects": [{ "do": "breach", "room": "random", "size": 0.3 }, { "do": "hull", "add": -1 }] },
       "text": "The lane runs straight through {hazard}. The chart, last updated by a company that no longer exists, calls it navigable. The hull has started to tick.",
       "choices": [
         {
@@ -39,7 +39,7 @@
       "place": { "room": "airlock", "scope": "Dead hull", "hold": true },
       "title": "A dead hull at {place}",
       "sign": "A dead hull, close alongside. No lights, no transponder. I have hove us to; somebody could look it over from the lock in {room}.",
-      "lapse": { "hours": 3, "text": "Nobody goes to the lock. The dead hull drops astern, still turning, and we are under way again." },
+      "lapse": { "hours": 12, "text": "Nobody goes to the lock. The dead hull drops astern, still turning, and we are under way again." },
       "text": "A freighter of the old company pattern turns slowly off the lock. No lights, no transponder, one airlock standing open. {who} is already looking at it the way people look at an unlocked door.",
       "choices": [
         { "id": "leave", "label": "Leave it turning", "outcomes": [{ "text": "You log the position and go on. Whatever is in there stays in there." }] },
@@ -80,7 +80,7 @@
       "place": { "room": "helm" },
       "title": "The last entry",
       "sign": "The log from the dead hull is on the bridge console. Somebody should hear it before we go anywhere.",
-      "lapse": { "hours": 4, "text": "The recording sat unplayed on the bridge for four hours. I have filed it under its manifest number, and I will not say anything about the number." },
+      "lapse": { "hours": 12, "text": "The recording sat unplayed on the bridge for half a day. I have filed it under its manifest number, and I will not say anything about the number." },
       "text": "The recording is eleven seconds long. A woman reads a manifest number twice, slowly, the way you read something to a person who is not listening. Then a door closes somewhere behind her and she stops reading.",
       "choices": [
         {
@@ -144,7 +144,7 @@
       "place": { "room": "sensors", "scope": "Beacon" },
       "title": "A beacon in the dark",
       "sign": "A distress beacon, low power, four minutes off the lane. It is on the scope. Whoever goes to {room} can decide what we do about it.",
-      "lapse": { "hours": 2, "text": "Nobody answered the beacon. It repeats itself behind us until the range opens and it is only noise." },
+      "lapse": { "hours": 8, "text": "Nobody answered the beacon. It repeats itself behind us until the range opens and it is only noise." },
       "text": "A distress beacon, low power, repeating a ship's name nobody aboard recognises. It is four minutes off the lane. Beacons in the Reach are sometimes what they say they are.",
       "choices": [
         { "id": "pass", "label": "Log it and pass by", "outcomes": [{ "text": "The beacon repeats itself behind you until the range opens and it is only noise." }] },
@@ -176,7 +176,7 @@
       "place": { "room": ["$patient", "quarters"] },
       "title": "{patient} has a cough",
       "sign": "{patient} has had a cough since the last port and has stopped pretending otherwise. Somebody should look in at {room}.",
-      "lapse": { "hours": 4, "text": "Nobody looked in on {patient}. The cough has gone down onto the chest.", "effects": [{ "do": "hurt", "crew": "$patient", "amount": 0.2 }] },
+      "lapse": { "hours": 12, "text": "Nobody looked in on {patient}. The cough has gone down onto the chest.", "effects": [{ "do": "hurt", "crew": "$patient", "amount": 0.2 }] },
       "text": "{patient} has had a cough since the last port and has stopped pretending otherwise. It is probably the scrubbers. On this ship it is usually the scrubbers.",
       "cast": { "patient": { "pick": "random" } },
       "choices": [
@@ -210,7 +210,7 @@
       "place": { "room": "helm" },
       "title": "Somebody's wake",
       "sign": "There is a trace on the bridge monitor I think somebody should see. It is a drive signature, and it is not ours.",
-      "lapse": { "hours": 3, "text": "The trace stays on the bridge monitor a while and then scrolls off. Whoever it is, they are still back there." },
+      "lapse": { "hours": 10, "text": "The trace stays on the bridge monitor a while and then scrolls off. Whoever it is, they are still back there." },
       "text": "Margo puts a trace on the monitor without being asked: a drive signature, hours old, laid over your own track like a second line of handwriting. Whoever it is, they are not in a hurry.",
       "choices": [
         { "id": "note", "label": "Note it and keep moving", "outcomes": [{ "text": "You keep moving. The trace stays on the monitor a little longer than it needs to." }] },
@@ -228,7 +228,7 @@
       "place": { "room": "hold" },
       "title": "Something in the hold",
       "sign": "Something moved in {room}, behind the crates. It is warm, it is breathing, and it is not on my crew list.",
-      "lapse": { "hours": 3, "text": "Nobody went down to look. By the next watch the galley is two ration tins short and the hold is quiet again.", "effects": [{ "do": "flag", "name": "stowaway_loose" }] },
+      "lapse": { "hours": 10, "text": "Nobody went down to look. By the next watch the galley is two ration tins short and the hold is quiet again.", "effects": [{ "do": "flag", "name": "stowaway_loose" }] },
       "text": "{who} finds a boy of about fifteen wedged in behind the machine parts with a water flask and a company blanket. He says he came aboard at the last port, that he can work, and that he would rather not say why he left.",
       "choices": [
         {
@@ -258,7 +258,7 @@
       "place": { "room": "cargo" },
       "title": "A crate is leaking",
       "sign": "Something is dripping in {room}. The deck sensor calls it coolant. I do not think it is coolant.",
-      "lapse": { "hours": 2, "text": "Nobody went to look at the drip in {room}. It has found something it can burn.", "effects": [{ "do": "fire", "room": "$room", "size": 0.35 }] },
+      "lapse": { "hours": 8, "text": "Nobody went to look at the drip in {room}. It has found something it can burn.", "effects": [{ "do": "fire", "room": "$room", "size": 0.35 }] },
       "text": "{who} follows the drip to one of the manifest crates. The seal has gone along one edge and something pale is beading out of it, slowly, taking the paint off the deck where it lands.",
       "choices": [
         {
@@ -292,7 +292,7 @@
       "cast": { "first": { "pick": "random" }, "second": { "not": "$first", "pick": "random" } },
       "title": "A fight in the mess",
       "sign": "Raised voices in {room}. {first} and {second}. It has gone past words, and I do not have hands.",
-      "lapse": { "hours": 1.5, "text": "Nobody came. {first} and {second} finished it themselves, and both of them are bleeding.", "effects": [{ "do": "hurt", "crew": "$first", "amount": 0.2 }, { "do": "hurt", "crew": "$second", "amount": 0.2 }] },
+      "lapse": { "hours": 6, "text": "Nobody came. {first} and {second} finished it themselves, and both of them are bleeding.", "effects": [{ "do": "hurt", "crew": "$first", "amount": 0.2 }, { "do": "hurt", "crew": "$second", "amount": 0.2 }] },
       "text": "In the mess {first} has {second} against the lockers by the collar. Neither will say what it was about. There is a broken mug on the deck and it was somebody's only mug.",
       "choices": [
         {
