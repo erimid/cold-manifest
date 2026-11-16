@@ -73,7 +73,7 @@ const ticks = Math.round(minutes * 60 * TICK_RATE);
 const content = createContent(readContentFiles());
 const shipId = String(option('ship', 'margin-of-error'));
 const ship = content.require('ships', shipId);
-const roster = content.all('crew').map(({ id, name, engineer, skills, traits }) => ({ id, name, engineer, skills, traits }));
+const roster = content.all('crew').map(({ id, name, role, engineer, skills, traits }) => ({ id, name, role, engineer, skills, traits }));
 const ruleSet = { memories: content.all('memories'), refusals: content.all('refusals'), risks: content.all('risks') };
 const transitEvents = content.all('events');
 const lines = content.all('ai-lines');

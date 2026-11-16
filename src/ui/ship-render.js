@@ -11,6 +11,8 @@
 // The renderer only reads sim state. It never changes it.
 
 import { createRng } from '../engine/rng.js';
+import { STAND } from '../sim/crew.js';
+import { BODY, drawBody, skinOf } from './crew-art.js';
 
 const MONO = "ui-monospace, 'SF Mono', Menlo, Consolas, 'Liberation Mono', 'Courier New', monospace";
 
@@ -74,8 +76,8 @@ const CRATE_STEP = 1.45;
 const CRATE_STACK = 3;
 const AIRLOCK_THICKNESS = 0.42;
 
-/** Crew are drawn as numbered discs this many tiles across (radius). */
-const CREW_RADIUS = 0.42;
+/** Crew are drawn as bodies (crew-art.js, D-132); their tap target is the body, never smaller than this in CSS pixels. */
+const TAP_MIN = 44;
 const CREW_COLOURS = ['#5ec8ff', '#ffd166', '#ef7bbf', '#8be28b', '#c9a0ff', '#ff9f5e', '#7fe3d0', '#e6e6e6'];
 
 /** A renderer for `layout`. `sensor` draws it as a sensor return (the enemy). */
@@ -225,11 +227,28 @@ export function createShipRenderer(layout, { sensor = false } = {}) {
     return { x: member.px + (member.x - member.px) * alpha, y: member.py + (member.y - member.py) * alpha };
   }
 
+  /** A crew member's body, in CSS pixels: head to feet, at least a fingertip wide. */
+  function bodyBox(view, member, alpha = 1) {
+    const s = view.scale;
+    const at = crewAt(member, alpha);
+    const cx = view.ox + at.x * s;
+    const feet = view.oy + (at.y + STAND) * s;
+    if (!member.alive) {
+      const w = Math.max(TAP_MIN, BODY.height * s);
+      return { x: cx - w / 2, y: feet - Math.max(TAP_MIN * 0.6, 0.5 * s), w, h: Math.max(TAP_MIN * 0.6, 0.5 * s) };
+    }
+    const w = Math.max(TAP_MIN * 0.75, BODY.width * 1.3 * s);
+    const h = Math.max(TAP_MIN, BODY.height * s);
+    return { x: cx - w / 2, y: feet - h, w, h };
+  }
+
   /** Everything tappable, in CSS pixels. Crew sit above doors, doors above rooms. */
   function targets(view, crew = {}, { foe = false, crates = null } = {}) {
     const out = [];
     for (const member of Object.values(crew)) {
-      out.push({ id: member.id, kind: 'crew', cx: view.ox + member.x * view.scale, cy: view.oy + member.y * view.scale, r: CREW_RADIUS * view.scale, priority: 3 });
+      // The whole body is the target, never narrower than a fingertip (brief §4).
+      const box = bodyBox(view, member);
+      out.push({ id: member.id, kind: 'crew', ...box, cx: box.x + box.w / 2, cy: box.y + box.h / 2, priority: 3 });
     }
     if (foe) {
       // The other ship: its rooms, to aim at, send boarders to or look at, and any of ours aboard.
@@ -726,7 +745,7 @@ export function createShipRenderer(layout, { sensor = false } = {}) {
       const member = crate.by ? state.crew[crate.by] : null;
       if (!member) continue;
       const at = crewAt(member, alpha);
-      drawCrate(ctx, crate, at.x - 0.42, at.y - CREW_RADIUS - 0.62, 0.84, 0.58, px, chosen === crate.id);
+      drawCrate(ctx, crate, at.x - 0.42, at.y + STAND - BODY.height - 0.5, 0.84, 0.58, px, chosen === crate.id); // held overhead
     }
     ctx.textAlign = 'start';
     ctx.textBaseline = 'alphabetic';
@@ -1095,15 +1114,39 @@ export function createShipRenderer(layout, { sensor = false } = {}) {
     }
   }
 
-  function drawCrew(ctx, view, member, alpha, selected) {
+  /** Which way each crew member last faced, so they do not snap round when they stop. */
+  const facings = new Map();
+
+  /** The pose a crew member is drawn in, from what they are doing. */
+  function poseOf(member) {
+    if (!member.alive) return 'dead';
+    if (member.task === 'crawling') return 'crawl';
+    if (member.carry) return 'carry';
+    if (member.task === 'fighting') return 'fight';
+    if (member.task === 'walking' || member.task === 'crossing') return member.path?.length && !onLiftNow(member) ? 'walk' : 'stand';
+    if (['extinguish', 'patch', 'repair', 'unjam', 'sabotage', 'loading', 'opening', 'lifting', 'cycling'].includes(member.task)) return 'work';
+    return 'stand';
+  }
+  const onLiftNow = (member) => {
+    const next = member.path?.[0];
+    return Boolean(next && !next.crawl && Math.abs(next.y - member.y) > Math.abs(next.x - member.x));
+  };
+
+  function drawCrew(ctx, view, member, alpha, selected, time = 0) {
     const hostile = member.owner === 'enemy';
     const s = view.scale;
     const at = crewAt(member, alpha);
     const cx = view.ox + at.x * s;
     const cy = view.oy + at.y * s;
-    const r = CREW_RADIUS * s;
-    // Theirs are alarm red and carry an initial instead of a number, so they never pass for ours.
+    const feet = cy + STAND * s;
     const colour = hostile ? C.alarm : CREW_COLOURS[member.index % CREW_COLOURS.length];
+    const box = bodyBox(view, member, alpha);
+
+    // Which way they face: the way they are going, or the way they last went.
+    const dx = (member.path?.[0]?.x ?? member.x) - member.x;
+    let facing = facings.get(member.id) ?? (hostile ? -1 : 1);
+    if (Math.abs(dx) > 0.05) facing = dx > 0 ? 1 : -1;
+    facings.set(member.id, facing);
 
     if (selected) {
       // Where they are headed.
@@ -1117,37 +1160,60 @@ export function createShipRenderer(layout, { sensor = false } = {}) {
         ctx.stroke();
         ctx.setLineDash([]);
       }
-      ctx.strokeStyle = C.paper;
-      ctx.lineWidth = 2.5;
+      // A bracket of light round them, and a pool on the floor.
+      ctx.fillStyle = 'rgba(233, 220, 195, 0.16)';
       ctx.beginPath();
-      ctx.arc(cx, cy, r + 5, 0, Math.PI * 2);
-      ctx.stroke();
+      ctx.ellipse(cx, feet, box.w * 0.62, 0.12 * s, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = C.paper;
+      ctx.lineWidth = 2;
+      const b = 6;
+      for (const [x, y, sx, sy] of [[box.x, box.y, 1, 1], [box.x + box.w, box.y, -1, 1], [box.x, box.y + box.h, 1, -1], [box.x + box.w, box.y + box.h, -1, -1]]) {
+        ctx.beginPath();
+        ctx.moveTo(x, y + sy * b);
+        ctx.lineTo(x, y);
+        ctx.lineTo(x + sx * b, y);
+        ctx.stroke();
+      }
     }
 
-    ctx.beginPath();
-    ctx.arc(cx, cy, r, 0, Math.PI * 2);
-    ctx.fillStyle = member.alive ? colour : '#3a404b';
-    ctx.fill();
-    ctx.lineWidth = member.suit ? 3.5 : 2;
-    ctx.strokeStyle = member.suit && member.alive ? '#f4f7fb' : '#05070b';
-    ctx.stroke();
+    // Walk cycle off the distance they have covered, so it freezes on pause and matches their pace.
+    const phase = (((at.x + at.y) * 1.3) % 1 + 1) % 1;
+    drawBody(ctx, {
+      x: cx,
+      feet,
+      s,
+      colour,
+      skin: skinOf(member.index),
+      role: member.role,
+      facing,
+      pose: poseOf(member),
+      phase: member.task === 'fighting' || poseOf(member) === 'work' ? (time * 1.5) % 1 : phase,
+      suit: member.suit,
+      hostile,
+      // Their roster number, or an initial for one of theirs, so nobody is told apart by colour alone (brief §17).
+      label: hostile ? member.name.charAt(0).toUpperCase() : String(member.index + 1),
+      dim: !member.alive,
+    });
 
-    // Their number, or a cross for the dead. Never colour alone (brief §17).
-    ctx.fillStyle = member.alive ? '#05070b' : '#8b93a1';
-    ctx.font = `700 ${Math.max(10, r * 1.15)}px ui-monospace, Menlo, Consolas, monospace`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(member.alive ? (hostile ? member.name.charAt(0).toUpperCase() : String(member.index + 1)) : '×', cx, cy + 1);
-    ctx.textAlign = 'start';
-    ctx.textBaseline = 'alphabetic';
+    if (!member.alive) {
+      ctx.fillStyle = '#8b93a1';
+      ctx.font = `700 ${Math.max(10, 0.4 * s)}px ui-monospace, Menlo, Consolas, monospace`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('×', cx, feet - 0.45 * s);
+      ctx.textAlign = 'start';
+      ctx.textBaseline = 'alphabetic';
+    }
 
-    // Health, once it is not full: a bar under their feet.
+    // Health, once it is not full: a bar over their head.
     if (member.alive && member.health < 1) {
-      const w = r * 2.2;
+      const w = Math.max(18, 0.7 * s);
+      const y = box.y - 7;
       ctx.fillStyle = '#05070b';
-      ctx.fillRect(cx - w / 2 - 1, cy + r + 3, w + 2, 6);
+      ctx.fillRect(cx - w / 2 - 1, y, w + 2, 6);
       ctx.fillStyle = member.health < 0.35 ? C.alarm : '#8be28b';
-      ctx.fillRect(cx - w / 2, cy + r + 4, w * member.health, 4);
+      ctx.fillRect(cx - w / 2, y + 1, w * member.health, 4);
     }
   }
 
@@ -1346,12 +1412,12 @@ export function createShipRenderer(layout, { sensor = false } = {}) {
 
     // The dead first, so the living are drawn over them. The other side's people only show where we can see.
     const crew = Object.values(state.crew).filter((member) => member.owner !== 'enemy' || !unseen.has(member.room));
-    for (const member of crew) if (!member.alive) drawCrew(ctx, view, member, alpha, member.id === selectedCrew);
+    for (const member of crew) if (!member.alive) drawCrew(ctx, view, member, alpha, member.id === selectedCrew, time);
     drawCrates(ctx, view, state, alpha, selectedCrate);
     for (const member of crew) {
       if (!member.alive) continue;
       if (member.task === 'crossing') ctx.globalAlpha = 0.45;
-      drawCrew(ctx, view, member, alpha, member.id === selectedCrew);
+      drawCrew(ctx, view, member, alpha, member.id === selectedCrew, time);
       ctx.globalAlpha = 1;
     }
 

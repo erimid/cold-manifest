@@ -623,6 +623,43 @@ body {
   text-transform: none;
 }
 
+/* Six or more crew (D-130): narrower chips, the number smaller, the name and task in small type. */
+.crewbar--many {
+  gap: 4px;
+  flex-wrap: nowrap;
+}
+/* With a big crew the ship's name stacks over its clock, to give the chips the room. */
+.shipbar:has(.crewbar--many) .shipbar__name {
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 12px;
+}
+.shipbar:has(.crewbar--many) .shipbar__name .stencil {
+  letter-spacing: 0.18em;
+}
+.crewbar--many .btn.crewchip {
+  width: 96px;
+  gap: 5px;
+  padding: 4px 6px 4px 5px;
+  letter-spacing: 0.02em;
+}
+.crewbar--many .crewchip__num {
+  width: 20px;
+  height: 20px;
+  font-size: 0.72em;
+  flex: none;
+}
+.crewbar--many .crewchip__name {
+  font-size: 0.7em;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.crewbar--many .crewchip__task {
+  font-size: 0.6em;
+}
+
 .crewchip__num {
   display: grid;
   place-items: center;

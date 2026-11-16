@@ -34,6 +34,7 @@ import { nerveWord, topMemory } from '../sim/memory.js';
 import { POWERED, aiCoreStatus, free, lightsDraw, litRooms, supply, usable } from '../sim/power.js';
 import { contactView, roomView, sensorsUp, signature, unseen } from '../sim/senses.js';
 import { SPACE, SYSTEMS } from '../sim/systems.js';
+import { roleOf, skillWords } from '../sim/roles.js';
 import { TICK_SECONDS } from '../sim/sim.js';
 import { createChart } from './chart.js';
 import { el } from './dom.js';
@@ -152,7 +153,8 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
     }
     if (target?.kind === 'crew') {
       const { member, ship } = findCrew(sim, target.id);
-      return `${member.name}${ship === sim ? '' : `, aboard the ${ship.layout.name}`}. ${describeTask(ship, member)}.${member.alive ? ` Health ${percent(member.health)}.` : ''}`;
+      const role = roleOf(member);
+      return `${member.name}${role ? `, ${role.name.toLowerCase()}` : ''}${ship === sim ? '' : `, aboard the ${ship.layout.name}`}. ${describeTask(ship, member)}.${member.alive ? ` Health ${percent(member.health)}.` : ''}${role ? ` ${role.blurb}` : ''}`;
     }
     if (target?.kind === 'door') {
       const door = layout.door(target.id);
@@ -971,14 +973,15 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
       const task = el('span', { class: 'crewchip__task' });
       const node = el(
         'button',
-        { class: 'btn crewchip', type: 'button', id: `crew-${member.id}`, press: () => selectCrew(selectedCrew === member.id ? null : member.id) },
+        { class: 'btn crewchip', type: 'button', id: `crew-${member.id}`, title: roleOf(member)?.name ?? '', press: () => selectCrew(selectedCrew === member.id ? null : member.id) },
         el('span', { class: 'crewchip__num', style: `background:${renderer.crewColour(member.index)}` }, String(member.index + 1)),
         el('span', { class: 'crewchip__body' }, el('span', { class: 'crewchip__name' }, member.name), task, el('span', { class: 'crewchip__bar' }, health)),
       );
       return { id: member.id, node, health, task };
     });
     roster = chips;
-    return el('div', { class: 'crewbar', id: 'crewbar' }, chips.map((chip) => chip.node));
+    // A big crew (D-130) packs the chips tighter so all of them fit beside the ship's name.
+    return el('div', { class: `crewbar${chips.length > 4 ? ' crewbar--many' : ''}`, id: 'crewbar' }, chips.map((chip) => chip.node));
   }
 
   function updateRoster() {
@@ -1001,12 +1004,13 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
     panel = null;
     if (selectedCrew) {
       const { member } = findCrew(sim, selectedCrew);
-      const stats = { health: stat('Health'), where: stat('In'), doing: stat('Doing'), suit: stat('Suit'), nerve: stat('Nerve') };
+      const stats = { health: stat('Health'), where: stat('In'), doing: stat('Doing'), skills: stat('Good at'), suit: stat('Suit'), nerve: stat('Nerve') };
+      setText(stats.skills.value, skillWords(member) || 'Nothing special');
       const memory = el('span', { class: 'status__hint status__hint--inline', id: 'crew-memory' });
       const suit = button('btn-suit', 'Suit up', () => order({ type: 'crew.suit', crew: member.id, on: !findCrew(sim, member.id).member.suit }));
       const note = el('span', { class: 'status__note' });
       nodes.status.replaceChildren(
-        el('div', { class: 'status__head' }, el('div', { class: 'status__title', id: 'status-title' }, member.name), el('div', { class: 'stencil' }, `Crew ${member.index + 1}`), note),
+        el('div', { class: 'status__head' }, el('div', { class: 'status__title', id: 'status-title' }, member.name), el('div', { class: 'stencil', id: 'crew-role' }, `${roleOf(member)?.name ?? 'Crew'} · ${member.index + 1}`), note),
         el('div', { class: 'status__stats' }, Object.values(stats).map((s) => s.node)),
         el(
           'div',

@@ -5,6 +5,7 @@ import { validateContent } from '../src/engine/content-schema.js';
 import { DEBUG_ACTIONS, FIX, HAIL_SECONDS, OFFER_SECONDS, OUTCOMES, STALEMATE_SECONDS, START_MONEY, enemyOf, fixOf, talkChance } from '../src/sim/combat.js';
 import { TICK_RATE, checkInvariants } from '../src/sim/sim.js';
 import { ARCHETYPES, validateTactics } from '../src/sim/tactics.js';
+import { skillFactor } from '../src/sim/roles.js';
 import { content, newCrewedSim, newTalkingSim } from './helpers.js';
 
 const steps = (sim, n) => {
@@ -222,12 +223,15 @@ test('a jump needs a sensor fix: sensors, a pilot, and a bar on the engines when
   const sim = fight(DRONE);
   assert.match(sim.whyNot({ type: 'ship.jump' }), /sensor fix is at 0%/);
   seconds(sim, 10);
-  assert.ok(Math.abs(fixOf(sim) - 10 / FIX.seconds) < 0.01, 'one sensor bar takes FIX.seconds');
-  // No pilot: the fix slips away.
+  // A pilot at the helm takes it faster by their piloting (D-131).
   const pilot = Object.values(sim.state.crew).find((m) => m.room === 'bridge');
+  const pace = skillFactor(pilot.skills.piloting);
+  assert.ok(pace > 1, 'the helm is held by a pilot');
+  assert.ok(Math.abs(fixOf(sim) - (10 * pace) / FIX.seconds) < 0.01, 'one sensor bar takes FIX.seconds, less for a pilot');
+  // No pilot: the fix slips away.
   sim.enqueue({ type: 'crew.move', crew: pilot.id, room: 'medbay' });
   seconds(sim, 6);
-  assert.ok(fixOf(sim) < 10 / FIX.seconds, 'nobody at the helm, so the fix drained');
+  assert.ok(fixOf(sim) < (10 * pace) / FIX.seconds, 'nobody at the helm, so the fix drained');
   sim.state.fix = 1;
   assert.match(sim.whyNot({ type: 'ship.jump' }), /nobody is at the helm/);
   sim.enqueue({ type: 'crew.move', crew: pilot.id, room: 'bridge' });

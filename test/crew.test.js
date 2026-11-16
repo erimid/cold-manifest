@@ -23,10 +23,20 @@ const listen = (sim, type) => {
 };
 const doors = (route) => route.map((step) => step.door);
 
-test('a run starts with three crew, standing in the rooms the ship names', () => {
+test('a run starts with six crew, one for each role, standing in the rooms the ship names', () => {
   const sim = newCrewedSim();
   const crew = Object.values(sim.state.crew);
-  assert.deepEqual(crew.map((c) => [c.name, c.room]), [['Ilse', 'bridge'], ['Dace', 'reactor'], ['Okoro', 'quarters']]);
+  assert.deepEqual(
+    crew.map((c) => [c.name, c.role, c.room]),
+    [
+      ['Ilse', 'pilot', 'bridge'],
+      ['Dace', 'engineer', 'reactor'],
+      ['Okoro', 'medic', 'quarters'],
+      ['Pruitt', 'gunner', 'weapons'],
+      ['Halloran', 'security', 'brig'],
+      ['Vesna', 'quartermaster', 'hold'],
+    ],
+  );
   for (const c of crew) assert.deepEqual([c.health, c.suit, c.alive, c.task, c.path.length], [1, false, true, 'idle', 0]);
   assert.deepEqual(checkInvariants(sim), []);
 });

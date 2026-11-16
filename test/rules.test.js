@@ -60,7 +60,8 @@ test('a new kind of memory, refusal and risk is a content edit, not a code chang
   sim.enqueue({ type: 'door.set', door, state: 'locked' });
   sim.step();
   assert.equal(topMemory(sim, sim.state.crew.ilse), 'a night locked up', 'the event named no room');
-  assert.deepEqual(refusalOf(sim, sim.state.crew.ilse, 'brig').reason, 'Ilse will not sit in Brig alone. Not after a night locked up.');
+  assert.deepEqual(refusalOf(sim, sim.state.crew.ilse, 'medbay').reason, 'Ilse will not sit in Medbay alone. Not after a night locked up.');
+  assert.equal(refusalOf(sim, sim.state.crew.ilse, 'brig'), null, 'Halloran is in there');
   assert.equal(refusalOf(sim, sim.state.crew.ilse, 'reactor'), null, 'Dace is in there');
   assert.deepEqual(riskOf(sim, { type: 'lights.all', on: false }), { id: 'dark_ship', grave: false, room: 'quarters', crew: ['okoro'] });
   assert.equal(riskOf(sim, { type: 'lights.all', on: true }), null);

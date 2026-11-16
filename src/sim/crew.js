@@ -20,6 +20,7 @@
 
 import { crewEmit, harmCrew } from './atmosphere.js';
 import { refusalOf } from './memory.js';
+import { bestSkillIn, skillFactor, skillOf } from './roles.js';
 import { isPowered } from './power.js';
 import { SPACE, SYSTEMS } from './systems.js';
 
@@ -72,15 +73,16 @@ export function spotIn(room, index) {
 }
 
 /** A new crew member standing in `roomId`. `index` is their place on the roster. */
-export function newCrewMember(layout, { id, name, engineer = false, skills = {}, traits = [] }, roomId, index = 0, owner = 'player') {
+export function newCrewMember(layout, { id, name, role = null, engineer = false, skills = {}, traits = [] }, roomId, index = 0, owner = 'player') {
   const { x, y } = spotIn(layout.room(roomId), index);
   return {
     id,
     name: name ?? id,
     index,
     owner, // whose crew: 'player' or 'enemy'. Not always the ship they are aboard
-    engineer: engineer === true, // may use the service crawlways (D-072); from S4.1 a skill or trait decides
-    skills: { ...skills }, // piloting, engineering, weapons, medicine, combat, negotiation: read by conditions only until S4.1 (D-112)
+    role, // the job they signed on for (roles.js, D-130): pilot, engineer, gunner, medic, security, quartermaster
+    engineer: engineer === true || role === 'engineer', // may use the service crawlways (D-072)
+    skills: { ...skills }, // piloting, engineering, weapons, medicine, combat, negotiation, 0 to 5; each level speeds its work (D-131)
     traits: [...traits], // trait ids; none exist until S4.1
 
     room: roomId,
@@ -429,8 +431,9 @@ export function hostilesBeside(sim, member) {
 function fight(sim, member, foes, seconds) {
   member.task = 'fighting';
   // Everyone goes for whoever is closest to dropping. Stage 4 skills and traits change who wins (brief §7).
+  // Security hit harder (D-131).
   const target = foes.reduce((weakest, other) => (other.health < weakest.health ? other : weakest));
-  harmCrew(sim, target.id, ((0.5 + 0.5 * member.health) * seconds) / MELEE_SECONDS, 'melee');
+  harmCrew(sim, target.id, ((0.5 + 0.5 * member.health) * skillFactor(skillOf(member, 'combat')) * seconds) / MELEE_SECONDS, 'melee');
 }
 
 function work(sim, member, seconds) {
@@ -444,7 +447,9 @@ function work(sim, member, seconds) {
   if (!job) {
     // Nothing to fix: a powered medbay patches up its own crew instead.
     if (isHome(sim, member) && sim.layout.room(member.room).system === 'medbay' && sim.state.systems.medbay.power > 0 && member.health < 1) {
-      member.health = Math.min(1, member.health + MEDBAY_HEAL * sim.state.systems.medbay.power * seconds);
+      // A medic in the room heals everyone in it faster, themselves included (D-131).
+      const medic = skillFactor(bestSkillIn(sim, member.room, 'medicine'));
+      member.health = Math.min(1, member.health + MEDBAY_HEAL * sim.state.systems.medbay.power * medic * seconds);
     }
     return;
   }
@@ -452,6 +457,8 @@ function work(sim, member, seconds) {
   // Hurt people work slower, and so does anyone in a suit or in the dark.
   let rate = (0.5 + 0.5 * member.health) * (member.suit ? SUIT_WORK : 1) * seconds;
   if (job.type !== 'extinguish' && r.light < 0.5) rate *= DARK_WORK;
+  // Engineers mend, patch and free doors faster (D-131). Anyone can put out a fire.
+  if (job.type === 'repair' || job.type === 'patch' || job.type === 'unjam') rate *= skillFactor(skillOf(member, 'engineering'));
 
   if (job.type === 'extinguish') {
     r.fire = Math.max(0, r.fire - EXTINGUISH_RATE * rate);

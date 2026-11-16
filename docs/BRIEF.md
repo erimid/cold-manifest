@@ -142,7 +142,8 @@ META HUB ──► PICK CONTRACT ──► PORT ──► JUMP ──► TRANSIT
 
 ### Each crew member has
 - **Name, look, background, and voice** (a short description of how they talk, used when writing their lines).
-- **Skills:** piloting, engineering, weapons, medicine, combat, negotiation. Skills improve with use.
+- **Role:** the job they signed on for, and what they excel at: Pilot (piloting), Engineer (engineering), Gunner (weapons), Medic (medicine), Security (combat), Quartermaster (negotiation). *(Eric, 2026-11-16; D-130.)*
+- **Skills:** piloting, engineering, weapons, medicine, combat, negotiation. Each level makes that kind of work faster; nobody is slower for lacking one. Skills improve with use.
 - **Two or three traits** from a pool of at least 30 (e.g. Reckless, Devout, Coward, Greedy, Former Company, Insomniac, Protective, Superstitious, Ex-Con, Sentimental). Traits change behavior, not just numbers. A Coward may refuse to enter a room with the creature; a Protective crew member runs to help a bonded friend.
 - **Needs:** rest, food, safety, and morale. Unmet needs lower performance and raise stress.
 - **Stress:** goes up from fear, injury, deaths, bad orders and horror events. At high stress, crew can freeze, panic, lash out, or break (a lasting negative trait).
@@ -164,7 +165,7 @@ META HUB ──► PICK CONTRACT ──► PORT ──► JUMP ──► TRANSIT
 - **Secret traitor (optional per run):** occasionally one crew member is working for a faction. They act on it at a key moment (sabotage, signaling a pursuer, letting the creature out). Their behavior leaves subtle tells that a careful player can notice.
 
 ### Recruitment
-- Hire at ports, rescue from derelicts and distress calls, or take prisoners who switch sides. Start each run with 3 crew; the ship holds up to 8.
+- Hire at ports, rescue from derelicts and distress calls, or take prisoners who switch sides. Start each run with 6 crew, one for each role; the ship holds up to 8. *(Eric, 2026-11-16: was 3; see D-130.)*
 - Procedurally generated crew from name, background, trait, and voice pools, plus about 10 hand-authored "special" characters who show up rarely and have their own scene chains.
 
 ---
@@ -292,7 +293,7 @@ Each has a name, a look, values, what it buys and bans, how it treats smugglers,
 
 - **Setting style:** a used, industrial future. Worn metal, hand-painted company warning stencils that the old owners left behind, cables, condensation, flickering fluorescent panels.
 - **Palette:** warm amber and sodium-orange interior lighting against cold blue-black space. Emergency red for alarms. Sickly green for the creature and infection. Avoid generic purple-and-pink neon.
-- **Ship view:** top-down cutaway with soft lighting per room (lights visibly turn off when power is cut), animated crew sprites with readable silhouettes, visible fire, smoke, sparks, and frost on breached rooms.
+- **Ship view:** top-down cutaway with soft lighting per room (lights visibly turn off when power is cut), animated crew sprites with readable silhouettes (drawn as full bodies on the side-on decks, each role with its own kit so it reads by shape; D-132), visible fire, smoke, sparks, and frost on breached rooms.
 - **UI:** looks like a ship's terminal from a cheap company: monospace font for the AI and readouts, chunky labeled buttons, slight scanline or CRT glow (subtle, and possible to turn off).
 - **Juice:** screen shake on hits, impact flashes, alarms that pulse the room borders, a heartbeat vignette when the creature is near.
 - **Accessibility:** text size setting, option to reduce flicker and screen shake, colorblind-safe alarm colors (use shape and icon as well as color), pause available always.

@@ -1,6 +1,7 @@
 // Content validation, shared by tools/content-check.js and the tests.
 // Each stage adds the rules for the content types it introduces (PLAN.md §4).
 
+import { ROLES } from '../sim/roles.js';
 import { AI_CATEGORIES, AI_SLOTS } from '../ai/categories.js';
 import { TRIGGERS } from '../ai/voice.js';
 import { SKILLS, validateCondition } from '../narrative/conditions.js';
@@ -101,7 +102,7 @@ export const REPLY_KINDS = Object.freeze(['move', 'open', 'carry', 'jettison', '
 function checkCrew(item, refs = {}) {
   const problems = [];
   if (!isNonEmptyString(item.name)) problems.push('missing name');
-  // Skills and traits are read by the condition language from S3.3 (D-112); S4.1 makes them matter to the work.
+  // Skills and traits are read by the condition language from S3.3 (D-112); skills speed their work from D-131.
   if (item.skills !== undefined) {
     if (!item.skills || typeof item.skills !== 'object' || Array.isArray(item.skills)) problems.push('skills must be an object of skill: level');
     else
@@ -109,6 +110,16 @@ function checkCrew(item, refs = {}) {
         if (!SKILLS.includes(skill)) problems.push(`skills: no skill "${skill}" (${SKILLS.join(', ')})`);
         if (!(Number.isInteger(level) && level >= 1 && level <= 5)) problems.push(`skills.${skill} must be a whole number from 1 to 5`);
       }
+  }
+  // A role (D-130) names the skill they excel at: it must be one of their skills, and none higher.
+  if (item.role !== undefined) {
+    if (!ROLES[item.role]) problems.push(`role: no role "${item.role}" (${Object.keys(ROLES).join(', ')})`);
+    else {
+      const skill = ROLES[item.role].skill;
+      const level = item.skills?.[skill] ?? 0;
+      if (level < 2) problems.push(`role ${item.role} needs ${skill} at 2 or more`);
+      for (const [other, l] of Object.entries(item.skills ?? {})) if (l > level) problems.push(`role ${item.role}: ${other} ${l} is higher than ${skill} ${level}, so they would excel at the wrong thing`);
+    }
   }
   if (item.traits !== undefined) {
     if (!Array.isArray(item.traits)) problems.push('traits must be a list of trait ids');

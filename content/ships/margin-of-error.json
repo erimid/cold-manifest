@@ -81,7 +81,7 @@
         { "kind": "cargo", "room": "hold", "label": "Manifest 7731-G · Sealed sample", "contents": "A cold-case canister under a biohazard seal, warmer than it should be. The manifest says soil." },
         { "kind": "cargo", "room": "hold", "label": "Manifest 7731-H · Rations", "contents": "Company rations, eighteen months past the date stamped on the lid." }
       ],
-      "crewStart": ["bridge", "reactor", "quarters"],
+      "crewStart": ["bridge", "reactor", "quarters", "weapons", "brig", "hold"],
       "hullPoints": 20,
       "hardpoints": [
         { "id": "hp_fore", "x": 32.6, "y": 5.0 },
