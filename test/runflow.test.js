@@ -69,6 +69,7 @@ test('the summary names the ending, the contract, the jumps and who died', () =>
 test('refuelling works at a port with room in the tanks, and nowhere else', () => {
   const sim = runSim();
   const run = sim.state.run;
+  run.fuel = run.fuelMax;
   assert.match(whyNoRefuel(sim), /full/, 'a full tank takes nothing');
   run.fuel = 4;
   assert.equal(whyNoRefuel(sim), null, 'the origin is a port');
