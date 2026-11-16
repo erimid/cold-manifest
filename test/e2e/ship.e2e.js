@@ -547,6 +547,20 @@ async function desktopTests(browser) {
     await powerIs(page, 'sensors', 1);
   });
 
+  await check('a damaged system says how to repair it, and Send to repair sends someone (D-118)', async () => {
+    await game(page, () => window.coldManifest.sim.enqueue({ type: 'debug.system', system: 'sensors', damage: 1 }));
+    const t = await target(page, 'sensors');
+    await page.mouse.click(t.mx, t.my);
+    await page.waitForSelector('#btn-repair', { state: 'visible', timeout: 2000 });
+    assert.match(await page.textContent('#status'), /1 of 1 bar broken/);
+    // Someone may already stand there (then the button says Repairing and is off); otherwise it sends the nearest hand.
+    if (await page.isEnabled('#btn-repair')) await page.click('#btn-repair');
+    else assert.match(await page.textContent('#status'), /is repairing it|will repair it|on the way/);
+    await page.waitForFunction(() => Object.values(window.coldManifest.sim.state.crew).some((m) => m.goal === 'sensors' || (m.room === 'sensors' && m.task === 'repair')), null, { timeout: 2000 });
+    await page.waitForFunction(() => window.coldManifest.sim.state.systems.sensors.damage === 0, null, { timeout: 30000 });
+    await page.waitForSelector('#btn-repair', { state: 'hidden', timeout: 2000 });
+  });
+
   await check('debug: fire, breach and thin air show in the status panel', async () => {
     const t = await target(page, 'reactor');
     await page.mouse.click(t.mx, t.my);
