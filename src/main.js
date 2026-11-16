@@ -25,7 +25,7 @@ import { createShipView } from './ui/shipview.js';
 import { renderContracts, renderEvent, renderHub, renderPort, renderScene, renderSummary } from './ui/screens.js';
 import { renderTitle } from './ui/title.js';
 
-const VERSION = '0.26.0';
+const VERSION = '0.27.0';
 
 const params = new URLSearchParams(window.location.search);
 const flags = {
@@ -34,6 +34,8 @@ const flags = {
   seed: params.get('seed') || newRunSeed(),
   // How many watches the crew starts in; ?watches=0 keeps no watch bill, so nobody walks off (for the browser tests).
   watches: ['0', '1', '2', '3'].includes(params.get('watches')) ? Number(params.get('watches')) : 2,
+  // How Margo runs what nobody mans (H.5); ?margo=book has her run it all by the book, as H.4 did.
+  margo: params.get('margo') === 'book' ? 'book' : 'own',
 };
 const onOff = (name) => (params.has(name) ? params.get(name) !== '0' : undefined);
 
@@ -123,7 +125,7 @@ let runCount = 0;
 /** Build a sim, its clock and its ship view, and wire the sound, auto-pause and run events to them. */
 function newGame(seed, { contract = null, pursuit } = {}) {
   // Only a run with a contract meets events: the sandbox has nowhere to show them.
-  sim = createSim({ seed, ship: content.require('ships', 'margin-of-error'), crew, watches: flags.watches, lines: content.all('ai-lines'), weapons: content.all('weapons'), rules, events: contract ? content.all('events') : [], sector: content.require('sectors', 'the-reach'), run: pursuit === undefined ? {} : { pursuit }, contract: contract?.template ?? null, ports, encounters: content.all('encounters') });
+  sim = createSim({ seed, ship: content.require('ships', 'margin-of-error'), crew, watches: flags.watches, margo: flags.margo, lines: content.all('ai-lines'), weapons: content.all('weapons'), rules, events: contract ? content.all('events') : [], sector: content.require('sectors', 'the-reach'), run: pursuit === undefined ? {} : { pursuit }, contract: contract?.template ?? null, ports, encounters: content.all('encounters') });
   clock = createClock({ sim, tickSeconds: TICK_SECONDS });
   clock.onChange(() => audio.play('pause'));
   runInfo = { contract, seed, seen: new Set([sim.state.run.at]), pending: null, doom: null, handedOver: false };

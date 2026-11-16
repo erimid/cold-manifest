@@ -276,7 +276,7 @@ async function touchTests(browser) {
     assert.match(await page.textContent('#station-life_support'), /Air plant/, 'each station is named');
     assert.match(await page.textContent('#station-sensors'), /Margo\s*1\.0/, 'and says who has it and how well');
     assert.equal(await page.locator('#breaker-board .pip, #btn-power-shields-plus').count(), 0, 'no bars to route');
-    for (const id of await page.$$eval('#breaker-board .btn', (list) => list.map((b) => b.id))) {
+    for (const id of await page.$$eval('#breaker-board .btn', (list) => list.filter((b) => b.offsetParent !== null).map((b) => b.id))) {
       const box = await page.locator(`#${id}`).boundingBox();
       assert.ok(box.width >= 44 && box.height >= 44, `${id} is ${box.width} by ${box.height}`);
     }
@@ -297,6 +297,33 @@ async function touchTests(browser) {
     await downIs(page, 'shields', false);
     await page.tap('#btn-stand-shields');
     await downIs(page, 'shields', true);
+  });
+
+  await check("Margo's row: pick a station, hand it to her or keep it for the crew, and tell her how to run it (H.5)", async () => {
+    const station = (id) => game(page, (key) => window.coldManifest.sim.state.stations[key], id);
+    assert.equal(await page.isVisible('#switch-margo'), false, 'no row until a station is picked');
+    await page.tap('#btn-station-sensors');
+    await page.waitForFunction(() => /Sensors/.test(document.querySelector('#margo-station').textContent));
+    assert.match(await page.textContent('#margo-note'), /Left to her/);
+    await page.tap('#btn-cover-crew');
+    await page.waitForFunction(() => window.coldManifest.sim.state.stations.sensors.cover === 'crew', null, { timeout: 2000 });
+    await page.waitForFunction(() => /Crew only/.test(document.querySelector('#station-sensors').textContent), null, { timeout: 2000 });
+    await page.tap('#btn-cover-fill');
+    await page.waitForFunction(() => window.coldManifest.sim.state.stations.sensors.cover === 'fill', null, { timeout: 2000 });
+    await page.tap('#btn-manner-quiet');
+    await page.waitForFunction(() => window.coldManifest.sim.state.stations.sensors.runs === 'quiet', null, { timeout: 2000 });
+    assert.match(await page.textContent('#margo-note'), /Her order: quiet/);
+    assert.match(await page.textContent('#station-sensors'), /Margo, quiet/);
+    await page.tap('#btn-manner-own');
+    await page.waitForFunction(() => window.coldManifest.sim.state.stations.sensors.order === null, null, { timeout: 2000 });
+    assert.equal((await station('sensors')).cover, 'fill');
+    // The reactor takes no orders on how to run it, and cannot be left dark.
+    await page.tap('#btn-station-reactor');
+    await page.waitForFunction(() => document.querySelector('#btn-manner-quiet').hidden);
+    assert.equal(await page.locator('#btn-cover-crew.is-blocked').count(), 1);
+    // Picked again, the row folds away and the panel is its old height.
+    await page.tap('#btn-station-reactor');
+    await page.waitForFunction(() => document.querySelector('#switch-margo').hidden);
   });
 
   await check('the big switches: reactor output, lights by deck and the lift', async () => {
