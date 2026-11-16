@@ -224,7 +224,7 @@ export function whyNoDeliver(sim) {
   if (contract.status === 'delivered') return 'the cargo has been handed over';
   if (contract.status === 'failed') return `the contract has failed: ${FAILURES[contract.reason] ?? contract.reason}`;
   if (run.at !== run.map.delivery) return 'the cargo is handed over at the drop';
-  if (sim.state.fight && !sim.state.fight.over) return 'not in a fight';
+  if (sim.state.boarding) return 'not with a party at the lock';
   if (!contractCrates(sim).length) return contract.claim && !contract.claim.done ? `nothing to hand over: the claim at ${nodeOf(run.map, contract.claim.node)?.name ?? 'the claim'} was never worked` : 'nothing of the contract is aboard';
   return null;
 }

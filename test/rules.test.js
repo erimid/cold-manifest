@@ -9,7 +9,6 @@ import { riskOf } from '../src/ai/judgement.js';
 import { gatherRefs, validateContent } from '../src/engine/content-schema.js';
 import { RISK_ROOMS, buildRules, checkRule } from '../src/narrative/rules.js';
 import { killCrew } from '../src/sim/atmosphere.js';
-import { enemyOf } from '../src/sim/combat.js';
 import { memoryTypes, refusalOf, remember, topMemory } from '../src/sim/memory.js';
 import { COMMAND_TYPES, createSim } from '../src/sim/sim.js';
 import { readContentFiles } from '../tools/lib/load-content.js';
@@ -116,14 +115,4 @@ test('a refusal that names no memory still refuses, and says so on the bus', () 
   assert.equal(heard.length, 1);
   assert.equal(heard[0].memory, null);
   assert.equal(heard[0].reason, 'Ilse will not go into Medbay.');
-});
-
-test('a memory can be read from the enemy ship, where a boarder stands', () => {
-  const sim = simWith(RULES);
-  remember(sim, sim.state.crew.ilse, 'burn', { room: 'medbay' });
-  sim.enqueue({ type: 'debug.fight', enemy: sim.catalog.enemies[0] });
-  sim.step();
-  assert.ok(enemyOf(sim), 'a fight to board in');
-  assert.equal(topMemory(sim, sim.state.crew.ilse), 'burns in Medbay');
-  assert.match(topMemory(enemyOf(sim), sim.state.crew.ilse), /^burns in /);
 });

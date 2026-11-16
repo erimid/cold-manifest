@@ -88,7 +88,7 @@
         { "id": "hp_mid", "x": 30.6, "y": 6.8 },
         { "id": "hp_keel", "x": 29.3, "y": 10.0 }
       ],
-      "weapons": ["pulse-laser", "slug-thrower"],
+      "weapons": ["point-defence", "slug-thrower"],
       "power": {
         "reactor": 8,
         "lightsPerBar": 6,

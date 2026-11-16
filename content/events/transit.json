@@ -116,7 +116,7 @@
           "requires": { "crew": { "skill": "negotiation" }, "as": "voice" },
           "outcomes": [
             { "weight": 3, "text": "{voice} asks the officer's name, then the officer's captain's name, then whether the captain knows about the fee. The lane is clear in under a minute." },
-            { "weight": 1, "text": "{voice} pushes one question too far. The channel goes quiet, and then the cutter's guns come round.", "effects": [{ "do": "fight", "ship": "knife-cutter" }] }
+            { "weight": 1, "text": "{voice} pushes one question too far. The channel goes quiet, and then the cutter's guns come round.", "effects": [{ "do": "contact", "encounter": "patrol-cutter", "range": 20 }] }
           ]
         },
         {
@@ -124,7 +124,7 @@
           "label": "Say nothing and burn through the line",
           "outcomes": [
             { "weight": 1, "text": "They were not expecting it. By the time anyone on that cutter has put down a cup, you are a heat trace and a bad report." },
-            { "weight": 2, "text": "They were expecting it. The cutter is already turning.", "effects": [{ "do": "fight", "ship": "knife-cutter" }] }
+            { "weight": 2, "text": "They were expecting it. The cutter is already turning.", "effects": [{ "do": "contact", "encounter": "patrol-cutter", "range": 30 }] }
           ]
         }
       ]
@@ -145,7 +145,7 @@
               "text": "A lifeboat, long empty, its locker still sealed. Somebody packed it for a fight they did not get to have.",
               "effects": [{ "do": "crate", "kind": "ammo", "label": "Ordnance crate, lifeboat issue" }]
             },
-            { "weight": 2, "text": "The beacon is bolted to a rock. The skiff behind the rock has been waiting some time.", "effects": [{ "do": "fight", "ship": "salvager-skiff" }] },
+            { "weight": 2, "text": "The beacon is bolted to a rock. The skiff behind the rock has been waiting some time.", "effects": [{ "do": "contact", "encounter": "raider-skiff", "range": 15 }] },
             { "weight": 1, "text": "By the time you match the drift the beacon has stopped. There is nothing on the sensors, and there was nothing on them before." }
           ]
         },

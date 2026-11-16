@@ -21,7 +21,6 @@ const room = (sim, id) => {
 const member = (sim, id) => sim.state.crew[id];
 const others = (sim, roomId, but) => Object.values(sim.state.crew).filter((other) => other.alive && other.room === roomId && other.id !== but);
 const run = (sim) => sim.state.run ?? undefined;
-const fightOn = (sim) => Boolean(sim.state.fight && !sim.state.fight.over);
 
 export const FACTS = Object.freeze({
   // ---------- the run ----------
@@ -35,7 +34,10 @@ export const FACTS = Object.freeze({
   'place.kind': { value: 'string', get: (sim) => run(sim)?.map.nodes.find((node) => node.id === run(sim).at)?.kind },
   flag: { args: { name: 'string' }, value: 'any', get: (sim, a) => run(sim)?.flags?.[a.name] ?? 0 },
   'event.met': { args: { event: 'event' }, value: 'boolean', get: (sim, a) => Boolean(run(sim)?.events?.met.includes(a.event)) },
-  fight: { value: 'boolean', get: fightOn },
+  /** A ship is clamped to our lock, its party at the door or aboard (H.2); the duel's `fight` fact went with the duel (H.3). */
+  boarded: { value: 'boolean', get: (sim) => Boolean(sim.state.boarding) },
+  /** A ship on the scope is closing on us or alongside. */
+  hunted: { value: 'boolean', get: (sim) => sim.state.scope.contacts.some((contact) => contact.state === 'closing' || contact.state === 'alongside') },
 
   // ---------- the contract and standing (S3.4) ----------
   /** The kind of contract on this run (smuggling, courier, salvage); no value without one. */
@@ -69,7 +71,7 @@ export const FACTS = Object.freeze({
   'room.dark': { args: { room: 'room' }, value: 'boolean', get: (sim, a) => room(sim, a.room) && lightIn(room(sim, a.room)) < DARK_ROOM },
   'room.gone': { args: { room: 'room' }, value: 'boolean', get: (sim, a) => (sim.state.rooms[a.room] ? Boolean(sim.state.rooms[a.room].jettisoned) : undefined) },
   /** How many of ours stand in a room. */
-  'room.crew': { args: { room: 'room' }, value: 'number', get: (sim, a) => room(sim, a.room) && others(sim, a.room).filter((other) => other.owner === 'player' && other.task !== 'crossing').length },
+  'room.crew': { args: { room: 'room' }, value: 'number', get: (sim, a) => room(sim, a.room) && others(sim, a.room).filter((other) => other.owner === 'player').length },
   /** Is anyone who is not ours in the room? */
   'room.foes': { args: { room: 'room' }, value: 'boolean', get: (sim, a) => room(sim, a.room) && others(sim, a.room).some((other) => other.owner !== 'player') },
   /** Is anyone of ours in the room, other than `crew`? */

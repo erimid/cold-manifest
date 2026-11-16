@@ -15,6 +15,8 @@ import { TICK_RATE, checkInvariants, createSim } from '../src/sim/sim.js';
 import { CATALOG, CREW, SHIP, content, shipCopy } from './helpers.js';
 
 const ENCOUNTERS = content.all('encounters');
+/** The kinds of ship that come aboard (H.2); the rest keep their distance (H.3). */
+const BOARDERS = ENCOUNTERS.filter((item) => item.party);
 const SECTOR = content.require('sectors', 'the-reach');
 
 const newSim = (seed = 'boarded', extra = {}) => createSim({ seed, ship: SHIP, crew: CREW, ...CATALOG, encounters: ENCOUNTERS, ...extra });
@@ -64,9 +66,10 @@ const party = (sim) => (sim.state.boarding?.party ?? []).map((id) => sim.state.c
 
 // ---------- content ----------
 
-test('every encounter sends a party aboard, and the checker says what is wrong with a bad one', () => {
+test('every ship that boards sends a party aboard, the rest send none, and the checker says what is wrong with a bad one', () => {
   assert.deepEqual(Object.keys(GOALS).sort(), ['cargo', 'crew', 'inspect', 'salvage']);
-  for (const def of ENCOUNTERS) {
+  for (const def of ENCOUNTERS.filter((item) => !GOALS[item.wants])) assert.equal(def.party, undefined, `${def.id} never docks (H.3)`);
+  for (const def of BOARDERS) {
     assert.ok(def.party, `${def.id} has a party`);
     assert.deepEqual(validateParty(def.party, def.wants), [], def.id);
     assert.ok(def.party.bribe, `${def.id} can be bought off at the lock`);
@@ -434,7 +437,7 @@ test('every kind of party, with the captain doing anything at all, always leaves
   const rooms = SHIP.rooms.map((room) => room.id);
   const ended = {};
   for (let i = 0; i < 12; i++) {
-    for (const def of ENCOUNTERS) {
+    for (const def of BOARDERS) {
       const sim = newSim(`stuck-${i}-${def.id}`);
       contraband(sim);
       const dice = sim.rng.stream('cosmetic');

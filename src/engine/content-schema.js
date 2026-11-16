@@ -91,6 +91,10 @@ function checkWeapon(item) {
   if (!Number.isInteger(item.pierce) || item.pierce < 0) problems.push('pierce must be a whole number, 0 or more: each point makes a brace spend one more unit to stop it');
   if (item.mount !== undefined && typeof item.mount !== 'boolean') problems.push('mount, if given, must be true or false');
   if (item.ammo !== undefined && !(item.ammo && Number.isInteger(item.ammo.magazine) && item.ammo.magazine >= 1)) problems.push('ammo, if given, must be { magazine }: the rounds the gun holds, at least 1');
+  // A mount's role (H.3, D-172): point defence fires by itself at drones and pods; a gun is laid on a contact, out to its range.
+  if (item.role !== undefined && !['pd', 'gun'].includes(item.role)) problems.push('role, if given, must be "pd" (point defence) or "gun" (the deterrent gun)');
+  if (item.role === 'gun' && !positive(item.range)) problems.push('a gun needs a range: how far out, in scope units, it can reach a contact');
+  if (item.range !== undefined && !positive(item.range)) problems.push('range must be scope units above 0');
   const effects = item.effects;
   if (!effects || typeof effects !== 'object' || !chance(effects.fire) || !chance(effects.breach) || !chance(effects.crew)) problems.push('effects needs fire, breach and crew, each between 0 and 1');
   return problems;
@@ -182,7 +186,7 @@ function checkSectorDef(item) {
       }
   }
   const chase = item.pursuit;
-  if (!chase || !share(chase.chance) || !isNonEmptyString(chase.ship) || !Number.isInteger(chase.lead) || chase.lead < 0 || !Number.isInteger(chase.sight) || chase.sight < 0) problems.push('pursuit must be { chance, ship, lead, sight }');
+  if (!chase || !share(chase.chance) || !isNonEmptyString(chase.encounter) || !Number.isInteger(chase.lead) || chase.lead < 0 || !Number.isInteger(chase.sight) || chase.sight < 0) problems.push('pursuit must be { chance, encounter, lead, sight }');
   if (problems.length) return problems;
   const kindsNeeded = Object.values(item.kinds).reduce((n, rule) => n + (rule.minimum ?? 0), 0);
   if (kindsNeeded > item.nodes[0] - 2) return [`the kinds' minimums need ${kindsNeeded} points between the ends, and a chart may have only ${item.nodes[0] - 2}`];
@@ -267,18 +271,18 @@ const ITEM_RULES = {
   contracts: checkContract,
   ports: (item) => checkPort(item),
   factions: (item) => checkFaction(item),
-  encounters: (item, refs) => validateEncounter(item, { ships: refs.ships, factions: refs.factions, nodeKinds: new Set(Object.keys(NODE_KINDS)) }),
+  encounters: (item, refs) => validateEncounter(item, { weapons: refs.weapons, encounters: refs.encounters, factions: refs.factions, nodeKinds: new Set(Object.keys(NODE_KINDS)) }),
 };
 
 /**
  * Everything a condition, an effect or a line can point at, gathered from all the files before any
  * one of them is checked: ids by type as Sets. Rooms and doors are those of our own ships (an event
- * happens aboard the ship we fly); `ships` are the ones that can be fought.
+ * happens aboard the ship we fly). There are no enemy ships since H.3: other ships are encounters.
  */
 export function gatherRefs(files) {
   const ids = (type, keep = () => true) => new Set(files.filter((file) => !file.error && typeOfPath(file.path) === type && Array.isArray(file.data?.items)).flatMap((file) => file.data.items.filter((item) => item && typeof item.id === 'string' && keep(item))));
   const of = (type, keep) => new Set([...ids(type, keep)].map((item) => item.id));
-  const ours = [...ids('ships', (item) => item.enemy !== true)];
+  const ours = [...ids('ships')];
   const inShips = (key) => new Set(ours.flatMap((ship) => (Array.isArray(ship[key]) ? ship[key] : []).map((part) => part?.id).filter(Boolean)));
   return {
     rooms: inShips('rooms'),
@@ -289,7 +293,7 @@ export function gatherRefs(files) {
     memories: of('memories'),
     phrases: new Set([...ids('memories')].flatMap((item) => Object.keys(item.phrases && typeof item.phrases === 'object' ? item.phrases : {}))),
     risks: of('risks'),
-    ships: of('ships', (item) => item.enemy === true),
+    weapons: of('weapons'),
     scenes: of('scenes'),
     events: of('events'),
     threats: of('threats'),
@@ -311,8 +315,7 @@ export function validateContent(files) {
   const seenLines = new Map();
   const fittedWeapons = []; // [label, weapon id] for every weapon a ship mounts
   const unmountable = new Set(); // weapons marked mount: false, such as a drone's zap
-  const pursuers = []; // [label, ship id] for every sector's pursuer
-  const enemyShips = new Set();
+  const pursuers = []; // [label, encounter id] for every sector's pursuer
   const refs = gatherRefs(files);
   const followed = new Set(); // events another event leads on to
   const unplaced = []; // [label, id] for events with no `at`
@@ -363,8 +366,7 @@ export function validateContent(files) {
 
       if (type === 'weapons' && item.mount === false) unmountable.add(item.id);
       if (type === 'ships' && Array.isArray(item.weapons)) for (const id of item.weapons) fittedWeapons.push([label, id]);
-      if (type === 'sectors' && isNonEmptyString(item.pursuit?.ship)) pursuers.push([label, item.pursuit.ship]);
-      if (type === 'ships' && item.enemy === true) enemyShips.add(item.id);
+      if (type === 'sectors' && isNonEmptyString(item.pursuit?.encounter)) pursuers.push([label, item.pursuit.encounter]);
 
       if (type === 'ai-lines' && isNonEmptyString(item.text)) {
         const key = normalizeLine(item.text);
@@ -382,7 +384,7 @@ export function validateContent(files) {
     else if (unmountable.has(id)) errors.push(`${label}: fits "${id}", which no ship can mount`);
   }
 
-  for (const [label, id] of pursuers) if (!enemyShips.has(id)) errors.push(`${label}: is followed by "${id}", which is not an enemy ship`);
+  for (const [label, id] of pursuers) if (!refs.encounters.has(id)) errors.push(`${label}: is followed by "${id}", which is not an encounter`);
 
   for (const [label, id] of unplaced) if (!followed.has(id)) errors.push(`${label}: has no "at" and no other event leads on to it, so it can never be met`);
 

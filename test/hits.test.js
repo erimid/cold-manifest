@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { FIRE_START } from '../src/sim/atmosphere.js';
-import { HIT, ROOM_HULL_PER_DAMAGE, applyHit, enemyOf } from '../src/sim/combat.js';
+import { HIT, ROOM_HULL_PER_DAMAGE, applyHit } from '../src/sim/combat.js';
 import { supply, used } from '../src/sim/power.js';
 import { TICK_RATE, checkInvariants } from '../src/sim/sim.js';
 import { content, newCrewedSim, newSim, newTalkingSim, putCrew } from './helpers.js';
@@ -21,14 +21,6 @@ function collect(sim, type) {
   const seen = [];
   sim.events.on(type, (event) => seen.push(event));
   return seen;
-}
-
-function fight(sim) {
-  sim.enqueue({ type: 'debug.fight', enemy: 'target-drone' });
-  sim.step();
-  sim.enqueue({ type: 'debug.combat', action: 'scan' }); // a perfect lock: these tests are about what a hit does
-  sim.step();
-  return enemyOf(sim);
 }
 
 test('a hit breaks a bar of the room\'s system per point of damage, and the power lets go at once', () => {
@@ -165,26 +157,9 @@ test('the dice are rolled the same whatever the room holds, so one change does n
   assert.equal(a.rng.stream('combat').next(), b.rng.stream('combat').next());
 });
 
-test('shots on the drone: what happens aboard it is announced as theirs, not ours', () => {
-  const sim = newCrewedSim('drone-fire');
-  const enemy = fight(sim);
-  const ours = collect(sim, 'fire.started');
-  const theirs = collect(sim, 'enemy.fire.started');
-  const hits = collect(sim, 'enemy.hull.hit');
-  const damage = collect(sim, 'enemy.system.damage');
-  applyHit(sim, enemy, 'shields', sure({ fire: 1 }));
-  sim.step();
-  assert.equal(ours.length, 0);
-  assert.equal(theirs.length, 1);
-  assert.equal(hits.length, 1);
-  assert.deepEqual(damage.map((e) => e.system), ['shields']);
-  assert.equal(enemy.state.systems.shields.power, 0, 'their shield lost its bar');
-  assert.deepEqual(checkInvariants(sim), []);
-});
-
-test('debug.hit lands a shot at once on either ship; force makes it a hit through shields', () => {
+test('debug.hit lands a shot on us at once; force makes it a hit through a brace', () => {
   const sim = newCrewedSim('debug-hit');
-  assert.match(sim.whyNot({ type: 'debug.hit', at: 'them', room: null, weapon: 'slug-thrower' }), /no enemy ship/);
+  assert.match(sim.whyNot({ type: 'debug.hit', at: 'them', room: null, weapon: 'slug-thrower' }), /no other ship/);
   assert.match(sim.whyNot({ type: 'debug.hit', at: 'us', room: 'nowhere', weapon: 'slug-thrower' }), /no room/);
   assert.match(sim.whyNot({ type: 'debug.hit', at: 'us', room: null, weapon: 'ray-gun' }), /no weapon/);
   assert.match(sim.whyNot({ type: 'debug.hit', at: 'sideways', room: null, weapon: 'slug-thrower' }), /at must be/);
@@ -197,7 +172,7 @@ test('debug.hit lands a shot at once on either ship; force makes it a hit throug
   sim.step();
   assert.equal(resolved.length, 1);
   assert.equal(resolved[0].result, 'hit');
-  assert.equal(resolved[0].side, 'enemy', 'a shot at us is theirs');
+  assert.equal(resolved[0].at, 'us');
   assert.equal(resolved[0].damage, 2);
   assert.equal(resolved[0].effects.system, 2);
   assert.equal(sim.state.shield.charge, 2, 'a forced hit leaves the capacitor alone');
@@ -213,42 +188,6 @@ test('debug.hit lands a shot at once on either ship; force makes it a hit throug
   sim.step();
   assert.ok(sim.state.rooms[resolved[2].room]);
   assert.deepEqual(checkInvariants(sim), []);
-});
-
-test('a hit that takes the last hull point decides the fight', () => {
-  const sim = newCrewedSim('last');
-  const enemy = fight(sim);
-  enemy.state.hull.points = 2;
-  sim.enqueue({ type: 'debug.hit', at: 'them', room: 'reactor', weapon: 'slug-thrower', force: true });
-  sim.step();
-  assert.deepEqual({ ...sim.state.fight.over, tick: 0 }, { outcome: 'destroyed', tick: 0 });
-  assert.match(sim.whyNot({ type: 'debug.hit', at: 'them', room: null, weapon: 'slug-thrower' }), /over/);
-});
-
-test('real shots: a stripped drone under fire burns, breaks and holes through the same code', () => {
-  const sim = newCrewedSim('range');
-  const enemy = fight(sim);
-  Object.assign(enemy.state.systems.shields, { power: 0 });
-  Object.assign(enemy.state.systems.engines, { power: 0 });
-  enemy.state.shield.charge = 0;
-  enemy.state.hull.points = enemy.state.hull.max = 400; // let it soak up a long fight
-  for (const system of ['sensors', 'doors', 'engines']) sim.enqueue({ type: 'power.add', system, delta: -1 });
-  sim.step();
-  for (let i = 0; i < 3; i++) sim.enqueue({ type: 'power.add', system: 'weapons', delta: 1 });
-  sim.enqueue({ type: 'weapon.target', slot: 0, room: 'weapons' });
-  sim.enqueue({ type: 'weapon.target', slot: 1, room: 'reactor' });
-  const fires = collect(sim, 'enemy.fire.started');
-  const breaches = collect(sim, 'enemy.breach.opened');
-  const broken = collect(sim, 'enemy.system.damage');
-  for (let i = 0; i < 240 * TICK_RATE; i++) {
-    sim.step();
-    const problems = checkInvariants(sim);
-    assert.deepEqual(problems, [], `tick ${sim.state.tick}`);
-  }
-  assert.ok(fires.length > 0, 'something caught fire');
-  assert.ok(breaches.length > 0, 'something was holed');
-  assert.ok(broken.some((e) => e.cause === 'hit'), 'something was broken by a hit');
-  assert.equal(enemy.state.systems.reactor.damage, enemy.state.systems.reactor.level, 'their reactor is wrecked');
 });
 
 test('Margo says something when we are hit', () => {

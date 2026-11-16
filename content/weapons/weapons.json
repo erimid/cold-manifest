@@ -1,6 +1,24 @@
 {
-  "note": "Ship weapons (brief §6, §7). power: bars it needs. charge: seconds to ready a shot. flight: seconds the shot is in the air. damage: hull points, and system bars from S2.2. pierce: extra brace units it takes to stop (S2.8, D-075). ammo: { magazine } for a heavy gun that fires rounds carried up from the hold, one round a shot (S2.8, D-076); none for a gun that needs no rounds. effects: chances of fire and breach and harm to crew in the room, used from S2.2. mount: false marks a weapon no ship fits, such as a carrier drone's zap (S2.5).",
+  "note": "Ship weapons (brief §6, §7). power: bars it needs. charge: seconds to ready a shot. flight: seconds the shot is in the air. damage: hull points, and system bars from S2.2. pierce: extra brace units it takes to stop (S2.8, D-075). ammo: { magazine } for a heavy gun that fires rounds carried up from the hold, one round a shot (S2.8, D-076); none for a gun that needs no rounds. effects: chances of fire and breach and harm to crew in the room, used from S2.2. mount: false marks a weapon no ship fits, such as a carrier drone's zap (S2.5). role (H.3, D-172): what a mount on our ship is for: \"pd\" is point defence, which fires by itself at drones on the hull and boarding pods in the air; \"gun\" is the deterrent gun, laid on a contact on the scope and never on a room, out to its `range` in scope units. A weapon with no role that we do not mount is what a contact fires at us (its encounter's `guns`).",
   "items": [
+    {
+      "id": "point-defence",
+      "name": "Point-defence turret",
+      "short": "PD",
+      "kind": "energy",
+      "role": "pd",
+      "power": 1,
+      "charge": 2.5,
+      "flight": 0.2,
+      "damage": 0,
+      "pierce": 0,
+      "effects": {
+        "fire": 0,
+        "breach": 0,
+        "crew": 0
+      },
+      "blurb": "A company-fit flak turret. It looks after itself: whatever comes at the hull small enough to shoot, a drone or a boarding pod, it shoots."
+    },
     {
       "id": "pulse-laser",
       "name": "Pulse laser",
@@ -16,14 +34,15 @@
         "breach": 0,
         "crew": 0.15
       },
-      "blurb": "Cheap, quick, needs nothing but power. Stopped dead by a brace."
+      "blurb": "Cheap, quick, needs nothing but power. What a patrol or a raider fires across your bow, and then into it. Stopped dead by a brace.",
+      "mount": false
     },
     {
       "id": "slug-thrower",
       "name": "Slug thrower",
       "short": "Slugs",
       "kind": "kinetic",
-      "power": 2,
+      "power": 1,
       "charge": 13,
       "flight": 1.1,
       "damage": 2,
@@ -36,7 +55,9 @@
         "breach": 0.45,
         "crew": 0.3
       },
-      "blurb": "A mass driver salvaged from a mining rig. Slow. Makes holes. Fed by hand, three slugs to a load."
+      "blurb": "A mass driver salvaged from a mining rig, and the one gun a hauler is allowed. Slow, loud, fed by hand three slugs to a load. It cannot sink anything; it can make a ship think twice.",
+      "role": "gun",
+      "range": 30
     },
     {
       "id": "breaching-lance",
@@ -56,7 +77,8 @@
         "breach": 0.2,
         "crew": 0.4
       },
-      "blurb": "Burns through a brace as if it were half there. Hungry, and every shot is a cell someone carried up from the hold."
+      "blurb": "Burns through a brace as if it were half there. Hungry, and every shot is a cell someone carried up from the hold.",
+      "mount": false
     },
     {
       "id": "drone-zap",

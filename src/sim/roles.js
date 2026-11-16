@@ -52,7 +52,7 @@ export function skillWords(member) {
 export function bestSkillIn(ship, roomId, skill) {
   let best = 0;
   for (const member of Object.values(ship.state.crew)) {
-    if (!member.alive || member.room !== roomId || member.task === 'crossing' || member.path?.length) continue;
+    if (!member.alive || member.room !== roomId || member.path?.length) continue;
     if ((member.owner ?? 'player') !== (ship.side ?? 'player')) continue;
     best = Math.max(best, skillOf(member, skill));
   }

@@ -79,7 +79,7 @@
             {
               "weight": 1,
               "text": "You are three crates in when a ship comes round her hull with its guns out, and a voice on the channel says the claim is theirs.",
-              "effects": [{"do": "contract.load", "count": 3}, {"do": "fight", "ship": "knife-cutter"}]
+              "effects": [{"do": "contract.load", "count": 3}, {"do": "contact", "encounter": "raider-skiff", "range": 25}]
             }
           ]
         },

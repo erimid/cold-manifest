@@ -51,7 +51,11 @@ export const EVENT_SOUNDS = Object.freeze({
   'power.brownout': 'powerdown',
   'room.jettisoned': 'thunk',
   'crew.died': 'flatline',
-  'fight.started': 'klaxon',
+  // Ships that mean it (H.3): a toll called, pods coming across, a round fired at us.
+  'contact.toll': 'klaxon',
+  'pods.launched': 'klaxon',
+  'contact.fired': 'shot',
+  'pod.downed': 'thunk',
   // The scope (H.1): a new return, and a ship coming alongside.
   'contact.sighted': 'chirp',
   'contact.alongside': 'klaxon',

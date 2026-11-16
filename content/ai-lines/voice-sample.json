@@ -23,15 +23,15 @@
     { "id": "vs.crew_death.002", "category": "crew_death", "conditions": { "trigger": "crew.died" }, "text": "I've stopped {crew_name}'s pay clock. It's the last thing the company lets me do for anyone." },
     { "id": "vs.crew_death.003", "category": "crew_death", "conditions": { "trigger": "crew.died" }, "text": "{crew_name} is dead. I'll keep the name on the roster until you tell me otherwise. Don't tell me yet." },
 
-    { "id": "vs.combat_start.001", "category": "combat_start", "conditions": { "trigger": "fight.started" }, "text": "Contact, close, and not answering to any name I have on file. Nobody friendly arrives like that." },
-    { "id": "vs.combat_start.002", "category": "combat_start", "conditions": { "trigger": "fight.started" }, "text": "Ship alongside. They can count our lamps from there. Something to think about." },
+    { "id": "vs.combat_start.001", "category": "combat_start", "conditions": { "trigger": "contact.alongside" }, "text": "Contact, close, and not answering to any name I have on file. Nobody friendly arrives like that." },
+    { "id": "vs.combat_start.002", "category": "combat_start", "conditions": { "trigger": "contact.alongside" }, "text": "Ship alongside. They can count our lamps from there. Something to think about." },
 
-    { "id": "vs.combat_progress.001", "category": "combat_progress", "conditions": { "trigger": "enemy.hull.hit" }, "text": "Hit on their hull. I've logged it under deliveries." },
-    { "id": "vs.combat_progress.002", "category": "combat_progress", "conditions": { "trigger": "enemy.lock.gained" }, "text": "They've got us lined up. Lamps, drive, noise. Pick one to lose." },
-    { "id": "vs.combat_progress.003", "category": "combat_progress", "conditions": { "trigger": "fight.offer" }, "text": "They're offering to stop. People who are winning don't." },
+    { "id": "vs.combat_progress.001", "category": "combat_progress", "conditions": { "trigger": "contact.struck" }, "text": "Hit on their hull. I've logged it under deliveries." },
+    { "id": "vs.combat_progress.002", "category": "combat_progress", "conditions": { "trigger": "contact.fired" }, "text": "They've got us lined up. Lamps, drive, noise. Pick one to lose." },
+    { "id": "vs.combat_progress.003", "category": "combat_end", "conditions": { "trigger": "contact.deterred" }, "text": "They're offering to stop. People who are winning don't." },
 
-    { "id": "vs.combat_end.001", "category": "combat_end", "conditions": { "trigger": "fight.won" }, "text": "They're finished. For the report: they started it. I always write that. Sometimes it's true." },
-    { "id": "vs.combat_end.002", "category": "combat_end", "conditions": { "trigger": "fight.parted" }, "text": "They're leaving and so are we. Call it a disagreement about distance." },
+    { "id": "vs.combat_end.001", "category": "combat_end", "conditions": { "trigger": "contact.deterred" }, "text": "They're finished. For the report: they started it. I always write that. Sometimes it's true." },
+    { "id": "vs.combat_end.002", "category": "combat_end", "conditions": { "trigger": "contact.lost" }, "text": "They're leaving and so are we. Call it a disagreement about distance." },
 
     { "id": "vs.order_confirm.001", "category": "order_confirm", "conditions": { "trigger": "crew.ordered" }, "text": "{crew_name}'s moving. Grumbling, but moving." },
     { "id": "vs.order_confirm.002", "category": "order_confirm", "conditions": { "trigger": "captain.stood_down" }, "text": "Order withdrawn. Thank you. I won't mention it again." },

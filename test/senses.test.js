@@ -4,13 +4,10 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { enemyOf } from '../src/sim/combat.js';
-import { LOCK, MISS, NOISE, contactView, hiddenRooms, lockQuality, missChance, resolvedRooms, roomView, sense, sensorGain, signature, watched } from '../src/sim/senses.js';
+import { NOISE, hiddenRooms, roomView, sense, sensorGain, signature, watched } from '../src/sim/senses.js';
 import { TICK_RATE, checkInvariants } from '../src/sim/sim.js';
 import { newCrewedSim, newSim, newTalkingSim } from './helpers.js';
 
-const DRONE = 'target-drone';
-const SKIFF = 'salvager-skiff';
 const seconds = (sim, s) => {
   for (let i = 0; i < Math.round(s * TICK_RATE); i++) sim.step();
 };
@@ -30,13 +27,6 @@ function goDark(sim, { sensors = true } = {}) {
     while (sim.state.systems[system].power > 0) go(sim, { type: 'power.add', system, delta: -1 });
   }
 }
-function fight(sim, enemy, { engage = true } = {}) {
-  go(sim, { type: 'debug.fight', enemy });
-  if (engage && sim.state.fight.phase === 'hail') go(sim, { type: 'fight.engage' });
-  return enemyOf(sim);
-}
-
-/** Take the crew who start in the hold off the ship, so it stands empty. */
 function emptyRooms(sim) {
   for (const member of Object.values(sim.state.crew)) if (member.room === 'hold') delete sim.state.crew[member.id];
 }
@@ -210,137 +200,3 @@ test('someone standing in a dark room is eyes on it; a fire in the dark is found
 });
 
 // ---------- the sensor return ----------
-
-test('their ship resolves room by room: nothing at first, bright and hot rooms soonest, slower without sensor power', () => {
-  const sim = newCrewedSim('scan');
-  seconds(sim, 1);
-  const enemy = fight(sim, DRONE);
-  assert.deepEqual(resolvedRooms(sim), [], 'a fresh contact is all static');
-  assert.match(sim.whyNot({ type: 'weapon.target', slot: 0, room: 'reactor' }), /sensors have not made that part of them out/);
-  // Put out the lamps in their weapons room: it is the last to resolve.
-  enemy.state.rooms.weapons.lightsOn = false;
-  const news = collect(sim, 'scan.resolved');
-  const order = [];
-  for (let i = 0; i < 40 * TICK_RATE && order.length < 5; i++) {
-    sim.step();
-    for (const id of resolvedRooms(sim)) if (!order.includes(id)) order.push(id);
-  }
-  assert.equal(order.length, 5, 'in the end every room is made out');
-  assert.equal(order.at(-1), 'weapons', `the dark room last: ${order.join(', ')}`);
-  assert.equal(news.at(-1).resolved, 5);
-  assert.equal(sim.whyNot({ type: 'weapon.target', slot: 0, room: 'reactor' }), null);
-  const withSensors = sim.state.tick;
-
-  // The same contact with our sensors unpowered: eyes and optics get there, in about twice the time.
-  const blind = newCrewedSim('scan');
-  seconds(blind, 1);
-  go(blind, { type: 'power.add', system: 'sensors', delta: -1 });
-  const start = blind.state.tick;
-  fight(blind, DRONE).state.rooms.weapons.lightsOn = false;
-  assert.ok(sensorGain(blind) < sensorGain(sim));
-  for (let i = 0; i < 120 * TICK_RATE && resolvedRooms(blind).length < 5; i++) blind.step();
-  assert.equal(resolvedRooms(blind).length, 5);
-  assert.ok(blind.state.tick - start > (withSensors - TICK_RATE) * 1.5, `passive scanning is slow: ${blind.state.tick - start} ticks against ${withSensors}`);
-  assert.deepEqual(checkInvariants(sim), []);
-});
-
-test('with our sensors dark the return goes stale: resolved rooms stay, but show the last scan', () => {
-  const sim = newCrewedSim('stale');
-  seconds(sim, 1);
-  const enemy = fight(sim, DRONE);
-  seconds(sim, 15);
-  assert.equal(contactView(sim, 'reactor').live, true);
-  go(sim, { type: 'power.add', system: 'sensors', delta: -1 });
-  enemy.state.rooms.reactor.fire = 0.5;
-  seconds(sim, 3);
-  const stale = contactView(sim, 'reactor', enemy);
-  assert.equal(stale.resolved, true, 'the map of them is not forgotten');
-  assert.equal(stale.live, false);
-  assert.equal(stale.fire, 0, 'but the fire that started since is not on it');
-  assert.ok(stale.age >= 3 * TICK_RATE);
-  go(sim, { type: 'power.add', system: 'sensors', delta: 1 });
-  sim.step();
-  assert.ok(contactView(sim, 'reactor', enemy).fire > 0, 'sensors back: the picture is fresh');
-});
-
-// ---------- running dark ----------
-
-test('a lock follows the signature: it comes slowly, goes when we run dark, and a lost lock is announced', () => {
-  const sim = newCrewedSim('lock');
-  seconds(sim, 1);
-  const enemy = fight(sim, SKIFF);
-  assert.ok(enemy.state.contact.lock < 0.1, 'a fresh contact: no lock yet');
-  assert.ok(missChance(enemy) > MISS.span - 0.1, 'no lock: most shots go wide');
-  const gained = collect(sim, 'enemy.lock.gained');
-  const lostIt = collect(sim, 'enemy.lock.lost');
-  seconds(sim, 10);
-  const bright = enemy.state.contact.lock;
-  assert.ok(bright > 0.8, `lit up, they have us: ${bright}`);
-  assert.equal(gained.length, 1);
-  assert.ok(Math.abs(bright - lockQuality(enemy, sim)) < 0.05, 'the lock settles to what the signature allows');
-  assert.ok(missChance(enemy) < 0.2);
-
-  goDark(sim, { sensors: false });
-  seconds(sim, 8);
-  assert.ok(enemy.state.contact.lock < LOCK.min, `dark, they lose us: ${enemy.state.contact.lock}`);
-  assert.equal(enemy.state.contact.locked, false);
-  assert.equal(lostIt.length, 1);
-  assert.ok(missChance(enemy) > 0.7);
-  assert.deepEqual(checkInvariants(sim), []);
-});
-
-/** Stand off against the skiff for five minutes and count what its guns do. `dark` runs dark first. */
-function underFire(seed, dark) {
-  const sim = newCrewedSim(seed);
-  seconds(sim, 1);
-  const enemy = fight(sim, SKIFF);
-  enemy.layout.tactics.board && (enemy.state.crew = Object.fromEntries(Object.entries(enemy.state.crew).slice(0, 1))); // only the pilot: nobody to board us
-  sim.state.hull.points = sim.state.hull.max = 100000;
-  if (dark) goDark(sim);
-  const tally = { shots: 0, hits: 0, blind: 0 };
-  sim.events.on('shot.resolved', (event) => {
-    if (event.side !== 'enemy') return;
-    tally.shots += 1;
-    if (event.result === 'hit') tally.hits += 1;
-    if (event.blind) tally.blind += 1;
-  });
-  for (let i = 0; i < 300 * TICK_RATE; i++) {
-    sim.step();
-    sim.state.fight.lastHarm = sim.state.tick; // no stalemate: we are here to be shot at
-    // Keep the ship as it was put: mend what they break, and hold the power where it is.
-    for (const room of Object.values(sim.state.rooms)) Object.assign(room, { fire: 0, breach: 0, oxygen: 1, hull: 1 });
-    for (const system of Object.values(sim.state.systems)) system.damage = 0;
-  }
-  assert.deepEqual(checkInvariants(sim), []);
-  return tally;
-}
-
-test('running dark changes hit rates: the same guns hit a lit ship far more often than a dark one', () => {
-  const lit = { shots: 0, hits: 0, blind: 0 };
-  const dark = { shots: 0, hits: 0, blind: 0 };
-  for (const seed of ['dark-1', 'dark-2', 'dark-3']) {
-    for (const [total, run] of [[lit, underFire(seed, false)], [dark, underFire(seed, true)]]) for (const key of Object.keys(total)) total[key] += run[key];
-  }
-  const rate = (t) => t.hits / t.shots;
-  assert.ok(lit.shots > 60 && dark.shots > 30, `${lit.shots} and ${dark.shots} shots`);
-  assert.ok(rate(lit) > 0.6, `lit: ${lit.hits} of ${lit.shots} hit`);
-  assert.ok(rate(dark) < 0.3, `dark: ${dark.hits} of ${dark.shots} hit`);
-  assert.ok(dark.blind > dark.shots * 0.5, `and most of their shots at a dark ship are fired blind: ${dark.blind} of ${dark.shots}`);
-  assert.equal(lit.blind, 0, 'a lit ship is never fired on blind once they have it');
-});
-
-test('their captain aims only at rooms its sensors have resolved, so a dark room is shot at last', () => {
-  const sim = newCrewedSim('aim');
-  seconds(sim, 1);
-  go(sim, { type: 'lights.all', on: false });
-  go(sim, { type: 'room.lights', room: 'bridge', on: true });
-  const enemy = fight(sim, SKIFF);
-  const aimed = collect(sim, 'weapon.fired').filter(() => false);
-  sim.events.on('weapon.fired', (event) => event.side === 'enemy' && !event.blind && aimed.push(event));
-  for (let i = 0; i < 40 * TICK_RATE && aimed.length < 2; i++) sim.step();
-  assert.ok(aimed.length >= 1, 'they fired');
-  const known = resolvedRooms(enemy);
-  assert.ok(known.includes('bridge'), 'the lit bridge is what they can see');
-  assert.ok(known.length < sim.layout.rooms.length, 'the dark rooms take them longer');
-  for (const shot of aimed) assert.ok(known.includes(shot.room), `aimed at ${shot.room}, which they had resolved`);
-});

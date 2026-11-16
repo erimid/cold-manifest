@@ -24,13 +24,25 @@
 //   docked     the clamp is on: what its party does aboard is H.2
 //   lost       it has given up and is leaving
 //
+// What a contact wants (`wants`) decides what it does once it has us (H.3,
+// D-175). Four come aboard (boarders.js): an inspection, a raid for cargo, a
+// bounty on one of the crew, a wrecker after a system; a grapple tender puts
+// its party across in pods that point defence can shoot down. Three never
+// dock: a bulwark holds a lane and charges a toll (`toll`), a drone carrier
+// sits off and swarms the hull with drones (`drones`), and a gunnery drone
+// scans us and calls in someone who will (`scan`). Some carry a gun (`guns`)
+// and fire on us when we run, when we shoot, or when we will not pay; and
+// any of them can be shot at with our deterrent gun (combat.js) until its
+// `nerve` breaks.
+//
 // Positions are kept relative to our ship (we are always the origin), x to
 // the right of the scope and y up it, in scope units (KM_PER_UNIT km each).
 // Velocities are absolute, so cutting our drive changes nothing about how the
 // picture moves. Bearings are degrees clockwise from the top of the scope.
 
 import { validateParty, startBoarding } from './boarders.js';
-import { hasPilot, startFight } from './combat.js';
+import { DRONE_WEAPON, GUN, fireOn, hasPilot } from './combat.js';
+import { changeReputation } from './contracts.js';
 import { isHome } from './crew.js';
 import { flare as flash, sensorGain, signature } from './senses.js';
 
@@ -45,9 +57,17 @@ export const ENDINGS = Object.freeze({
   bluff: 'Bluffed',
   jumped: 'Left behind by a jump',
   docked: 'Docked with us',
+  deterred: 'Driven off by the gun',
+  paid: 'Paid the toll',
+  scanned: 'Scanned us and called it in',
+  swarmed: 'Spent its drones on us',
 });
-/** What a contact can be looking for (H.2 gives each a boarding party with that goal). */
-export const WANTS = Object.freeze(['inspect', 'cargo', 'crew', 'salvage']);
+/** What a contact can be looking for. The first four send a boarding party with that goal (H.2); the rest never dock (H.3). */
+export const WANTS = Object.freeze(['inspect', 'cargo', 'crew', 'salvage', 'toll', 'hull', 'scan']);
+/** The goals a boarding party comes aboard for. */
+export const BOARDING_WANTS = Object.freeze(['inspect', 'cargo', 'crew', 'salvage']);
+/** When a contact's gun opens up on us (`guns.when`): we run from it, we shoot at it, it is closing, or we will not pay its toll. */
+export const GUN_WHEN = Object.freeze(['running', 'shot', 'closing', 'toll']);
 /** The lies a hail can tell. */
 export const BLUFFS = Object.freeze({ transponder: 'False transponder', manifest: 'False manifest' });
 /** The kinds of decoy. */
@@ -86,6 +106,10 @@ export const DECOYS = Object.freeze({
   crate: Object.freeze({ strength: 0.3, seconds: 180, kick: 0.12, flash: 0 }),
 });
 const DECOY_REACH = 4;
+/** A drone takes `flight` seconds to cross to our hull, its zaps miss `miss` of the time, and its cell is flat `life` seconds after it lands. */
+export const DRONE = Object.freeze({ flight: 6, miss: 0.25, life: 24 });
+/** A scan that is out of reach unwinds at this share of the rate it builds. */
+const SCAN_DECAY = 0.5;
 /** A searching contact is 'there' within this of where it thinks we are; on the way its patience runs at this share. */
 const SEARCH_RADIUS = 8;
 const SEARCH_ON_THE_WAY = 0.25;
@@ -114,10 +138,10 @@ const turnBetween = (from, to) => ((to - from + 540) % 360) - 180;
 
 // ---------- content ----------
 
-/** Problems with an encounter definition (content/encounters/), as readable strings. `refs.ships` are the enemy ships. */
+/** Problems with an encounter definition (content/encounters/), as readable strings. `refs` holds weapons, encounters, factions and node kinds by id. */
 export function validateEncounter(item, refs = {}) {
   const problems = [];
-  const allowed = ['id', 'note', 'name', 'class', 'blurb', 'wants', 'at', 'weight', 'signature', 'sensors', 'reach', 'keen', 'notice', 'sure', 'speed', 'accel', 'standoff', 'shadow', 'patience', 'chase', 'decoys', 'bluffs', 'alongside', 'party'];
+  const allowed = ['id', 'note', 'name', 'class', 'blurb', 'wants', 'at', 'weight', 'signature', 'sensors', 'reach', 'keen', 'notice', 'sure', 'speed', 'accel', 'standoff', 'shadow', 'patience', 'chase', 'decoys', 'bluffs', 'alongside', 'party', 'nerve', 'guns', 'drones', 'pods', 'toll', 'scan'];
   for (const key of Object.keys(item)) if (!allowed.includes(key) && key !== '_file') problems.push(`unknown key "${key}"`);
   const text = (v) => typeof v === 'string' && v.trim().length > 0;
   const positive = (v) => typeof v === 'number' && Number.isFinite(v) && v > 0;
@@ -148,16 +172,53 @@ export function validateEncounter(item, refs = {}) {
         if (!share(chance)) problems.push(`bluffs.${bluff} must be a chance, 0 to 1`);
       }
   }
+  const boards = BOARDING_WANTS.includes(item.wants);
   const side = item.alongside;
-  if (!side || typeof side !== 'object' || !positive(side.seconds) || !text(side.hail)) problems.push('alongside must be { seconds, hail }: how long before the clamp goes on, and what it says first');
-  else {
-    for (const key of Object.keys(side)) if (!['seconds', 'hail', 'fight'].includes(key)) problems.push(`alongside: unknown key "${key}"`);
-    if (side.fight !== undefined && !text(side.fight)) problems.push('alongside.fight must name an enemy ship');
-    else if (side.fight !== undefined && refs.ships && !refs.ships.has(side.fight)) problems.push(`alongside.fight: no enemy ship "${side.fight}"`);
+  if (side !== undefined || boards) {
+    if (!side || typeof side !== 'object' || !positive(side.seconds) || !text(side.hail)) problems.push('alongside must be { seconds, hail }: how long before the clamp goes on, and what it says first');
+    else for (const key of Object.keys(side)) if (!['seconds', 'hail'].includes(key)) problems.push(`alongside: unknown key "${key}"`);
   }
-  if (item.party !== undefined) problems.push(...validateParty(item.party, item.wants));
-  else if (!side?.fight) problems.push('needs a party (who comes aboard when it docks) or, until H.3, alongside.fight');
+  if (boards) {
+    if (item.party === undefined) problems.push(`a ship that wants ${item.wants} needs a party: who comes aboard when it docks`);
+    else problems.push(...validateParty(item.party, item.wants));
+  } else {
+    if (item.party !== undefined) problems.push(`a ship that wants ${item.wants} never docks, so it has no party`);
+    if (!positive(item.standoff)) problems.push('a ship that never docks needs a standoff: how far off it holds once it has us');
+  }
   if (item.party?.faction && refs.factions && !refs.factions.has(item.party.faction)) problems.push(`party.faction: no faction "${item.party.faction}"`);
+  if (item.nerve !== undefined && !(typeof item.nerve === 'number' && item.nerve >= 0)) problems.push('nerve must be a number, 0 or more: how much of our gun it takes to break off (0: it never does)');
+  const guns = item.guns;
+  if (guns !== undefined) {
+    if (!guns || typeof guns !== 'object' || Array.isArray(guns)) problems.push('guns must be { weapon, range, every, hit, warn, when }');
+    else {
+      for (const key of Object.keys(guns)) if (!['weapon', 'range', 'every', 'hit', 'warn', 'when'].includes(key)) problems.push(`guns: unknown key "${key}"`);
+      if (!text(guns.weapon)) problems.push('guns.weapon must name a weapon');
+      else if (refs.weapons && !refs.weapons.has(guns.weapon)) problems.push(`guns.weapon: no weapon "${guns.weapon}"`);
+      for (const key of ['range', 'every']) if (!positive(guns[key])) problems.push(`guns.${key} must be a number above 0`);
+      if (!share(guns.hit)) problems.push('guns.hit must be a chance, 0 to 1: how often a round finds us when it has us cold');
+      if (guns.warn !== undefined && !(Number.isInteger(guns.warn) && guns.warn >= 0)) problems.push('guns.warn must be how many warning shots it fires first');
+      if (!(Array.isArray(guns.when) && guns.when.length && guns.when.every((w) => GUN_WHEN.includes(w)))) problems.push(`guns.when must be a list of ${GUN_WHEN.join(', ')}`);
+      if (guns.when?.includes('toll') && !item.toll) problems.push('guns.when: "toll" needs a toll');
+    }
+  }
+  const drones = item.drones;
+  if (item.wants === 'hull' && drones === undefined) problems.push('a ship that wants our hull needs drones');
+  if (drones !== undefined && !(drones && ['every', 'fire', 'range'].every((key) => positive(drones[key])) && Number.isInteger(drones.max) && drones.max >= 1 && Number.isInteger(drones.total) && drones.total >= drones.max)) problems.push('drones must be { every, max, total, fire, range }: seconds between launches, the most out at once, how many it carries, seconds between zaps, and how close it launches');
+  const pods = item.pods;
+  if (pods !== undefined) {
+    if (!(pods && positive(pods.range) && positive(pods.flight))) problems.push('pods must be { range, flight }: how close it puts its party across, and seconds in the air');
+    if (!boards) problems.push('pods carry a boarding party: only a ship that boards has them');
+  }
+  const toll = item.toll;
+  if (item.wants === 'toll' && toll === undefined) problems.push('a ship that wants a toll needs a toll');
+  if (toll !== undefined && !(toll && Number.isInteger(toll.cost) && toll.cost > 0 && positive(toll.zone) && positive(toll.grace) && text(toll.demand))) problems.push('toll must be { cost, zone, grace, demand }: credits, how close it calls, seconds to pay before it shoots, and what it says');
+  const scan = item.scan;
+  if (item.wants === 'scan' && scan === undefined) problems.push('a ship that wants a scan needs a scan');
+  if (scan !== undefined) {
+    if (!(scan && positive(scan.range) && positive(scan.seconds))) problems.push('scan must be { range, seconds, calls }: how close it has to be, how long it takes, and the encounter it calls in');
+    else if (scan.calls !== undefined && !text(scan.calls)) problems.push('scan.calls must name an encounter');
+    else if (scan.calls !== undefined && refs.encounters && !refs.encounters.has(scan.calls)) problems.push(`scan.calls: no encounter "${scan.calls}"`);
+  }
   return problems;
 }
 
@@ -183,7 +244,9 @@ export function newScopeState() {
   return {
     contacts: [], // ships around us (newContact)
     decoys: [], // { id, kind, x, y, vx, vy, left }
-    next: 1, // the next contact or decoy number
+    drones: [], // a carrier's drones: { id, contact, lands, on, next, dies }; on the hull once `on`
+    pods: [], // boarding pods in the air: { id, contact, encounter, lands }
+    next: 1, // the next contact, decoy, drone or pod number
     record: [], // encounters that have ended: { encounter, outcome, seconds, tick }
   };
 }
@@ -198,8 +261,6 @@ const driveShare = (sim) => {
 };
 /** Our speed, scope units a second. */
 export const speedOf = (sim) => Math.hypot(sim.state.helm.vx, sim.state.helm.vy);
-/** A fight is the old way an encounter ends (until H.3): while one runs, the scope holds still. */
-const inFight = (sim) => Boolean(sim.state.fight) && !sim.state.fight.over;
 /** The contacts still in play: not docked, not gone. */
 export const liveContacts = (sim) => sim.state.scope.contacts.filter((contact) => contact.state !== 'lost' && contact.state !== 'docked');
 /** Is a ship alongside us, about to put a clamp on? */
@@ -258,7 +319,18 @@ export function spawnContact(sim, def, { range = 80, bearing = 0, miss = 20, sid
     held: 0, // seconds alongside
     left: 0, // seconds since it gave up
     tried: [], // bluffs it has heard
-    wary: false, // it has caught us in a lie
+    wary: false, // it has caught us in a lie, or been shot at
+    shotAt: false, // we have fired on it (H.3)
+    fear: 0, // how much of our gun it has taken, against its nerve
+    fired: 0, // rounds it has fired at us
+    reload: null, // seconds until its gun fires again, once it has opened up
+    launched: 0, // drones put out, or boarding pods
+    podsOut: 0, // pods of its party still in the air
+    podsLanded: 0, // pods that got there
+    tolled: false, // it has called its toll
+    tollEnds: null, // the tick its patience with an unpaid toll runs out
+    scan: 0, // seconds of a scan it has built up
+    lastLaunch: null, // the tick it last put a drone out
     born: tick,
     // Margo's return on it: quality 0 to 1, and the slow wander of the reading inside its error.
     track: { q: 0, shown: false, known: false, jb: 0, jr: 0, nb: rng.range(-1, 1), nr: rng.range(-1, 1), t: 0, ghost: null },
@@ -271,9 +343,9 @@ export function spawnContact(sim, def, { range = 80, bearing = 0, miss = 20, sid
 function record(sim, contact, outcome) {
   const { scope, tick } = sim.state;
   const seconds = (tick - contact.born) / 20;
-  scope.record.push({ encounter: contact.encounter, outcome, seconds, tick });
+  scope.record.push({ encounter: contact.encounter, outcome, seconds, fired: contact.fired, fear: contact.fear, tick });
   if (scope.record.length > RECORD_MAX) scope.record.shift();
-  sim.events.emit('encounter.ended', { contact: contact.id, encounter: contact.encounter, name: defOf(sim, contact).name, outcome, seconds, tick });
+  sim.events.emit('encounter.ended', { contact: contact.id, encounter: contact.encounter, name: defOf(sim, contact).name, outcome, seconds, pursuer: Boolean(contact.pursuer), tick });
 }
 
 /** It gives up on us: `how` is quiet, outrun, decoy or bluff. It stays on the scope a while, leaving. */
@@ -360,7 +432,26 @@ export function scopeView(sim) {
     flares: helm.flares,
     contacts: scope.contacts.map((contact) => contactView(sim, contact)).filter(Boolean),
     decoys: scope.decoys.map((decoy) => ({ id: decoy.id, kind: decoy.kind, bearing: bearingOf(decoy.x, decoy.y), range: rangeOf(decoy.x, decoy.y), left: decoy.left })),
+    incoming: incomingView(sim),
   };
+}
+
+/**
+ * Drones and pods on their way in (H.3), for the scope: on the line from whoever launched them to us, as far
+ * along it as their flight is. Close and loud, so they are drawn where they are. A drone on the hull is at the centre.
+ */
+function incomingView(sim) {
+  const { scope, tick } = sim.state;
+  const along = (item, seconds, kind) => {
+    const from = findContact(sim, item.contact);
+    if (!from) return null;
+    const left = item.on ? 0 : Math.max(0, Math.min(1, (item.lands - tick) / (seconds * 20)));
+    return { id: item.id, kind, on: Boolean(item.on), bearing: bearingOf(from.x, from.y), range: rangeOf(from.x, from.y) * left };
+  };
+  return [
+    ...scope.drones.map((drone) => along(drone, DRONE.flight, 'drone')),
+    ...scope.pods.map((pod) => along(pod, sim.encounters.byId.get(pod.encounter).pods.flight, 'pod')),
+  ].filter(Boolean);
 }
 
 function stepTrack(sim, contact, dt, rng) {
@@ -459,7 +550,7 @@ function headFor(contact, def, x, y, speed, dt, helm, stopAt = 0) {
   steer(contact, def, vx, vy, dt);
 }
 
-function stepContact(sim, contact, dt, loud, newShipState) {
+function stepContact(sim, contact, dt, loud) {
   const def = defOf(sim, contact);
   const { helm, tick } = { helm: sim.state.helm, tick: sim.state.tick };
   const info = { contact: contact.id, encounter: def.id, name: def.name, tick };
@@ -560,9 +651,11 @@ function stepContact(sim, contact, dt, loud, newShipState) {
   }
 
   if (contact.state === 'closing') {
-    headFor(contact, def, est.x, est.y, def.speed.chase, dt, helm);
+    // A ship that boards comes right in; one that never docks holds off at its standoff and works from there.
+    const boards = BOARDING_WANTS.includes(def.wants);
+    headFor(contact, def, est.x, est.y, def.speed.chase, dt, helm, boards || drawn ? 0 : def.standoff);
     contact.chased += dt;
-    if (range <= ALONGSIDE && !drawn && contact.aware >= AWARE.notice) {
+    if (boards && range <= reachOf(def) && !drawn && contact.aware >= AWARE.notice) {
       contact.state = 'alongside';
       contact.held = 0;
       sim.events.emit('contact.alongside', { ...info, hail: def.alongside.hail, seconds: def.alongside.seconds });
@@ -578,28 +671,261 @@ function stepContact(sim, contact, dt, loud, newShipState) {
     return;
   }
 
-  // Alongside: it holds station on us while it readies the clamp. A ship that can outpace it can still pull clear.
+  // Alongside: it holds station on us while it readies the clamp (or its pods). A ship that can outpace it can still pull clear.
   const speed = Math.hypot(helm.vx, helm.vy);
   const cap = speed > def.speed.chase ? def.speed.chase / speed : 1;
   steer(contact, def, helm.vx * cap, helm.vy * cap, dt);
+  if (contact.podsOut) return; // its party is in the air: it waits to see how many get there
   contact.held += dt;
-  if (range > ALONGSIDE * 2.5) {
+  // A second ship waits its turn alongside while one is clamped on, or while pods are in the air.
+  const free = !sim.state.boarding && !sim.state.scope.pods.length;
+  if (range > reachOf(def) * 2.5) {
     contact.state = 'closing';
     sim.events.emit('contact.closing', info);
-  } else if (contact.held >= def.alongside.seconds && !sim.state.boarding) {
-    // A second ship waits its turn alongside while one is clamped on.
+  } else if (contact.held >= def.alongside.seconds && free && def.pods) launchPods(sim, contact, def, info);
+  else if (contact.held >= def.alongside.seconds && free) {
     contact.state = 'docked';
     sim.events.emit('contact.docked', { ...info, wants: def.wants });
     record(sim, contact, 'docked');
     remove(sim, contact);
-    // The clamp goes on and its party comes to our lock (H.2, boarders.js). An encounter with no party
-    // still means the old fight, until the duel goes in H.3.
-    if (def.party) startBoarding(sim, def, { contact: contact.id });
-    else if (def.alongside.fight && sim.catalog.enemies.includes(def.alongside.fight) && !sim.state.fight) {
-      startFight(sim, def.alongside.fight, newShipState);
-      sim.state.fight.contact = def.id;
+    // The clamp goes on and its party comes to our lock (H.2, boarders.js).
+    startBoarding(sim, def, { contact: contact.id });
+  }
+}
+
+/** How close a boarding ship has to be to put its party across: alongside for a clamp, further off for pods. */
+const reachOf = (def) => (def.pods ? def.pods.range : ALONGSIDE);
+
+/** A grapple tender puts its party across in pods, one boarder to a pod (D-176). Point defence gets a go at each. */
+function launchPods(sim, contact, def, info) {
+  const { scope, tick } = sim.state;
+  const size = def.party.size;
+  for (let n = 0; n < size; n++) scope.pods.push({ id: scope.next++, contact: contact.id, encounter: def.id, lands: tick + Math.round(def.pods.flight * 20) });
+  contact.launched = size;
+  contact.podsOut = size;
+  contact.podsLanded = 0;
+  sim.events.emit('pods.launched', { ...info, pods: size, lands: tick + Math.round(def.pods.flight * 20) });
+}
+
+/** The last of a contact's pods is down or in: its party, what is left of it, comes to our lock. */
+function podsSettled(sim, contactId, encounter) {
+  const contact = findContact(sim, contactId);
+  const def = sim.encounters.byId.get(encounter);
+  const landed = contact ? contact.podsLanded : 0;
+  if (contact) {
+    contact.podsOut = 0;
+    const info = { contact: contact.id, encounter: def.id, name: def.name, tick: sim.state.tick };
+    if (contact.state !== 'lost') {
+      if (landed > 0) {
+        contact.state = 'docked';
+        sim.events.emit('contact.docked', { ...info, wants: def.wants, pods: landed });
+        record(sim, contact, 'docked');
+        remove(sim, contact);
+      } else {
+        sim.events.emit('contact.deterred', { ...info, why: 'pods' });
+        lose(sim, contact, 'deterred');
+      }
     }
   }
+  if (landed > 0) startBoarding(sim, def, { contact: contactId, size: landed });
+}
+
+// ---------- what else a contact does about us (H.3) ----------
+
+/** Is this contact's gun cleared to fire on us, by any of its `guns.when`? */
+function gunCleared(sim, contact, def, range) {
+  const near = contact.state === 'closing' || contact.state === 'alongside';
+  return def.guns.when.some((when) => {
+    if (when === 'running') return near && burning(sim);
+    if (when === 'shot') return contact.shotAt;
+    if (when === 'closing') return near;
+    return contact.tolled && sim.state.tick >= contact.tollEnds && range <= def.toll.zone; // 'toll'
+  });
+}
+
+/** A contact with a gun fires on us when it is cleared to, from inside its range, with a track on us. Warning shots first. */
+function stepContactGun(sim, contact, def, range, dt) {
+  const guns = def.guns;
+  if (!guns || sim.state.hull.points === 0) return;
+  const cleared = contact.state !== 'unseen' && contact.target === null && contact.aware >= AWARE.notice && range <= guns.range && gunCleared(sim, contact, def, range);
+  if (!cleared) {
+    if (contact.reload !== null) contact.reload = Math.max(contact.reload, guns.every * 0.5);
+    return;
+  }
+  contact.reload = contact.reload === null ? guns.every * 0.5 : contact.reload - dt;
+  if (contact.reload > 0) return;
+  contact.reload = guns.every;
+  const warn = contact.fired < (guns.warn ?? 0);
+  contact.fired += 1;
+  // A round finds us as well as it knows where we are, and less well from further off.
+  const chance = clamp01(guns.hit * contact.aware * (1 - (0.5 * range) / guns.range));
+  const shot = fireOn(sim, { contact: contact.id, weapon: guns.weapon, miss: 1 - chance, warn });
+  if (shot) sim.events.emit('contact.fired', { contact: contact.id, encounter: def.id, name: def.name, weapon: guns.weapon, warn, chance, lands: shot.lands, tick: sim.state.tick });
+}
+
+/** A carrier with us in reach puts drones out, up to its most at once and all it carries; when they are spent, so is it. */
+function stepDroneBay(sim, contact, def, range) {
+  const spec = def.drones;
+  if (!spec) return;
+  const { scope, tick } = sim.state;
+  const out = scope.drones.filter((drone) => drone.contact === contact.id).length;
+  if (contact.launched >= spec.total) {
+    if (!out) {
+      sim.events.emit('contact.spent', { contact: contact.id, encounter: def.id, name: def.name, tick });
+      lose(sim, contact, 'swarmed');
+    }
+    return;
+  }
+  const near = contact.state === 'closing' || contact.state === 'alongside';
+  if (!near || contact.target !== null || contact.aware < AWARE.notice || range > spec.range || out >= spec.max) return;
+  if (contact.lastLaunch !== null && tick - contact.lastLaunch < Math.round(spec.every * 20)) return;
+  contact.lastLaunch = tick;
+  contact.launched += 1;
+  const drone = { id: scope.next++, contact: contact.id, lands: tick + Math.round(DRONE.flight * 20), on: false, next: null };
+  scope.drones.push(drone);
+  sim.events.emit('drone.launched', { contact: contact.id, drone: drone.id, name: def.name, out: out + 1, left: spec.total - contact.launched, tick });
+}
+
+/** A gunnery drone close enough builds a scan of us; finished, it calls in a ship that will do something about it. */
+function stepScan(sim, contact, def, range, dt) {
+  const spec = def.scan;
+  if (!spec) return;
+  const near = contact.state === 'shadowing' || contact.state === 'closing';
+  const info = { contact: contact.id, encounter: def.id, name: def.name, tick: sim.state.tick };
+  if (near && contact.target === null && contact.aware >= AWARE.notice && range <= spec.range) {
+    if (contact.scan === 0) sim.events.emit('contact.scanning', { ...info, seconds: spec.seconds });
+    contact.scan += dt;
+  } else contact.scan = Math.max(0, contact.scan - SCAN_DECAY * dt);
+  if (contact.scan < spec.seconds) return;
+  sim.events.emit('contact.scanned', { ...info, calls: spec.calls ?? null });
+  const caller = spec.calls ? sim.encounters.byId.get(spec.calls) : null;
+  if (caller) {
+    const rng = sim.rng.stream('encounters');
+    spawnContact(sim, caller, { range: rng.range(SPAWN.near, SPAWN.far), bearing: rng.range(0, 360), state: 'closing' });
+  }
+  lose(sim, contact, 'scanned');
+}
+
+/** A bulwark with us inside its zone calls its toll once, and gives us its grace to pay before its gun clears. */
+function stepToll(sim, contact, def, range) {
+  const spec = def.toll;
+  if (!spec || contact.tolled) return;
+  const near = contact.state === 'shadowing' || contact.state === 'closing';
+  if (!near || contact.aware < AWARE.notice || range > spec.zone) return;
+  contact.tolled = true;
+  contact.tollEnds = sim.state.tick + Math.round(spec.grace * 20);
+  sim.events.emit('contact.toll', { contact: contact.id, encounter: def.id, name: def.name, cost: spec.cost, text: spec.demand, seconds: spec.grace, tick: sim.state.tick });
+}
+
+/** Everything a contact does besides moving: its gun, its drones, its scan, its toll. */
+function stepThreat(sim, contact, dt) {
+  if (contact.state === 'lost' || contact.state === 'docked' || contact.state === 'unseen') return;
+  const def = defOf(sim, contact);
+  const range = rangeOf(contact.x, contact.y);
+  stepToll(sim, contact, def, range);
+  stepContactGun(sim, contact, def, range, dt);
+  stepDroneBay(sim, contact, def, range);
+  if (contact.state !== 'lost') stepScan(sim, contact, def, range, dt);
+}
+
+/** Drones crossing to the hull, and those on it zapping a room every few seconds. Their carrier gone, they fall dead. */
+function stepDrones(sim) {
+  const { scope, tick } = sim.state;
+  for (const drone of [...scope.drones]) {
+    const carrier = findContact(sim, drone.contact);
+    if (!carrier || carrier.state === 'lost') {
+      scope.drones.splice(scope.drones.indexOf(drone), 1);
+      sim.events.emit('drone.lost', { drone: drone.id, cause: 'carrier', tick });
+      continue;
+    }
+    const spec = defOf(sim, carrier).drones;
+    if (!drone.on) {
+      if (tick < drone.lands) continue;
+      drone.on = true;
+      drone.next = tick + Math.round(spec.fire * 20);
+      drone.dies = tick + Math.round(DRONE.life * 20);
+      sim.events.emit('drone.attached', { drone: drone.id, contact: carrier.id, tick });
+      continue;
+    }
+    if (tick >= drone.dies) {
+      scope.drones.splice(scope.drones.indexOf(drone), 1);
+      sim.events.emit('drone.lost', { drone: drone.id, cause: 'spent', tick });
+      continue;
+    }
+    if (tick < drone.next) continue;
+    drone.next = tick + Math.round(spec.fire * 20);
+    if (sim.state.hull.points > 0) fireOn(sim, { contact: carrier.id, weapon: DRONE_WEAPON, miss: DRONE.miss, drone: drone.id });
+  }
+}
+
+/** Pods in the air come in on our hull; a contact whose pods are all down or in settles what is left of its party. */
+function stepPods(sim) {
+  const { scope, tick } = sim.state;
+  const settled = new Map();
+  for (const pod of [...scope.pods]) {
+    if (tick < pod.lands) continue;
+    scope.pods.splice(scope.pods.indexOf(pod), 1);
+    const contact = findContact(sim, pod.contact);
+    if (contact) contact.podsLanded += 1;
+    sim.events.emit('pod.landed', { pod: pod.id, contact: pod.contact, tick });
+    settled.set(pod.contact, pod.encounter);
+  }
+  for (const [id, encounter] of settled) if (!scope.pods.some((pod) => pod.contact === id)) podsSettled(sim, id, encounter);
+}
+
+// ---------- our gun and our point defence, as they meet a contact (combat.js fires them) ----------
+
+/** We open fire on a contact: it knows exactly where we are now, comes for us, and its faction hears of it. */
+export function shotAt(sim, contact) {
+  const def = defOf(sim, contact);
+  const first = !contact.shotAt;
+  contact.shotAt = true;
+  contact.wary = true;
+  contact.aware = 1;
+  contact.target = null;
+  Object.assign(contact.est, { x: 0, y: 0, vx: sim.state.helm.vx, vy: sim.state.helm.vy });
+  if (contact.state === 'unseen' || contact.state === 'shadowing') {
+    contact.state = 'closing';
+    sim.events.emit('contact.closing', { contact: contact.id, encounter: def.id, name: def.name, tick: sim.state.tick });
+  }
+  if (first && def.party?.faction) changeReputation(sim, def.party.faction, GUN.standing, 'fired-on');
+}
+
+/** Our round comes down by it: a hit, or a warning shot across its bow. Enough of either and it breaks off. */
+export function struck(sim, contact, hit) {
+  const def = defOf(sim, contact);
+  contact.fear += hit ? GUN.fear.hit : GUN.fear.miss;
+  const info = { contact: contact.id, encounter: def.id, name: def.name, hit, fear: contact.fear, nerve: def.nerve ?? 0, tick: sim.state.tick };
+  sim.events.emit('contact.struck', info);
+  if ((def.nerve ?? 0) > 0 && contact.fear >= def.nerve - 1e-9) {
+    sim.events.emit('contact.deterred', { ...info, why: 'gun' });
+    lose(sim, contact, 'deterred');
+  }
+}
+
+/** What point defence would shoot at now: a pod in the air first, then a drone on its way, then one on the hull. */
+export function pdTarget(sim) {
+  const { pods, drones } = sim.state.scope;
+  if (pods.length) return { kind: 'pod', item: pods[0] };
+  const flying = drones.find((drone) => !drone.on);
+  if (flying) return { kind: 'drone', item: flying };
+  if (drones.length) return { kind: 'drone', item: drones[0] };
+  return null;
+}
+
+/** A pod or a drone is shot down (or a drone burns out in a brace: `cause`). */
+export function pdShot(sim, target, cause = 'pd') {
+  const { scope, tick } = sim.state;
+  const list = target.kind === 'pod' ? scope.pods : scope.drones;
+  const index = list.findIndex((item) => item.id === target.item.id);
+  if (index < 0) return;
+  const [item] = list.splice(index, 1);
+  if (target.kind === 'drone') {
+    sim.events.emit('drone.lost', { drone: item.id, cause, tick });
+    return;
+  }
+  sim.events.emit('pod.downed', { pod: item.id, contact: item.contact, tick });
+  if (!scope.pods.some((pod) => pod.contact === item.contact)) podsSettled(sim, item.contact, item.encounter);
 }
 
 // ---------- each tick ----------
@@ -629,10 +955,10 @@ function stepHelm(sim, dt) {
 }
 
 /** The helm, the decoys, every contact, and the scope's picture of them. */
-export function stepEncounters(sim, dt, newShipState) {
+export function stepEncounters(sim, dt) {
   stepHelm(sim, dt);
   const { scope, helm } = sim.state;
-  if (inFight(sim) || (!scope.contacts.length && !scope.decoys.length)) return;
+  if (!scope.contacts.length && !scope.decoys.length && !scope.drones.length && !scope.pods.length) return;
   const rng = sim.rng.stream('encounters');
   for (const decoy of scope.decoys) {
     decoy.x += (decoy.vx - helm.vx) * dt;
@@ -641,12 +967,16 @@ export function stepEncounters(sim, dt, newShipState) {
   }
   const loud = signature(sim).total;
   for (const contact of [...scope.contacts]) {
-    stepContact(sim, contact, dt, loud, newShipState);
+    stepContact(sim, contact, dt, loud);
+    if (!scope.contacts.includes(contact)) continue;
+    stepThreat(sim, contact, dt);
     if (!scope.contacts.includes(contact)) continue;
     contact.x += (contact.vx - helm.vx) * dt;
     contact.y += (contact.vy - helm.vy) * dt;
     stepTrack(sim, contact, dt, rng);
   }
+  stepDrones(sim);
+  stepPods(sim);
   // A decoy that has burned out or drifted off: anything still chasing it finds nothing there.
   for (const decoy of scope.decoys.filter((d) => d.left <= 0)) {
     scope.decoys.splice(scope.decoys.indexOf(decoy), 1);
@@ -684,6 +1014,8 @@ export function attachEncounters(sim) {
     }
     scope.contacts = [];
     scope.decoys = [];
+    scope.drones = [];
+    scope.pods = [];
     Object.assign(helm, { vx: 0, vy: 0, burn: false, wanted: helm.heading });
   });
   sim.events.on('sector.arrived', (event) => {
@@ -701,19 +1033,33 @@ export function attachEncounters(sim) {
 
 // ---------- orders ----------
 
-const findContact = (sim, id) => sim.state.scope.contacts.find((contact) => contact.id === id) ?? null;
+/** A contact on the board by its id, or null. */
+export const findContact = (sim, id) => sim.state.scope.contacts.find((contact) => contact.id === id) ?? null;
 
 /** Why we cannot hail this contact with this bluff right now, or null. */
 export function whyNoHail(sim, cmd) {
   const contact = findContact(sim, cmd.contact);
   if (!contact) return `no contact "${cmd.contact}" on the scope`;
   if (!BLUFFS[cmd.bluff]) return `bluff must be one of ${Object.keys(BLUFFS).join(', ')}`;
-  if (inFight(sim)) return 'not in a fight';
   if (contact.state === 'lost') return 'it is already breaking off';
   if (!contact.track.shown) return 'there is nothing on the scope to hail';
   if (contact.tried.includes(cmd.bluff)) return 'they have heard that one';
   if (contact.wary) return 'they have stopped listening';
   if (negotiation(sim) < 1) return 'nobody aboard can talk their way past a hail';
+  // A drone has nobody aboard to lie to (H.3). Margo only knows that once she has made out what it is.
+  if (!defOf(sim, contact).bluffs && contact.track.known) return `there is nobody aboard the ${defOf(sim, contact).name.toLowerCase()} to lie to`;
+  return null;
+}
+
+/** Why we cannot pay this contact's toll right now, or null. */
+export function whyNoPay(sim, id) {
+  const contact = findContact(sim, id);
+  if (!contact) return `no contact "${id}" on the scope`;
+  const toll = defOf(sim, contact).toll;
+  if (!toll) return 'it is not asking for anything';
+  if (!contact.tolled) return 'it has not called a toll';
+  if (contact.state === 'lost') return 'it is already breaking off';
+  if (sim.state.money < toll.cost) return `it wants ${toll.cost} and we have ${sim.state.money}`;
   return null;
 }
 
@@ -776,6 +1122,17 @@ export const ENCOUNTER_COMMANDS = {
       }
     },
   },
+  // Pay a bulwark's toll: it lets us through the lane.
+  'contact.pay': {
+    check: (sim, cmd) => whyNoPay(sim, cmd.contact),
+    apply(sim, cmd) {
+      const contact = findContact(sim, cmd.contact);
+      const def = defOf(sim, contact);
+      sim.state.money -= def.toll.cost;
+      sim.events.emit('contact.paid', { contact: contact.id, encounter: def.id, name: def.name, cost: def.toll.cost, tick: sim.state.tick });
+      lose(sim, contact, 'paid');
+    },
+  },
   // Debug panel and tests: put a contact on the board, or clear it.
   'debug.contact': {
     check(sim, cmd) {
@@ -787,8 +1144,8 @@ export const ENCOUNTER_COMMANDS = {
     },
     apply(sim, cmd) {
       if (cmd.clear) {
-        sim.state.scope.contacts = [];
-        sim.state.scope.decoys = [];
+        Object.assign(sim.state.scope, { contacts: [], decoys: [], drones: [], pods: [] });
+        sim.state.shots = sim.state.shots.filter((shot) => shot.contact === null); // what they had in the air goes with them
         return;
       }
       spawnContact(sim, sim.encounters.byId.get(cmd.encounter), { range: cmd.range, bearing: cmd.bearing, miss: cmd.miss, state: cmd.state });
@@ -814,6 +1171,15 @@ export function checkEncounterInvariants(sim) {
     if (!(contact.aware >= 0 && contact.aware <= 1)) problems.push(`${where}: awareness is ${contact.aware}`);
     if (!(contact.track.q >= 0 && contact.track.q <= 1)) problems.push(`${where}: return quality is ${contact.track.q}`);
     if (contact.target !== null && !scope.decoys.some((decoy) => decoy.id === contact.target)) problems.push(`${where}: chasing a decoy that is not there`);
+  }
+  for (const drone of scope.drones) {
+    if (!scope.contacts.some((contact) => contact.id === drone.contact)) problems.push(`drone ${drone.id}: its carrier is not on the board`);
+    if (drone.on ? !Number.isInteger(drone.next) : !Number.isInteger(drone.lands)) problems.push(`drone ${drone.id}: no clock`);
+  }
+  for (const pod of scope.pods) if (!(pod.lands >= sim.state.tick)) problems.push(`pod ${pod.id}: should have landed at tick ${pod.lands}`);
+  for (const contact of scope.contacts) {
+    if (contact.podsOut && contact.state !== 'alongside' && contact.state !== 'lost') problems.push(`contact ${contact.id}: has pods out while ${contact.state}`);
+    if (!(contact.fear >= 0)) problems.push(`contact ${contact.id}: fear is ${contact.fear}`);
   }
   for (const decoy of scope.decoys) {
     if (!DECOYS[decoy.kind]) problems.push(`decoy ${decoy.id}: of no known kind`);

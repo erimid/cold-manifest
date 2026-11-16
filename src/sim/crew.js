@@ -12,11 +12,11 @@
 // being told: fire first, then a breach, then a damaged system, then a jammed
 // door.
 //
-// In a fight (S2.4) crew can be aboard the other ship: `owner` says whose crew
-// they are ('player' or 'enemy') and the ship's `side` says whose ship it is.
-// Anyone aboard a ship that is not theirs is a boarder: they fight whoever of
-// the other side shares their room, wreck the system they stand in, and fix
-// nothing. Crossing between ships is boarding.js.
+// `owner` says whose crew someone is ('player' or 'enemy'). Anyone of the
+// other side aboard our ship is a boarder (a party off a docked contact,
+// boarders.js): they fight whoever of ours shares their room (if their party
+// is hostile), and fix nothing. Our crew never cross to another ship: that
+// went with the duel in H.3.
 
 import { crewEmit, harmCrew } from './atmosphere.js';
 import { refusalOf } from './memory.js';
@@ -105,9 +105,7 @@ export function newCrewMember(layout, { id, name, role = null, engineer = false,
     alive: true,
     goal: null, // the room they are walking to
     path: [], // waypoints still ahead of them
-    task: 'idle', // what they are doing: idle | walking | waiting | extinguish | patch | repair | unjam | fighting | sabotage | crossing
-    board: null, // set while heading for the other ship: { room } there to go to (boarding.js)
-    crossEnds: null, // the tick they come out the other end, while crossing
+    task: 'idle', // what they are doing: idle | walking | waiting | extinguish | patch | repair | unjam | fighting | sabotage
     wreck: 0, // 0 to 1 progress toward breaking the next bar of the system they are sabotaging
     carry: null, // the crate in their arms (hold.js)
     job: null, // a crate job under way: { kind, crate, to, slot, phase, t, since } (hold.js)
@@ -289,6 +287,7 @@ export const CREW_COMMANDS = {
     check(sim, cmd) {
       const problem = living(sim, cmd.crew);
       if (problem) return problem;
+      if (cmd.ship !== undefined && cmd.ship !== 'us') return 'there is no other ship to send them to'; // boarding by clamp only, and only theirs onto ours (H.3)
       const room = sim.state.rooms[cmd.room];
       if (!room) return `no room "${cmd.room}"`;
       if (room.jettisoned) return 'that section is gone';
@@ -353,7 +352,6 @@ function stop(sim, member, reason, door) {
   member.goal = null;
   member.path = [];
   member.task = 'idle';
-  member.board = null;
   crewEmit(sim, member, 'crew.blocked', { crew: member.id, room: member.room, door, reason, tick: sim.state.tick });
 }
 
@@ -470,7 +468,7 @@ export function hostilesBeside(sim, member) {
   // Hidden, or beaten down by a stunner (H.2) and not yet back on their feet: out of the fight.
   if (member.hidden || (member.stunned && member.health <= STUN_FLOOR + 0.05)) return [];
   const calm = sim.state.boarding && !sim.state.boarding.hostile;
-  return Object.values(sim.state.crew).filter((other) => other.alive && other.room === member.room && other.owner !== member.owner && other.task !== 'crossing' && !other.hidden && !(calm && (other.party || member.party)));
+  return Object.values(sim.state.crew).filter((other) => other.alive && other.room === member.room && other.owner !== member.owner && !other.hidden && !(calm && (other.party || member.party)));
 }
 
 /** Hit someone; false if there is nobody here this one would hit (a bounty party and the one it came for). */
@@ -564,9 +562,9 @@ export function stepCrew(sim, seconds) {
       continue;
     }
     if (member.path.length) walk(sim, member, seconds);
-    else if (!member.board) work(sim, member, seconds); // at the airlock, or in the tube: boarding.js has them
+    else work(sim, member, seconds);
     // Someone left standing in a doorway or on a deck lift when their way was cut short steps back into the room.
-    if (member.alive && !member.path.length && !member.board && !inside(sim.layout.room(member.room), member)) member.path = [spotIn(sim.layout.room(member.room), member.index)];
+    if (member.alive && !member.path.length && !inside(sim.layout.room(member.room), member)) member.path = [spotIn(sim.layout.room(member.room), member.index)];
   }
 }
 
@@ -589,11 +587,8 @@ export function describeTask(sim, member) {
     case 'crawling':
       return 'In a service crawlway';
     case 'walking':
-      if (member.board) return 'Heading for the airlock';
       if (onLift(member) && !isPowered(sim, 'doors')) return `Cranking the lift by hand, to ${sim.layout.room(member.goal)?.name ?? 'somewhere'}`;
       return `Walking to ${sim.layout.room(member.goal)?.name ?? 'somewhere'}`;
-    case 'crossing':
-      return isHome(sim, member) ? 'Crossing over' : 'Crossing back';
     case 'fighting':
       return 'Fighting hand to hand';
     case 'sabotage':
@@ -638,8 +633,6 @@ export function checkCrewInvariants(sim) {
     if (member.alive && !(member.health > 0 && member.health <= 1)) problems.push(`crew ${id} is alive with health ${member.health}`);
     if (!['player', 'enemy'].includes(member.owner)) problems.push(`crew ${id} belongs to "${member.owner}"`);
     if (!(member.wreck >= 0 && member.wreck < 1)) problems.push(`crew ${id} wreck progress is ${member.wreck}`);
-    if (member.task === 'crossing' && !(member.board && member.crossEnds !== null)) problems.push(`crew ${id} is crossing with nowhere to go`);
-    if (member.board && !member.alive) problems.push(`crew ${id} is dead but still boarding`);
   }
   for (const id of Object.keys(sim.state.systems)) {
     const repair = sim.state.systems[id].repair ?? 0;

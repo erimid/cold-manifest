@@ -18,8 +18,9 @@
 // She has a say (ai/judgement.js): she holds an order she thinks is risky or
 // monstrous until the captain overrides or stands down. The crew remember
 // (memory.js), and may refuse an order because of what they remember.
-// And it can fight (combat.js): in a fight the enemy is a second whole ship,
-// stepped by the same code as the player's.
+// Other ships are contacts on the scope (encounters.js), never a second ship
+// stepped beside ours: a hauler hides, runs, lies, pays, or fires one gun to
+// warn them off (combat.js), and boarders walk our own decks (boarders.js).
 
 import { attachJudgement, checkJudgementInvariants, considerOrder, overrode, standDown, stepJudgement, takeObjection } from '../ai/judgement.js';
 import { attachVoice, checkVoiceInvariants, newVoiceState, stepVoice } from '../ai/voice.js';
@@ -27,9 +28,8 @@ import { createEventBus } from '../engine/events.js';
 import { createRngSet } from '../engine/rng.js';
 import { EVENT_CHANCE, attachEvents, buildEvents, checkEventInvariants, eventCommands, newEventState } from '../narrative/events.js';
 import { buildRules } from '../narrative/rules.js';
-import { checkBoardingInvariants } from './boarding.js';
 import { ATMOSPHERE_COMMANDS, checkAtmosphereInvariants, stepAtmosphere } from './atmosphere.js';
-import { START_MONEY, checkCombatInvariants, checkFightInvariants, combatCommands, enemyOf, newCombatState, stepCombat } from './combat.js';
+import { COMBAT_COMMANDS, START_MONEY, checkCombatInvariants, newCombatState, stepCombat } from './combat.js';
 import { CREW_COMMANDS, checkCrewInvariants, newCrewState, stepCrew } from './crew.js';
 import { POWER_COMMANDS, checkPowerInvariants, isPowered, lightsNeedPower, newSystemsState, stepPower } from './power.js';
 import { checkSenseInvariants, newSenseState, stepSenses } from './senses.js';
@@ -91,9 +91,8 @@ function newDoorState() {
 }
 
 /**
- * Everything that makes up one ship's state: the player's, or an enemy's in a fight.
- * `roster` is the crew aboard: [{ id, name }], `owner` whose crew they are ('player' or 'enemy'),
- * and `catalog` where its weapons are looked up.
+ * Everything that makes up our ship's state. `roster` is the crew aboard: [{ id, name }], `owner` whose
+ * crew they are ('player'), and `catalog` where its weapons are looked up.
  */
 export function newShipState(layout, roster, owner, catalog) {
   const systems = newSystemsState(layout);
@@ -292,9 +291,9 @@ const COMMANDS = {
   ...ATMOSPHERE_COMMANDS,
   ...CREW_COMMANDS,
   ...HOLD_COMMANDS,
-  ...combatCommands(newShipState),
-  ...sectorCommands(newShipState),
-  ...eventCommands(newShipState),
+  ...COMBAT_COMMANDS,
+  ...sectorCommands(),
+  ...eventCommands(),
   ...CONTRACT_COMMANDS,
   ...PORT_COMMANDS,
   ...ENCOUNTER_COMMANDS,
@@ -327,21 +326,11 @@ function stepLights(sim) {
 /** Everything that happens each tick, in order. Later sessions add systems here. */
 // Order matters: crew act on the world as it stood, then fire can break a system, so power is settled
 // after the air and before anything reads it.
-// In a fight the enemy ship then takes the same steps, and the shooting is settled once both ships are up to date.
 // Nerves come after the lamps, so a lamp someone puts on is counted by the senses in the same tick.
-const SHIP_SYSTEMS = [(ship) => stepCrew(ship, TICK_SECONDS), (ship) => stepHold(ship, TICK_SECONDS), (ship) => stepAtmosphere(ship, TICK_SECONDS), stepPower, stepDoors, stepLights, (ship) => stepNerve(ship, TICK_SECONDS), (ship) => stepSenses(ship, TICK_SECONDS)];
-
-function stepEnemy(sim) {
-  const enemy = enemyOf(sim);
-  if (!enemy) return;
-  enemy.state.tick = sim.state.tick;
-  for (const system of SHIP_SYSTEMS) system(enemy);
-}
-
-// The chart comes after the fight, so an escape decided this tick is flown before anyone hears about it.
+// The guns come after the ship: a round lands on the ship as it now stands.
 // The scope comes after the chart: a jump clears it before any contact moves again.
 // A boarding party (H.2) decides what to do next after the crew have moved, with the ship as it now stands.
-const SYSTEMS = [...SHIP_SYSTEMS, stepEnemy, (sim) => stepCombat(sim, TICK_SECONDS), (sim) => stepSector(sim, TICK_SECONDS, newShipState), (sim) => stepEncounters(sim, TICK_SECONDS, newShipState), (sim) => stepBoarders(sim, TICK_SECONDS), stepJudgement, stepVoice];
+const SYSTEMS = [(sim) => stepCrew(sim, TICK_SECONDS), (sim) => stepHold(sim, TICK_SECONDS), (sim) => stepAtmosphere(sim, TICK_SECONDS), stepPower, stepDoors, stepLights, (sim) => stepNerve(sim, TICK_SECONDS), (sim) => stepSenses(sim, TICK_SECONDS), (sim) => stepCombat(sim, TICK_SECONDS), (sim) => stepSector(sim, TICK_SECONDS), (sim) => stepEncounters(sim, TICK_SECONDS), (sim) => stepBoarders(sim, TICK_SECONDS), stepJudgement, stepVoice];
 
 /**
  * Create a simulation.
@@ -349,8 +338,7 @@ const SYSTEMS = [...SHIP_SYSTEMS, stepEnemy, (sim) => stepCombat(sim, TICK_SECON
  *   ship    a ship layout item from content/ships/
  *   crew    the starting roster: [{ id, name }], placed in the ship's crewStart rooms
  *   lines   the AI line library from content/ai-lines/ (she is silent without it)
- *   weapons the weapon items from content/weapons/
- *   ships   every ship item from content/ships/, so enemies can be brought alongside
+ *   weapons the weapon items from content/weapons/: what our mounts are, and what a contact fires at us
  *   sector  a sector item from content/sectors/: the run's chart is drawn from it (S3.1). Without one there is no run
  *   run     options for the run: { pursuit: true | false } to fix whether the contract is followed
  *   rules   { memories, refusals, risks }: the items of those content folders, what the crew remember and
@@ -363,11 +351,9 @@ const SYSTEMS = [...SHIP_SYSTEMS, stepEnemy, (sim) => stepCombat(sim, TICK_SECON
  *   encounters the items from content/encounters/ (H.1): the ships that can turn up on the scope. Without them
  *           nothing does, except through the debug command in tests that pass their own
  */
-export function createSim({ seed, ship, crew = [], lines = [], weapons = [], ships = [], sector = null, run = {}, rules = {}, events = [], contract = null, ports = [], encounters = [] }) {
+export function createSim({ seed, ship, crew = [], lines = [], weapons = [], sector = null, run = {}, rules = {}, events = [], contract = null, ports = [], encounters = [] }) {
   const layout = buildLayout(ship);
   const weaponById = new Map(weapons.map((item) => [item.id, item]));
-  const shipById = new Map(ships.map((item) => [item.id, item]));
-  const layouts = new Map([[layout.id, layout]]);
   const catalog = {
     weapon(id) {
       const item = weaponById.get(id);
@@ -375,20 +361,11 @@ export function createSim({ seed, ship, crew = [], lines = [], weapons = [], shi
       return item;
     },
     hasWeapon: (id) => weaponById.has(id),
-    layout(id) {
-      if (!layouts.has(id)) {
-        if (!shipById.has(id)) throw new Error(`Unknown ship "${id}"`);
-        layouts.set(id, buildLayout(shipById.get(id)));
-      }
-      return layouts.get(id);
-    },
-    /** Ships that can be fought. */
-    enemies: ships.filter((item) => item.enemy === true).map((item) => item.id),
   };
   for (const id of layout.weapons) catalog.weapon(id);
   const sim = {
     side: 'player',
-    /** Content the sim looks things up in: weapons and other ships. Never changes during a run. */
+    /** Content the sim looks things up in: weapons. Never changes during a run. */
     catalog,
     /** The ship's fixed shape: rooms, doors, vents. Never changes during a run. */
     layout,
@@ -411,7 +388,6 @@ export function createSim({ seed, ship, crew = [], lines = [], weapons = [], shi
       nextCommandId: 1,
       commands: [], // orders waiting for the next tick
       ...newShipState(layout, crew, 'player', catalog),
-      fight: null, // the fight in progress, enemy ship and all (combat.js)
       money: START_MONEY, // spent on bribes, fuel and repairs (port.js); the contract pays into it (contracts.js)
       reputation: {}, // standing with each faction by id, -10 to 10 (contracts.js); 0 when not there
       cargo: [], // what we have been handed: { name, qty, from }; it also comes aboard as crates (hold.js). Goods become content in Stage 7
@@ -504,8 +480,8 @@ export function createSim({ seed, ship, crew = [], lines = [], weapons = [], shi
   return sim;
 }
 
-/** Problems aboard one ship (the player's or the enemy's) that should never happen. */
-function shipProblems(ship, foe) {
+/** Problems aboard our ship that should never happen. */
+function shipProblems(ship) {
   const problems = [];
   const { state, layout } = ship;
   const in01 = (value) => value >= 0 && value <= 1;
@@ -531,7 +507,7 @@ function shipProblems(ship, foe) {
     if (!['open', 'closed', 'locked', 'jammed'].includes(d.state)) problems.push(`${door.id}.state is ${d.state}`);
     if (!in01(d.openness)) problems.push(`${door.id}.openness is ${d.openness}`);
   }
-  problems.push(...checkPowerInvariants(ship), ...checkAtmosphereInvariants(ship), ...checkCrewInvariants(ship), ...checkCombatInvariants(ship, foe), ...checkSenseInvariants(ship), ...checkHoldInvariants(ship), ...checkMemoryInvariants(ship));
+  problems.push(...checkPowerInvariants(ship), ...checkAtmosphereInvariants(ship), ...checkCrewInvariants(ship), ...checkCombatInvariants(ship), ...checkSenseInvariants(ship), ...checkHoldInvariants(ship), ...checkMemoryInvariants(ship));
   if (Object.keys(state.rooms).length !== layout.rooms.length) problems.push('room states do not match the layout');
   if (Object.keys(state.doors).length !== layout.doors.length) problems.push('door states do not match the layout');
   return problems;
@@ -541,8 +517,6 @@ function shipProblems(ship, foe) {
 export function checkInvariants(sim) {
   const problems = [];
   if (!Number.isInteger(sim.state.tick) || sim.state.tick < 0) problems.push(`tick is ${sim.state.tick}`);
-  const enemy = enemyOf(sim);
-  problems.push(...shipProblems(sim, enemy), ...checkVoiceInvariants(sim), ...checkJudgementInvariants(sim), ...checkFightInvariants(sim), ...checkBoardingInvariants(sim, enemy), ...checkRunInvariants(sim), ...checkEventInvariants(sim), ...checkContractInvariants(sim), ...checkEncounterInvariants(sim), ...checkBoarderInvariants(sim));
-  if (enemy) problems.push(...shipProblems(enemy, sim).map((problem) => `enemy: ${problem}`));
+  problems.push(...shipProblems(sim), ...checkVoiceInvariants(sim), ...checkJudgementInvariants(sim), ...checkRunInvariants(sim), ...checkEventInvariants(sim), ...checkContractInvariants(sim), ...checkEncounterInvariants(sim), ...checkBoarderInvariants(sim));
   return problems;
 }

@@ -25,7 +25,7 @@ import { createShipView } from './ui/shipview.js';
 import { renderContracts, renderEvent, renderHub, renderPort, renderScene, renderSummary } from './ui/screens.js';
 import { renderTitle } from './ui/title.js';
 
-const VERSION = '0.24.0';
+const VERSION = '0.25.0';
 
 const params = new URLSearchParams(window.location.search);
 const flags = {
@@ -96,7 +96,7 @@ let stopTyping = () => {};
 
 // Auto-pause (brief §7): stop the clock the moment something goes badly wrong, and say what.
 const AUTO_PAUSE_TEXT = {
-  fight: (event) => `${event.name} alongside`,
+  fired: (event) => `${event.name} ${event.warn ? 'fires a warning shot' : 'is firing on us'}`,
   contact: (event) => `${event.name} closing on us`,
   boarded: (event) => `Boarders in ${sim.layout.room(event.room).name}`,
   fire: (event) => `Fire in ${sim.layout.room(event.room).name}`,
@@ -121,7 +121,7 @@ let runCount = 0;
 /** Build a sim, its clock and its ship view, and wire the sound, auto-pause and run events to them. */
 function newGame(seed, { contract = null, pursuit } = {}) {
   // Only a run with a contract meets events: the sandbox has nowhere to show them.
-  sim = createSim({ seed, ship: content.require('ships', 'margin-of-error'), crew, lines: content.all('ai-lines'), weapons: content.all('weapons'), ships: content.all('ships'), rules, events: contract ? content.all('events') : [], sector: content.require('sectors', 'the-reach'), run: pursuit === undefined ? {} : { pursuit }, contract: contract?.template ?? null, ports, encounters: content.all('encounters') });
+  sim = createSim({ seed, ship: content.require('ships', 'margin-of-error'), crew, lines: content.all('ai-lines'), weapons: content.all('weapons'), rules, events: contract ? content.all('events') : [], sector: content.require('sectors', 'the-reach'), run: pursuit === undefined ? {} : { pursuit }, contract: contract?.template ?? null, ports, encounters: content.all('encounters') });
   clock = createClock({ sim, tickSeconds: TICK_SECONDS });
   clock.onChange(() => audio.play('pause'));
   runInfo = { contract, seed, seen: new Set([sim.state.run.at]), pending: null, doom: null, handedOver: false };
@@ -144,7 +144,7 @@ function newGame(seed, { contract = null, pursuit } = {}) {
     sim.events.on(item.event, (event) => !(item.found && unseen(mine, event)) && trip(event));
     if (item.found) sim.events.on(item.found, trip);
   }
-  // Arriving somewhere opens its screen, once the jump settles and any fight it brought is decided.
+  // Arriving somewhere opens its screen, once the jump settles.
   sim.events.on('sector.arrived', (event) => {
     if (!mineInfo.contract || mineInfo.seen.has(event.node)) return;
     mineInfo.seen.add(event.node);
@@ -154,8 +154,8 @@ function newGame(seed, { contract = null, pursuit } = {}) {
   sim.events.on('sector.jumped', (event) => {
     if (mineInfo.contract && event.kind === 'port' && mineInfo.seen.has(event.to)) mineInfo.pending = { screen: 'port', node: event.to };
   });
-  sim.events.on('fight.over', (event) => {
-    if (event.outcome === 'lost') mineInfo.doom = 'destroyed';
+  sim.events.on('ship.wrecked', () => {
+    mineInfo.doom = 'destroyed';
   });
   // A contract can fail out on the chart (the cargo over the side, a courier late): say so where the captain is looking.
   const view = shipView;
@@ -185,8 +185,8 @@ function backToShip() {
   if (doom) finishRun(doom);
   else {
     machine.go('ship');
-    // An event can leave us in a fight: the chart stays down so the fight is what the captain sees.
-    shipView.openChart(!(sim.state.fight && !sim.state.fight.over));
+    // An event can put a ship on the scope coming for us: the chart stays down so the scope is what the captain sees.
+    shipView.openChart(!sim.state.scope.contacts.some((contact) => contact.state === 'closing' || contact.state === 'alongside'));
   }
 }
 
@@ -195,8 +195,6 @@ function settleRun() {
   if (!runInfo?.contract || runInfo.ended || machine.state !== 'ship') return;
   const lost = runInfo.doom === 'destroyed' ? 'destroyed' : lostEnding(sim);
   if (lost) return finishRun(lost);
-  const fightLive = sim.state.fight && !sim.state.fight.over;
-  if (fightLive) return;
   // An event the sim has put on the table (S3.3) comes before anything else the arrival opens.
   if (eventView(sim)) return machine.go('event');
   if (!runInfo.pending) return;
@@ -365,7 +363,7 @@ function frame(now) {
         `auto   ${flags.auto ? 'on' : 'off'}`,
         `crew   ${ourCrew(sim).filter(({ member }) => member.alive).length} alive`,
         `fires  ${Object.values(sim.state.rooms).filter((r) => r.fire > 0).length}`,
-        `fight  ${sim.state.fight ? `${sim.state.fight.enemy.ship} ${sim.state.fight.enemy.hull.points}hp, ${sim.state.fight.shots.length} shots` : 'none'}`,
+        `scope  ${sim.state.scope.contacts.length} contacts, ${sim.state.scope.drones.length} drones, ${sim.state.shots.length} shots, hull ${sim.state.hull.points}`,
         `margo  ${sim.state.ai.said} said, ${sim.state.ai.queue.length} waiting`,
         `event  ${sim.state.run?.events.open ? `${sim.state.run.events.open.id}${sim.state.run.events.open.result ? ' (answered)' : ''}` : 'none'}, ${sim.state.run?.events.count ?? 0} met`,
         `chart  ${sim.state.run ? `${sim.state.run.at} fuel ${sim.state.run.fuel} jump ${sim.state.run.jumps}/${sim.state.run.deadline}${sim.state.run.pursuit ? ` chase@${sim.state.run.pursuit.at}` : ''}` : 'none'}`,

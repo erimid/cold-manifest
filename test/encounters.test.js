@@ -62,17 +62,20 @@ const first = (sim) => sim.state.scope.contacts[0];
 
 test('every encounter in content/encounters is sound, and the checker says what is wrong with a bad one', () => {
   assert.ok(ENCOUNTERS.length >= 4, 'at least four kinds of contact');
-  const ships = new Set(content.all('ships').filter((ship) => ship.enemy).map((ship) => ship.id));
-  for (const item of ENCOUNTERS) assert.deepEqual(validateEncounter(item, { ships }), [], item.id);
-  assert.deepEqual([...new Set(ENCOUNTERS.map((item) => item.wants))].sort(), ['cargo', 'crew', 'inspect', 'salvage'], 'one for each thing a contact can be looking for');
+  const refs = { weapons: new Set(content.all('weapons').map((item) => item.id)), encounters: new Set(ENCOUNTERS.map((item) => item.id)) };
+  for (const item of ENCOUNTERS) assert.deepEqual(validateEncounter(item, refs), [], item.id);
+  assert.deepEqual([...new Set(ENCOUNTERS.map((item) => item.wants))].sort(), ['cargo', 'crew', 'hull', 'inspect', 'salvage', 'scan', 'toll'], 'one for each thing a contact can be looking for');
 
   const { _file, ...good } = ENCOUNTERS[0];
-  const bad = (change) => validateEncounter({ ...good, ...change }, { ships }).join('; ');
+  const bad = (change) => validateEncounter({ ...good, ...change }, refs).join('; ');
   assert.match(bad({ wants: 'tea' }), /wants must be one of/);
   assert.match(bad({ notice: 0.5, sure: 0.3 }), /notice below sure/);
   assert.match(bad({ bluffs: { flattery: 0.5 } }), /no bluff "flattery"/);
   assert.match(bad({ decoys: { chaff: 1 } }), /no decoy "chaff"/);
-  assert.match(bad({ alongside: { seconds: 10, hail: 'Heave to.', fight: 'nobody' } }), /no enemy ship "nobody"/);
+  assert.match(bad({ alongside: { seconds: 10, hail: 'Heave to.', fight: 'nobody' } }), /alongside: unknown key "fight"/);
+  assert.match(bad({ guns: { ...good.guns, weapon: 'death-ray' } }), /no weapon "death-ray"/);
+  assert.match(bad({ wants: 'toll' }), /needs a toll/);
+  assert.match(bad({ wants: 'scan', scan: { range: 10, seconds: 5, calls: 'nobody' } }), /no encounter "nobody"/);
   assert.match(bad({ colour: 'red' }), /unknown key "colour"/);
 
   // The whole content folder still checks clean, and a sector may only name real kinds of point for its contacts.
@@ -218,7 +221,7 @@ test('a ship that docks puts its party at our lock (H.2), and a second one waits
   spawn(sim, 'raider-skiff', { range: 30, bearing: 180, state: 'closing' });
   const result = play(sim, 200);
   assert.equal(result.outcome, 'docked');
-  assert.equal(sim.state.fight, null, 'no duel any more');
+  assert.equal(sim.state.fight, undefined, 'no duel any more');
   assert.equal(sim.state.boarding?.phase, 'demand');
   const waiting = first(sim);
   seconds(sim, 30);

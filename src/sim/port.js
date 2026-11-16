@@ -32,7 +32,7 @@ function whyNoPort(sim, service) {
   if (!run) return 'there is no chart for this run';
   const port = portHere(sim);
   if (!port) return 'only a port has that';
-  if (sim.state.fight && !sim.state.fight.over) return 'not in a fight';
+  if (sim.state.boarding) return 'not with a party at the lock';
   if (!(port.services ?? SERVICES).includes(service)) return `${port.name} does not offer that`;
   return null;
 }

@@ -18,7 +18,7 @@ const REACH = content.require('sectors', 'the-reach');
 const FILES = readContentFiles();
 const REFS = gatherRefs(FILES);
 const runSim = (events = EVENTS, seed = 'events', sector = REACH) => {
-  const sim = createSim({ seed, ship: SHIP, crew: CREW, ...CATALOG, sector, events, run: { pursuit: false } });
+  const sim = createSim({ seed, ship: SHIP, crew: CREW, ...CATALOG, sector, events, encounters: content.all('encounters'), run: { pursuit: false } });
   sim.step();
   return sim;
 };
@@ -239,12 +239,14 @@ test('an effect can be aimed at the cast, or at whoever a requirement found', ()
   assert.equal(uncast.length, 1);
 });
 
-test('an outcome can start a fight, cue a scene, cue the threat, and lead on to another event', () => {
-  let sim = play([{ do: 'fight', ship: 'salvager-skiff' }]);
-  assert.equal(sim.state.fight.enemy.ship, 'salvager-skiff');
+test('an outcome can put a ship on the scope, cue a scene, cue the threat, and lead on to another event', () => {
+  let sim = play([{ do: 'contact', encounter: 'raider-skiff', range: 20 }]);
+  const contact = sim.state.scope.contacts.find((item) => item.encounter === 'raider-skiff');
+  assert.ok(contact, 'a raider on the scope');
+  assert.equal(contact.state, 'closing');
   assert.ok(eventView(sim).result, 'the outcome is still on the table to be read');
   give(sim, { type: 'event.dismiss' });
-  assert.ok(sim.state.fight && !sim.state.fight.over, 'and the fight goes on');
+  assert.ok(sim.state.scope.contacts.includes(contact), 'and it keeps coming');
   assert.deepEqual(checkInvariants(sim), []);
 
   sim = runSim([doing([{ do: 'scene', scene: 'bar.first' }, { do: 'threat', threat: 'stowaway' }, { do: 'threat' }])]);
@@ -292,7 +294,7 @@ test('an event replays exactly from its seed, and a snapshot taken mid-event res
 test('every effect checks what it is given', () => {
   const env = { vars: { scout: 'crew', place: 'text' }, refs: REFS };
   const bad = (effects) => validateEffects(effects, env)[0] ?? '';
-  assert.deepEqual(validateEffects([{ do: 'hurt', crew: '$scout', amount: 0.3 }, { do: 'fire', room: { of: '$scout' } }, { do: 'fight', ship: 'knife-cutter' }, { do: 'threat' }, { do: 'intel', text: 'At {place}.' }], env), []);
+  assert.deepEqual(validateEffects([{ do: 'hurt', crew: '$scout', amount: 0.3 }, { do: 'fire', room: { of: '$scout' } }, { do: 'contact', encounter: 'patrol-cutter' }, { do: 'threat' }, { do: 'intel', text: 'At {place}.' }], env), []);
   assert.match(bad([{ do: 'explode' }]), /no effect "explode"/);
   assert.match(bad([{ do: 'money' }]), /needs "add"/);
   assert.match(bad([{ do: 'money', add: 0 }]), /whole number, not 0/);
@@ -302,7 +304,8 @@ test('every effect checks what it is given', () => {
   assert.match(bad([{ do: 'fire', room: 'ballroom' }]), /no room "ballroom"/);
   assert.match(bad([{ do: 'damage', system: 'warp' }]), /no system "warp"/);
   assert.match(bad([{ do: 'remember', crew: 'all', memory: 'birthday' }]), /no memory "birthday"/);
-  assert.match(bad([{ do: 'fight', ship: 'margin-of-error' }]), /no ship "margin-of-error"/, 'only a ship that can be fought');
+  assert.match(bad([{ do: 'fight', ship: 'salvager-skiff' }]), /no effect "fight"/, 'the duel is gone (H.3)');
+  assert.match(bad([{ do: 'contact', encounter: 'margin-of-error' }]), /no encounter "margin-of-error"/);
   assert.match(bad([{ do: 'scene', scene: 'bar.first' }]), /no scene "bar.first"/);
   assert.match(bad([{ do: 'threat', threat: 'stowaway' }]), /no threat "stowaway"/);
   assert.match(bad([{ do: 'event', event: 'nowhere' }]), /no event "nowhere"/);
@@ -330,7 +333,7 @@ test('the content check catches a broken event: bad references, names out of rea
   broken((e) => (e.text = 'Hello {stranger}.'), /nothing called "\{stranger\}"/);
   broken((e) => (e.cast = { place: {} }), /already the name of something/);
   broken((e) => (e.cast = { scout: { skill: 'cooking' } }), /no skill "cooking"/);
-  broken((e) => (e.choices[0].outcomes[0].effects = [{ do: 'fight', ship: 'ghost-ship' }]), /no ship "ghost-ship"/);
+  broken((e) => (e.choices[0].outcomes[0].effects = [{ do: 'contact', encounter: 'ghost-ship' }]), /no encounter "ghost-ship"/);
   broken((e) => (e.choices[0].outcomes[0].effects = [{ do: 'event', event: 'test.gone' }]), /no event "test.gone"/);
   broken((e) => (e.choices[0].outcomes[0].text = '{medic} helps.'), /nothing called "\{medic\}"/);
   broken((e) => (e.choices[0].label = '{medic} helps'), /nothing called "\{medic\}"/);

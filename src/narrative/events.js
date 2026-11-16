@@ -37,7 +37,6 @@
 // A sim given no events never opens one. A salvage claim (contracts.js) is an event too: standing at
 // the claim point opens it, every time, until the claim is worked.
 
-import { endFight } from '../sim/combat.js';
 import { NODE_KINDS, nodeOf } from '../sim/sector.js';
 import { checkCrewSpec, crewMatching, fillText, match, requirement, validateCondition, validateText, vars } from './conditions.js';
 import { applyEffects, validateEffects } from './effects.js';
@@ -190,13 +189,13 @@ function outcomesFor(sim, choice, reach) {
   return first.length ? first : fit;
 }
 
-function choose(sim, choiceId, newShipState) {
+function choose(sim, choiceId) {
   const open = sim.state.run.events.open;
   const event = sim.transit.byId.get(open.id);
   const choice = event.choices.find((one) => one.id === choiceId);
   const reach = requirement(choice.requires, { sim, vars: reachOf(sim, open) }).vars;
   const picked = rng(sim).weighted(outcomesFor(sim, choice, reach), ({ outcome }) => outcome.weight ?? 1);
-  const ctx = { sim, vars: picked.vars, newShipState, endFight };
+  const ctx = { sim, vars: picked.vars };
   // The words are settled first, so they describe the world the choice was made in.
   const text = fillText(picked.outcome.text, ctx);
   open.result = { choice: choiceId, outcome: picked.index, text };
@@ -204,12 +203,12 @@ function choose(sim, choiceId, newShipState) {
   applyEffects(picked.outcome.effects, ctx);
 }
 
-export function eventCommands(newShipState) {
+export function eventCommands() {
   return {
     // Answer the event on the table.
     'event.choose': {
       check: (sim, cmd) => whyNoChoice(sim, cmd.choice),
-      apply: (sim, cmd) => choose(sim, cmd.choice, newShipState),
+      apply: (sim, cmd) => choose(sim, cmd.choice),
     },
     // Put an answered event away. If it leads on to another, that one opens.
     'event.dismiss': {

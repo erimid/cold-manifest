@@ -1,9 +1,9 @@
 // What a ship gives off, and what can be made of it (D-074). DOM-free.
 //
 // One model, read three ways:
-//   - the other ship's fire control reads our SIGNATURE to hold a lock on us,
-//     and we read theirs. No lock, no aimed shots: running dark is the
-//     defence that evasion used to be;
+//   - a contact on the scope reads our SIGNATURE to notice us, track us and
+//     close on us, and Margo reads theirs (encounters.js, H.1): running dark
+//     is how a hauler is not caught;
 //   - Margo reads each ROOM to know what is happening aboard. A room she
 //     cannot see (lamps off, nobody in it, internal sensors down) keeps its
 //     last-known state, and the screen shows that behind static;
@@ -24,12 +24,9 @@
 // What a ship knows:
 //   state.seen[room]   our own rooms: { live, tick }, and once a room has been lost sight of, the
 //                      ROOM_FACTS and `foes` as they were when it was (kept until it is seen again)
-//   state.contact      the other ship, in a fight: { lock, locked, rooms: { id: { resolve, live, tick } } },
-//                      with the same memory of a room whose picture has gone stale
 // While a room is in sight the truth is read straight from the ship: nothing is copied.
-// `lock` is how good the firing solution is, 0 to 1. A room of theirs
-// "resolves" on the sensor return as it is scanned: bright, hot, loud rooms
-// first. Only a resolved room can be aimed at.
+// (The fight's lock on another ship and the rooms of it resolving on a sensor
+// return went with the duel in H.3.)
 
 import { isHome } from './crew.js';
 import { supply, used } from './power.js';
@@ -64,20 +61,8 @@ const FIRE_GLOW = 0.7;
 /** Light enough for the cameras to see a room by. */
 export const SEE_LIGHT = 0.35;
 
-/** How well a ship's sensors read the other ship: unpowered (eyes and optics), powered, more per extra bar; and a ship built without a sensors room has fixed fire control. */
+/** How well a ship's sensors read what is outside: unpowered (eyes and optics), powered, more per extra bar; and a ship built without a sensors room has a fixed set. */
 export const GAIN = Object.freeze({ passive: 0.5, active: 1, perExtraBar: 0.25, builtin: 0.8 });
-
-/**
- * A lock: what the sensors make of the target's signature settles to a quality
- * between `from` (nothing to shoot at) and `full` (a clean solution). It comes
- * slowly and goes quickly. Below `min` there is no lock: shots go wide and wild.
- */
-export const LOCK = Object.freeze({ from: 0.12, full: 0.6, gain: 0.15, loss: 0.3, min: 0.2, regain: 0.25 });
-/** The chance a shot misses: none with a perfect lock, up to `span` with no lock at all. */
-export const MISS = Object.freeze({ span: 0.85 });
-
-/** Seconds to resolve a room that is giving off everything, at a gain of 1; a room giving off nothing takes 1 / dark times as long. */
-export const RESOLVE = Object.freeze({ seconds: 3, dark: 0.1 });
 
 /** The facts about a room that are remembered when it can no longer be seen. */
 export const ROOM_FACTS = Object.freeze(['oxygen', 'temperature', 'light', 'noise', 'hull', 'fire', 'breach']);
@@ -93,17 +78,6 @@ export function newSenseState(layout) {
   return {
     flare: 0, // 0 to 1: a gun has just gone off (a brace will do the same, S2.8)
     seen: Object.fromEntries(layout.rooms.map((room) => [room.id, { live: true, tick: 0 }])),
-    contact: null, // what we know of the other ship, while there is one
-  };
-}
-
-/** Start knowing nothing about `target`. */
-export function newContact(target) {
-  return {
-    lock: 0,
-    locked: false,
-    pinned: false, // debug and tests only: a perfect lock and a full scan that nothing can shake
-    rooms: Object.fromEntries(target.layout.rooms.map((room) => [room.id, { resolve: 0, live: false, tick: 0 }])),
   };
 }
 
@@ -268,36 +242,6 @@ export const unseen = (ship, event) => event?.room !== undefined && ship.state.s
 /** Rooms of our own ship Margo cannot see into right now. */
 export const hiddenRooms = (ship) => ship.layout.rooms.filter((room) => !ship.state.seen[room.id].live).map((room) => room.id);
 
-/**
- * A room of the other ship as `observer` knows it, or null before a fight:
- * { resolve, resolved, live, age }, and with `target` (the other ship) the
- * facts and `foes` too: the truth while the picture is live, the last scan
- * once it has gone stale, and nothing at all for a room never resolved.
- */
-export function contactView(observer, roomId, target = null) {
-  const entry = observer.state.contact?.rooms[roomId];
-  if (!entry) return null;
-  const view = { resolve: entry.resolve, resolved: entry.resolve >= 1, live: entry.live, age: entry.live ? 0 : observer.state.tick - entry.tick };
-  if (!target || !view.resolved) return view;
-  if (entry.live) return { ...view, ...factsOf(target.state.rooms[roomId]), foes: living(target, roomId).filter((member) => isHome(target, member)).length };
-  return { ...view, ...factsOf(entry), foes: entry.foes };
-}
-
-/** The rooms of the other ship this one has resolved. */
-export const resolvedRooms = (observer) => Object.entries(observer.state.contact?.rooms ?? {}).filter(([, entry]) => entry.resolve >= 1).map(([id]) => id);
-
-/** The chance, 0 to 1, that a shot from `shooter` misses. */
-export function missChance(shooter) {
-  const lock = shooter.state.contact?.lock ?? 0;
-  return clamp01(MISS.span * (1 - lock));
-}
-
-/** The lock `observer` would settle to on `target` as things stand, 0 to 1. */
-export function lockQuality(observer, target) {
-  const reading = signature(target).total * sensorGain(observer);
-  return clamp01((reading - LOCK.from) / (LOCK.full - LOCK.from));
-}
-
 // ---------- each tick ----------
 
 /** Noise settles, the gun flare fades, and Margo looks into every room she can. */
@@ -338,58 +282,6 @@ export function stepSenses(ship, seconds) {
   if (hidden) ship.events.emit('rooms.hidden', { rooms: hidden, tick: state.tick });
 }
 
-/**
- * `observer` works on its picture of `target`: the lock follows the target's
- * signature, rooms resolve, and what is resolved stays fresh while the
- * sensors run (or one of the observer's own people is standing there).
- */
-export function stepContact(observer, target, seconds) {
-  const contact = observer.state.contact;
-  if (!contact) return;
-  const { tick } = observer.state;
-  const gain = sensorGain(observer);
-
-  if (contact.pinned) for (const entry of Object.values(contact.rooms)) entry.resolve = 1;
-  const goal = contact.pinned ? 1 : lockQuality(observer, target);
-  if (contact.pinned) contact.lock = 1;
-  contact.lock = goal > contact.lock ? Math.min(goal, contact.lock + LOCK.gain * seconds) : Math.max(goal, contact.lock - LOCK.loss * seconds);
-  if (contact.locked && contact.lock < LOCK.min) {
-    contact.locked = false;
-    observer.events.emit('lock.lost', { tick });
-  } else if (!contact.locked && contact.lock >= LOCK.regain) {
-    contact.locked = true;
-    observer.events.emit('lock.gained', { tick });
-  }
-
-  const fresh = sensorsUp(observer);
-  const crew = byRoom(target);
-  const load = reactorLoad(target);
-  let resolved = 0;
-  let news = false;
-  for (const room of target.layout.rooms) {
-    const entry = contact.rooms[room.id];
-    const r = target.state.rooms[room.id];
-    const people = crew.get(room.id) ?? NOBODY;
-    const there = people.some((member) => isHome(observer, member));
-    if (entry.resolve < 1) {
-      const rate = (gain * (RESOLVE.dark + (1 - RESOLVE.dark) * emission(target, room.id, people, load))) / RESOLVE.seconds;
-      entry.resolve = there ? 1 : Math.min(1, entry.resolve + rate * seconds);
-      if (entry.resolve >= 1) news = true;
-    }
-    const live = entry.resolve >= 1 && (fresh || there);
-    if (entry.live && !live) {
-      // The picture goes stale: keep the last scan.
-      copyFacts(entry, r);
-      entry.tick = tick;
-      entry.foes = 0;
-      for (const member of people) if (isHome(target, member)) entry.foes += 1;
-    }
-    entry.live = live;
-    if (entry.resolve >= 1) resolved += 1;
-  }
-  if (news) observer.events.emit('scan.resolved', { resolved, of: target.layout.rooms.length, tick });
-}
-
 // ---------- invariants ----------
 
 export function checkSenseInvariants(ship) {
@@ -401,14 +293,6 @@ export function checkSenseInvariants(ship) {
     if (!seen) problems.push(`room ${room.id} has never been seen`);
     else if (seen.tick > state.tick) problems.push(`room ${room.id} was last seen in the future`);
     else if (!seen.live && seen.fire === undefined) problems.push(`room ${room.id} is out of sight with nothing remembered`);
-  }
-  const contact = state.contact;
-  if (contact) {
-    if (!(contact.lock >= 0 && contact.lock <= 1)) problems.push(`lock is ${contact.lock}`);
-    for (const [id, entry] of Object.entries(contact.rooms)) {
-      if (!(entry.resolve >= 0 && entry.resolve <= 1)) problems.push(`contact room ${id} is resolved ${entry.resolve}`);
-      if (entry.live && entry.resolve < 1) problems.push(`contact room ${id} is live before it is resolved`);
-    }
   }
   return problems;
 }

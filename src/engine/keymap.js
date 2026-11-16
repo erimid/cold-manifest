@@ -2,10 +2,10 @@
 // The input module turns key presses into { type: 'key', action } events.
 // Number keys pick crew (S1.6). The Q row routes power: the key adds a bar to
 // that slot of the power panel, Shift with the key takes one back.
-// The A row picks a weapon to aim (S2.1). B braces the shields (S2.8). P opens
+// A lays the gun on the contact selected on the scope, or holds fire (H.3). B braces the shields (S2.8). P opens
 // or folds the breaker board (S2.9). O overrides an order Margo is holding,
 // and Escape stands down from it (S2.10). M puts the route chart up or takes it
-// down, and J jumps: down the plotted course, or out of a fight (S3.1).
+// down, and J jumps down the plotted course (S3.1).
 // V lights the drive or cuts it, and X puts out a flare (H.1).
 
 export const KEYMAP = Object.freeze({
@@ -27,10 +27,7 @@ export const KEYMAP = Object.freeze({
   KeyY: 'power-6',
   KeyU: 'power-7',
   KeyI: 'power-8',
-  KeyA: 'weapon-1',
-  KeyS: 'weapon-2',
-  KeyD: 'weapon-3',
-  KeyF: 'weapon-4',
+  KeyA: 'gun',
   KeyB: 'brace',
   KeyP: 'breakers',
   KeyO: 'override',
