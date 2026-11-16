@@ -19,6 +19,16 @@
       "crew": { "in": "$room", "suit": false }
     },
     {
+      "id": "vent_room_crew",
+      "order": 2,
+      "grave": true,
+      "note": "An emergency vent (H.2) opened on a room with one of ours in it and no suit on.",
+      "on": "room.vent",
+      "rooms": "order.room",
+      "when": [{ "fact": "order", "field": "open", "eq": true }],
+      "crew": { "in": "$room", "suit": false }
+    },
+    {
       "id": "vent_near",
       "order": 3,
       "grave": false,

@@ -891,7 +891,7 @@ export function createShipRenderer(layout, { sensor = false } = {}) {
 
     // Alarm: a pulsing border, plus a shape per hazard so it never relies on colour alone.
     const lowAir = r.oxygen < 0.35;
-    if (r.fire > 0 || r.breach > 0 || lowAir) {
+    if (r.fire > 0 || r.breach > 0 || lowAir || r.vent) {
       const pulse = reduceFlicker ? 0.8 : 0.55 + 0.45 * Math.sin(time * 6.5);
       ctx.strokeStyle = `rgba(255, 65, 54, ${pulse})`;
       ctx.lineWidth = 3;
@@ -913,6 +913,8 @@ export function createShipRenderer(layout, { sensor = false } = {}) {
       if (r.fire > 0) badge((cx, cy) => { ctx.moveTo(cx, cy - 10); ctx.lineTo(cx + 10, cy + 8); ctx.lineTo(cx - 10, cy + 8); ctx.closePath(); }, 'F');
       if (r.breach > 0) badge((cx, cy) => { ctx.moveTo(cx, cy - 10); ctx.lineTo(cx + 10, cy); ctx.lineTo(cx, cy + 10); ctx.lineTo(cx - 10, cy); ctx.closePath(); }, 'B');
       if (lowAir) badge((cx, cy) => ctx.arc(cx, cy, 9, 0, Math.PI * 2), 'O');
+      // An emergency vent open to space (H.2): a square badge.
+      if (r.vent) badge((cx, cy) => ctx.rect(cx - 9, cy - 9, 18, 18), 'V');
     }
   }
 
@@ -924,8 +926,9 @@ export function createShipRenderer(layout, { sensor = false } = {}) {
     const system = state.systems[room.system];
     if (!system || system.absent || system.lost || !system.damage || state.rooms[room.id]?.jettisoned) return;
     const s = view.scale;
-    const fixing = Object.values(state.crew).some((m) => m.alive && m.owner === 'player' && m.room === room.id && m.task === 'repair');
-    const text = fixing ? `REPAIRING ${system.damage}/${system.level}` : `DAMAGED ${system.damage}/${system.level} · SEND CREW`;
+    const fixing = !system.stripped && Object.values(state.crew).some((m) => m.alive && m.owner === 'player' && m.room === room.id && m.task === 'repair');
+    // Stripped by a salvage crew (H.2): the parts are gone, and only a port can fit new ones.
+    const text = system.stripped ? 'STRIPPED · NEEDS A PORT' : fixing ? `REPAIRING ${system.damage}/${system.level}` : `DAMAGED ${system.damage}/${system.level} · SEND CREW`;
     const size = Math.max(9, Math.min(12, s * 0.32));
     ctx.font = `700 ${size}px ${MONO}`;
     const maxW = room.w * s - 14;
@@ -1158,7 +1161,7 @@ export function createShipRenderer(layout, { sensor = false } = {}) {
     if (member.carry) return 'carry';
     if (member.task === 'fighting') return 'fight';
     if (member.task === 'walking' || member.task === 'crossing') return member.path?.length && !onLiftNow(member) ? 'walk' : 'stand';
-    if (['extinguish', 'patch', 'repair', 'unjam', 'sabotage', 'loading', 'opening', 'lifting', 'cycling'].includes(member.task)) return 'work';
+    if (['extinguish', 'patch', 'repair', 'unjam', 'sabotage', 'loading', 'opening', 'lifting', 'cycling', 'stashing', 'forcing', 'searching', 'grabbing'].includes(member.task)) return 'work';
     return 'stand';
   }
   const onLiftNow = (member) => {
@@ -1213,6 +1216,8 @@ export function createShipRenderer(layout, { sensor = false } = {}) {
 
     // Walk cycle off the distance they have covered, so it freezes on pause and matches their pace.
     const phase = (((at.x + at.y) * 1.3) % 1 + 1) % 1;
+    // Hiding (H.2): drawn faint, behind a locker door or up in the crawlway, so the captain still knows where.
+    if (member.hidden) ctx.globalAlpha = 0.35;
     drawBody(ctx, {
       x: cx,
       feet,
@@ -1229,6 +1234,19 @@ export function createShipRenderer(layout, { sensor = false } = {}) {
       label: hostile ? member.name.charAt(0).toUpperCase() : String(member.index + 1),
       dim: !member.alive,
     });
+    if (member.hidden) {
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = C.paper;
+      ctx.setLineDash([3, 3]);
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(box.x - 2, box.y - 2, box.w + 4, box.h + 4);
+      ctx.setLineDash([]);
+      ctx.fillStyle = C.paper;
+      ctx.font = `700 ${Math.max(9, 0.28 * s)}px ${MONO}`;
+      ctx.textAlign = 'center';
+      ctx.fillText(member.hidden === 'crawlway' ? 'CRAWLWAY' : 'HIDING', cx, box.y - 4);
+      ctx.textAlign = 'start';
+    }
 
     if (!member.alive) {
       ctx.fillStyle = '#8b93a1';

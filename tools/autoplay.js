@@ -37,6 +37,11 @@
 //              scope at a seeded range and bearing, against a bot that tries one answer:
 //              nothing, going quiet, running, a flare, a crate out of the airlock, or a
 //              bluff. An encounter still going after ENCOUNTER_MINUTES is a failure
+//   boardings  every kind of party from content/encounters/ at our lock in turn (H.2),
+//              against a bot with one answer: nothing, a bribe at the lock, handing over
+//              what they want, everyone hiding, everyone fighting at the lock, or venting
+//              the rooms they come through. A party still aboard after its time is a failure.
+//              On the crossings the bot pays at the lock when it can and opens it when not
 //
 // Chaos: the bot sends three crew around the ship to deal with whatever is
 // worst, suits them up for breaches, works doors, airlocks and lights, routes
@@ -58,6 +63,8 @@ import { MANUAL_DOOR_SECONDS, TICK_RATE, TICK_SECONDS, checkInvariants, createSi
 import { cheapestRoute, laneBetween, neighbours, nodeOf, whyNoCourseJump } from '../src/sim/sector.js';
 import { contractCrates } from '../src/sim/contracts.js';
 import { BLUFFS, ENDINGS, SPAWN, bluffChance, scopeView } from '../src/sim/encounters.js';
+import { BOARD, GOALS, OUTCOMES as BOARD_OUTCOMES, REASONS, whyNoBribe } from '../src/sim/boarders.js';
+import { hidingSpot, lockersFree } from '../src/sim/agents.js';
 import { boardOffers } from '../src/sim/runflow.js';
 import { writeFileSync } from 'node:fs';
 
@@ -705,7 +712,7 @@ function playCrossing(seed, index) {
   const { run } = sim.state;
   const contract = run.contract;
   const end = CROSSING_MINUTES * 60 * TICK_RATE;
-  const tally = { caught: 0, escapes: 0, detours: 0, sighted: 0, fightTicks: 0, lines: 0, outcomes: {}, events: 0, lapsed: 0, eventFights: 0, hooks: 0, met: {}, picked: {}, locked: 0, offered: 0, inspections: 0, seized: 0, fuelBought: 0, fuelSpent: 0, repairSpent: 0, claimLeft: false, contacts: {}, contactKinds: {} };
+  const tally = { caught: 0, escapes: 0, detours: 0, sighted: 0, fightTicks: 0, lines: 0, outcomes: {}, events: 0, lapsed: 0, eventFights: 0, hooks: 0, met: {}, picked: {}, locked: 0, offered: 0, inspections: 0, seized: 0, fuelBought: 0, fuelSpent: 0, repairSpent: 0, claimLeft: false, contacts: {}, contactKinds: {}, boardings: {} };
   sim.events.on('cargo.seized', () => (tally.seized += 1));
   sim.events.on('port.refueled', (event) => {
     tally.fuelBought += event.bought;
@@ -723,6 +730,7 @@ function playCrossing(seed, index) {
     if (event.effect === 'fight') tally.eventFights += 1;
     if (event.effect === 'scene' || event.effect === 'threat') tally.hooks += 1;
   });
+  sim.events.on('boarding.ended', (event) => (tally.boardings[event.outcome] = (tally.boardings[event.outcome] ?? 0) + 1));
   sim.events.on('encounter.ended', (event) => {
     tally.contacts[event.outcome] = (tally.contacts[event.outcome] ?? 0) + 1;
     tally.contactKinds[event.encounter] = (tally.contactKinds[event.encounter] ?? 0) + 1;
@@ -780,6 +788,10 @@ function playCrossing(seed, index) {
         tally.locked += view.choices.length - open.length;
         give({ type: 'event.choose', choice: bot.pick(open).id });
       }
+    } else if (sim.state.boarding?.phase === 'demand') {
+      // A party at the lock (H.2): pay if the money allows, otherwise let them get on with it.
+      if (!whyNoBribe(sim)) give({ type: 'boarding.bribe' });
+      else give({ type: 'boarding.admit' });
     } else if (fight?.over) {
       if (fight.over.outcome === 'lost') {
         lost = true;
@@ -980,6 +992,83 @@ function playEncounter(seed, def, tactic) {
   return { ...tally, hash: hashState(sim.snapshot()) };
 }
 
+/** What the boarding bot can try. Each seed gives each kind of party one of them, in turn. */
+const ANSWERS = Object.freeze(['nothing', 'bribe', 'yield', 'hide', 'fight', 'vent']);
+
+/**
+ * One party at our lock (H.2) and a bot with one answer. Throws on any failure, including a party that is
+ * still aboard after its demand, its stay and its leaving are all up.
+ */
+function playBoarding(seed, def, answer) {
+  const sim = createSim({ seed, ship, crew: roster, lines, weapons, ships: [], rules: ruleSet, encounters: encounterDefs });
+  sim.state.money = 500;
+  // Something for an inspection to find.
+  const smuggled = Object.values(sim.state.crates).find((crate) => crate.label.includes('7731-D'));
+  if (smuggled) smuggled.contraband = true;
+  const give = (command) => !sim.whyNot(command) && sim.enqueue(command);
+  const tally = { encounter: def.id, wants: def.wants, answer, outcome: null, reason: null, seconds: 0, ourDead: 0, theirDead: 0, found: 0, forced: 0, took: 0 };
+  sim.events.on('crew.died', () => (tally.ourDead += 1));
+  sim.events.on('enemy.crew.died', () => (tally.theirDead += 1));
+  sim.events.on('crew.found', () => (tally.found += 1));
+  sim.events.on('door.forced', () => (tally.forced += 1));
+  sim.events.on('boarding.ended', (event) => {
+    tally.outcome ??= event.outcome;
+    tally.reason ??= event.reason;
+    tally.seconds = event.seconds;
+    tally.took = event.took + event.seized;
+  });
+  sim.enqueue({ type: 'debug.boarding', encounter: def.id });
+  const limit = (BOARD.demand + def.party.stay + BOARD.leave + 5) * TICK_RATE;
+  const ours = () => Object.values(sim.state.crew).filter((member) => member.owner === 'player' && member.alive);
+  let vented = [];
+  while (sim.state.tick < limit && !tally.outcome) {
+    const boarding = sim.state.boarding;
+    if (boarding && sim.state.tick % 10 === 0) {
+      const dock = boarding.dock;
+      if (answer === 'bribe' && boarding.phase === 'demand') give({ type: 'boarding.bribe' });
+      else if (answer === 'yield' && boarding.phase === 'demand') give({ type: 'boarding.yield' });
+      else if (answer === 'hide') {
+        // Everyone to somewhere with a locker or a crawlway, and in.
+        for (const member of ours()) {
+          if (member.hidden || member.path.length) continue;
+          if (hidingSpot(sim, member)) give({ type: 'crew.hide', crew: member.id, on: true });
+          else {
+            const room = ship.rooms.find((item) => item.hide && lockersFree(sim, item.id) > 0 && !Object.values(sim.state.crew).some((other) => other !== member && other.goal === item.id));
+            if (room) give({ type: 'crew.move', crew: member.id, room: room.id });
+          }
+        }
+      } else if (answer === 'fight') {
+        // Everyone to the lock, and at them.
+        for (const member of ours()) if (member.room !== dock && member.goal !== dock) give({ type: 'crew.move', crew: member.id, room: dock });
+        if (boarding.phase === 'aboard' && !boarding.hostile) give({ type: 'boarding.fight' });
+      } else if (answer === 'vent' && boarding.phase === 'demand') {
+        // Clear the lock room and the rooms beside it, shut them off, and open the vents before the lock opens.
+        const near = [dock, ...sim.layout.exits(dock).filter((exit) => exit.to !== 'space' && sim.layout.room(exit.to).kind !== 'lift').map((exit) => exit.to)];
+        const safe = ship.rooms.find((room) => !near.includes(room.id) && room.kind !== 'lift' && room.kind !== 'corridor')?.id;
+        for (const member of ours()) if (near.includes(member.room) && member.goal !== safe) give({ type: 'crew.move', crew: member.id, room: safe });
+        if (!ours().some((member) => near.includes(member.room) || member.path.length)) {
+          for (const room of near) if (give({ type: 'room.vent', room, open: true })) vented.push(room);
+        }
+      }
+    }
+    if (!boarding && vented.length) {
+      for (const room of vented) give({ type: 'room.vent', room, open: false });
+      vented = [];
+    }
+    sim.step();
+    if (sim.state.tick % 20 === 0) {
+      const problems = checkInvariants(sim);
+      if (problems.length) throw new Error(`invariant broken at tick ${sim.state.tick}: ${problems[0]}`);
+    }
+  }
+  if (!tally.outcome) throw new Error(`the ${def.id} party was still aboard after ${(limit / TICK_RATE).toFixed(0)}s (${sim.state.boarding?.phase})`);
+  if (!BOARD_OUTCOMES[tally.outcome] || !REASONS[tally.reason]) throw new Error(`the ${def.id} boarding ended in no known way: "${tally.outcome}/${tally.reason}"`);
+  if (Object.values(sim.state.crew).some((member) => member.party)) throw new Error(`a ${def.id} boarder was left aboard`);
+  const bad = findBadNumbers(sim.state);
+  if (bad.length) throw new Error(`non-finite numbers at ${bad.join(', ')}`);
+  return { ...tally, hash: hashState(sim.snapshot()) };
+}
+
 const started = performance.now();
 const failures = [];
 const totals = { orders: 0, refused: 0, dropped: 0, doorMoves: 0, pauses: 0, powerMoves: 0, brownouts: 0, darkTicks: 0, fires: 0, spreads: 0, firesOut: 0, scorched: 0, jettisons: 0, airlessTicks: 0, moves: 0, arrivals: 0, blocked: 0, deaths: 0, firesFought: 0, patches: 0, repairs: 0, fights: 0, shots: 0, hits: 0, absorbed: 0, missed: 0, kills: 0, boarded: 0, boardedUs: 0, melee: 0, captured: 0, said: 0, argued: 0, margoRefused: 0, overrides: 0, stoodDown: 0, lapsed: 0, crewRefused: 0, scares: 0, lamps: 0 };
@@ -991,6 +1080,7 @@ const crewedIds = ships.filter((item) => item.enemy === true && item.crew?.lengt
 const underFire = [];
 const crossings = [];
 const encounters = [];
+const boardings = [];
 for (let i = 1; i <= runs; i++) {
   const seed = `${baseSeed}-${i}`;
   try {
@@ -1010,6 +1100,16 @@ for (let i = 1; i <= runs; i++) {
       encounters.push(first);
     } catch (err) {
       failures.push({ seed, reason: `encounter with ${def.id} (${tactic}): ${err.message}` });
+    }
+    if (!def.party) return;
+    const answer = ANSWERS[(i - 1 + index) % ANSWERS.length];
+    try {
+      const first = playBoarding(seed, def, answer);
+      const second = playBoarding(seed, def, answer);
+      if (first.hash !== second.hash) failures.push({ seed, reason: `boarding by ${def.id}: replay mismatch (${first.hash} vs ${second.hash})` });
+      boardings.push(first);
+    } catch (err) {
+      failures.push({ seed, reason: `boarding by ${def.id} (${answer}): ${err.message}` });
     }
   });
   try {
@@ -1240,11 +1340,27 @@ for (const c of crossings) {
 }
 const crossTotal = Object.values(crossContacts).reduce((a, b) => a + b, 0);
 out.push(`  on the crossings:  ${crossTotal} contacts met (${(crossTotal / Math.max(1, crossings.length)).toFixed(1)} a crossing): ${Object.keys(ENDINGS).filter((k) => crossContacts[k]).map((k) => `${ENDINGS[k].toLowerCase()} ${crossContacts[k]}`).join(', ') || 'none'}; ${Object.entries(crossKinds).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k} ${n}`).join(', ') || 'none'}`);
+const boardList = (list) => Object.keys(BOARD_OUTCOMES).map((k) => [k, list.filter((b) => b.outcome === k).length]).filter(([, n]) => n > 0).map(([k, n]) => `${BOARD_OUTCOMES[k].toLowerCase()} ${n}`).join(', ') || 'none';
+const whyList = (list) => Object.keys(REASONS).map((k) => [k, list.filter((b) => b.reason === k).length]).filter(([, n]) => n > 0).map(([k, n]) => `${k} ${n}`).join(', ');
+out.push(`Boardings (H.2): ${boardings.length} parties at our lock, every kind from content/encounters/ against a bot with one answer each`);
+out.push(`  how they ended:    ${boardList(boardings)} (${whyList(boardings)}); ${mean(boardings.map((b) => b.seconds)).toFixed(0)}s a boarding (longest ${Math.max(0, ...boardings.map((b) => b.seconds)).toFixed(0)}s)`);
+out.push(`  the cost:          ${boardings.reduce((n, b) => n + b.ourDead, 0)} of ours dead, ${boardings.reduce((n, b) => n + b.theirDead, 0)} of theirs; ${boardings.reduce((n, b) => n + b.found, 0)} found hiding; ${boardings.reduce((n, b) => n + b.forced, 0)} doors forced`);
+for (const goal of Object.keys(GOALS)) {
+  const of = boardings.filter((b) => b.wants === goal);
+  if (of.length) out.push(`  ${GOALS[goal].toLowerCase().padEnd(18)} ${boardList(of)} (${whyList(of)})`);
+}
+for (const answer of ANSWERS) {
+  const of = boardings.filter((b) => b.answer === answer);
+  if (of.length) out.push(`  bot: ${answer.padEnd(13)} ${boardList(of)}; ${of.reduce((n, b) => n + b.ourDead, 0)} of ours dead`);
+}
+const crossBoard = {};
+for (const c of crossings) for (const [k, n] of Object.entries(c.boardings)) crossBoard[k] = (crossBoard[k] ?? 0) + n;
+out.push(`  on the crossings:  ${Object.entries(crossBoard).map(([k, n]) => `${BOARD_OUTCOMES[k].toLowerCase()} ${n}`).join(', ') || 'no boardings'}`);
 out.push('');
 out.push(`  wall time:         ${seconds.toFixed(2)}s`);
 const verdict = failures.length
   ? `FAILED: ${failures.length} problem(s).`
-  : 'PASSED: no crashes, no stuck doors, no crew stuck on a path, power never over supply, no fire without air, no fight left hanging, no crossing left unfinished, no contact left on the scope, nothing moved while paused, every run replays from its seed.';
+  : 'PASSED: no crashes, no stuck doors, no crew stuck on a path, power never over supply, no fire without air, no fight left hanging, no crossing left unfinished, no contact left on the scope, no party left aboard, nothing moved while paused, every run replays from its seed.';
 
 console.log(out.join('\n'));
 const reportPath = option('report', null);

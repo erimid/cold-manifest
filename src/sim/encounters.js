@@ -29,6 +29,7 @@
 // Velocities are absolute, so cutting our drive changes nothing about how the
 // picture moves. Bearings are degrees clockwise from the top of the scope.
 
+import { validateParty, startBoarding } from './boarders.js';
 import { hasPilot, startFight } from './combat.js';
 import { isHome } from './crew.js';
 import { flare as flash, sensorGain, signature } from './senses.js';
@@ -116,7 +117,7 @@ const turnBetween = (from, to) => ((to - from + 540) % 360) - 180;
 /** Problems with an encounter definition (content/encounters/), as readable strings. `refs.ships` are the enemy ships. */
 export function validateEncounter(item, refs = {}) {
   const problems = [];
-  const allowed = ['id', 'note', 'name', 'class', 'blurb', 'wants', 'at', 'weight', 'signature', 'sensors', 'reach', 'keen', 'notice', 'sure', 'speed', 'accel', 'standoff', 'shadow', 'patience', 'chase', 'decoys', 'bluffs', 'alongside'];
+  const allowed = ['id', 'note', 'name', 'class', 'blurb', 'wants', 'at', 'weight', 'signature', 'sensors', 'reach', 'keen', 'notice', 'sure', 'speed', 'accel', 'standoff', 'shadow', 'patience', 'chase', 'decoys', 'bluffs', 'alongside', 'party'];
   for (const key of Object.keys(item)) if (!allowed.includes(key) && key !== '_file') problems.push(`unknown key "${key}"`);
   const text = (v) => typeof v === 'string' && v.trim().length > 0;
   const positive = (v) => typeof v === 'number' && Number.isFinite(v) && v > 0;
@@ -154,6 +155,9 @@ export function validateEncounter(item, refs = {}) {
     if (side.fight !== undefined && !text(side.fight)) problems.push('alongside.fight must name an enemy ship');
     else if (side.fight !== undefined && refs.ships && !refs.ships.has(side.fight)) problems.push(`alongside.fight: no enemy ship "${side.fight}"`);
   }
+  if (item.party !== undefined) problems.push(...validateParty(item.party, item.wants));
+  else if (!side?.fight) problems.push('needs a party (who comes aboard when it docks) or, until H.3, alongside.fight');
+  if (item.party?.faction && refs.factions && !refs.factions.has(item.party.faction)) problems.push(`party.faction: no faction "${item.party.faction}"`);
   return problems;
 }
 
@@ -582,13 +586,16 @@ function stepContact(sim, contact, dt, loud, newShipState) {
   if (range > ALONGSIDE * 2.5) {
     contact.state = 'closing';
     sim.events.emit('contact.closing', info);
-  } else if (contact.held >= def.alongside.seconds) {
+  } else if (contact.held >= def.alongside.seconds && !sim.state.boarding) {
+    // A second ship waits its turn alongside while one is clamped on.
     contact.state = 'docked';
     sim.events.emit('contact.docked', { ...info, wants: def.wants });
     record(sim, contact, 'docked');
     remove(sim, contact);
-    // Until boarding parties walk our decks (H.2) and the duel goes (H.3), a clamp means the old fight.
-    if (def.alongside.fight && sim.catalog.enemies.includes(def.alongside.fight) && !sim.state.fight) {
+    // The clamp goes on and its party comes to our lock (H.2, boarders.js). An encounter with no party
+    // still means the old fight, until the duel goes in H.3.
+    if (def.party) startBoarding(sim, def, { contact: contact.id });
+    else if (def.alongside.fight && sim.catalog.enemies.includes(def.alongside.fight) && !sim.state.fight) {
       startFight(sim, def.alongside.fight, newShipState);
       sim.state.fight.contact = def.id;
     }

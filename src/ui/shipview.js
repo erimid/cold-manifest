@@ -31,6 +31,8 @@
 import { REFUSALS_PER_RUN, trustWord } from '../ai/judgement.js';
 import { pickTarget } from '../engine/hit.js';
 import { DEBUG_ACTIONS, OUTCOMES, OFFER_SECONDS, braced, bribePrice, capacitorOf, capacity, chargeOf, enemyOf, findCrew, fixOf, offerText, ourCrew, talkChance, whyNoBrace, whyNoJump } from '../sim/combat.js';
+import { GOALS, REASONS, OUTCOMES as BOARDING_OUTCOMES, bribeChance, describeBoarder, partyOf, whyNoBribe, whyNoYield } from '../sim/boarders.js';
+import { HIDING, compartmentsFree, whyNoHide } from '../sim/agents.js';
 import { describeTask } from '../sim/crew.js';
 import { BLUFFS, ENDINGS, bluffChance, scopeView, whyNoHail } from '../sim/encounters.js';
 import { describeJob, magazineOf, pickHand, roundsInHold } from '../sim/hold.js';
@@ -75,7 +77,7 @@ function effectWords(effects) {
   return words.join('  ');
 }
 /** Short task names for the crew bar, where there is no room for a sentence. */
-const CHIP_TASKS = { walking: 'Walking', crawling: 'Crawling', waiting: 'At a door', extinguish: 'Fighting fire', patch: 'Patching hull', repair: 'Repairing', unjam: 'Freeing door', idle: 'Standing by', fighting: 'Fighting', sabotage: 'Wrecking', crossing: 'In the tube', lifting: 'Lifting', opening: 'Opening', loading: 'Loading gun', cycling: 'At the airlock' };
+const CHIP_TASKS = { walking: 'Walking', crawling: 'Crawling', waiting: 'At a door', extinguish: 'Fighting fire', patch: 'Patching hull', repair: 'Repairing', unjam: 'Freeing door', idle: 'Standing by', fighting: 'Fighting', sabotage: 'Wrecking', crossing: 'In the tube', lifting: 'Lifting', opening: 'Opening', loading: 'Loading gun', cycling: 'At the airlock', stashing: 'Stashing', hiding: 'Hiding' };
 /** What a crate is, in a few words for its panel. */
 const CRATE_KIND = { ammo: 'Ordnance · rounds for the heavy guns', cargo: 'Company manifest', salvage: 'Salvage' };
 /** Start a sentence with a capital: the sim's reasons are written to follow "because". */
@@ -108,6 +110,7 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
   let sensorBox = null; // the enemy's sensor-return screen, in a fight
   let scopeBox = null; // the passive scope, the rest of the time (H.1)
   let fightBar = null; // the weapons bar's live parts
+  let boardCall = null; // the boarding card's live parts (H.2)
   let impacts = []; // shots that just landed, for a moment: { side, room, result, damage, effects, tick }
   let shake = null; // { tick, strength } the last hit on our ship, while the screen shakes
   let roster = null; // the crew bar's live parts
@@ -420,6 +423,9 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
           sim.encounters.all.map((def) => button(`btn-dbg-contact-${def.id}`, def.name, act(() => order({ type: 'debug.contact', encounter: def.id, range: 95, bearing: 40, miss: 15 })), 'btn--debug')),
           sim.encounters.all.map((def) => button(`btn-dbg-closing-${def.id}`, `${def.name}, closing`, act(() => order({ type: 'debug.contact', encounter: def.id, range: 45, bearing: 300, state: 'closing' })), 'btn--debug')),
           button('btn-dbg-contact-clear', 'Clear the scope', act(() => order({ type: 'debug.contact', clear: true })), 'btn--debug'),
+          // A party at our lock at once (H.2), as if its ship had just docked; and the clamp off again.
+          sim.encounters.all.filter((def) => def.party).map((def) => button(`btn-dbg-board-${def.id}`, `${def.name} docks`, act(() => order({ type: 'debug.boarding', encounter: def.id })), 'btn--debug')),
+          button('btn-dbg-board-clear', 'Cast them off', act(() => order({ type: 'debug.boarding', clear: true })), 'btn--debug'),
         ),
       el('div', { class: 'stencil sheet__sub' }, 'View'),
       el('div', { class: 'sheet__grid' }, button('btn-crawlways', showCrawlways ? 'Hide crawlways' : 'Show crawlways', () => {
@@ -632,7 +638,70 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
     const braceBtn = el('button', { class: 'btn btn--small btn--brace', type: 'button', id: 'btn-brace', press: () => order({ type: 'ship.brace' }) }, el('span', {}, 'Brace'), braceNote);
     fightBar = { tiles, own, theirs, leave, jump, jumpNote, brace: braceBtn, braceNote, call: buildCall() };
     fightBar.node = el('div', { class: 'panel fightbar', id: 'fightbar', hidden: true }, own.node, el('div', { class: 'fightbar__weapons' }, tiles.map((t) => t.node)), theirs.node, braceBtn, jump, leave);
-    return el('div', { class: 'fightstack' }, fightBar.call.node, fightBar.node);
+    boardCall = buildBoardCall();
+    return el('div', { class: 'fightstack' }, boardCall.node, fightBar.call.node, fightBar.node);
+  }
+
+  /**
+   * The boarding card (H.2): a party at our lock, what it wants, and our answers there (pay, hand it over,
+   * open up); then, while they are aboard, how many and what they are at, and turning on a peaceful party.
+   */
+  function buildBoardCall() {
+    const title = el('span', { class: 'stencil fightcall__title', id: 'boardcall-title' });
+    const text = el('span', { class: 'fightcall__text', id: 'boardcall-text' });
+    const clockText = el('small', { class: 'fightcall__clock', id: 'boardcall-clock' });
+    const bribe = button('btn-board-bribe', 'Pay', () => order({ type: 'boarding.bribe' }));
+    const give = button('btn-board-yield', 'Hand over', () => order({ type: 'boarding.yield' }), 'btn--danger');
+    const admit = button('btn-board-admit', 'Open the lock', () => order({ type: 'boarding.admit' }));
+    const fight = button('btn-board-fight', 'Fight them', () => order({ type: 'boarding.fight' }), 'btn--danger');
+    const node = el('div', { class: 'panel fightcall boardcall', id: 'boardcall', hidden: true }, el('div', { class: 'fightcall__words' }, title, text, clockText), el('div', { class: 'fightcall__buttons' }, bribe, give, admit, fight));
+    return { node, title, text, clock: clockText, bribe, give, admit, fight };
+  }
+
+  function updateBoarding() {
+    const boarding = sim.state.boarding;
+    const card = boardCall;
+    if (card.node.hidden !== !boarding) card.node.hidden = !boarding;
+    if (!boarding) return;
+    const toggle = (node, on) => node.hidden !== !on && (node.hidden = !on);
+    const atLock = boarding.phase === 'demand';
+    const def = sim.encounters.byId.get(boarding.encounter);
+    const lock = layout.room(boarding.dock)?.name ?? 'the';
+    toggle(card.bribe, atLock && Boolean(def?.party.bribe));
+    toggle(card.give, atLock && (boarding.wants === 'cargo' || boarding.wants === 'crew'));
+    toggle(card.admit, atLock);
+    toggle(card.fight, !atLock && !boarding.hostile && boarding.phase === 'aboard');
+    if (atLock) {
+      setText(card.title, `${boarding.name} at the ${lock.toLowerCase()} lock · ${GOALS[boarding.wants]}`);
+      setText(card.text, `"${demandText(boarding, def)}"`);
+      setText(card.clock, `They come through in ${seconds(boarding.demandEnds - sim.state.tick)}`);
+      const why = whyNoBribe(sim);
+      setText(card.bribe, def?.party.bribe ? `Pay ${def.party.bribe.cost} · ${percent(bribeChance(sim))}` : 'Pay');
+      card.bribe.disabled = Boolean(why);
+      card.bribe.title = why ? sentence(why) : 'They might take it and go. They might take it and come aboard anyway.';
+      const target = boarding.target ? findCrew(sim, boarding.target)?.member : null;
+      setText(card.give, boarding.wants === 'crew' ? `Hand over ${target?.name ?? 'them'}` : `Hand over ${def?.party.take ?? ''} crates`);
+      card.give.disabled = Boolean(whyNoYield(sim));
+      return;
+    }
+    const people = partyOf(sim);
+    const up = people.filter((member) => member.alive);
+    const doing = up.map((member) => describeBoarder(sim, member).toLowerCase());
+    const counts = [...new Set(doing)].map((what) => `${doing.filter((d) => d === what).length} ${what}`).join(', ');
+    setText(card.title, `${boarding.name}: ${up.length} aboard${boarding.hostile ? ' · hostile' : ''}`);
+    setText(card.text, boarding.phase === 'leaving' ? `Going back to their ship: ${(REASONS[boarding.reason] ?? '').toLowerCase()}` : counts || 'Nobody left standing');
+    setText(card.clock, boarding.phase === 'leaving' ? `Clamp off within ${seconds(boarding.leaveEnds - sim.state.tick)}` : `They give up in ${seconds(boarding.deadline - sim.state.tick)}`);
+  }
+
+  /** How many lamps are lit on a deck. */
+  function deckLit(deck) {
+    return layout.rooms.filter((room) => room.y < deck.y + deck.h && room.y + room.h > deck.y && sim.state.rooms[room.id].lightsOn).length;
+  }
+
+  /** What a party says at the lock, with the warrant's name and the wanted system filled in. */
+  function demandText(boarding, def) {
+    const target = boarding.target ? findCrew(sim, boarding.target)?.member.name ?? 'one of your crew' : 'one of your crew';
+    return (def?.party.demand ?? '').replaceAll('{crew_name}', target).replaceAll('{system}', boarding.strip ? SYSTEMS[boarding.strip].name.toLowerCase() : 'your fittings');
   }
 
   /** The card that answers a hail or a surrender. Its buttons are built once and shown or hidden. */
@@ -731,6 +800,7 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
   }
 
   function updateFight() {
+    updateBoarding();
     const fight = sim.state.fight;
     if (fightBar.node.hidden !== !fight) fightBar.node.hidden = !fight;
     if (!fight && !fightBar.call.node.hidden) fightBar.call.node.hidden = true;
@@ -1028,7 +1098,13 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
   function updateRoster() {
     for (const chip of roster) {
       const found = findCrew(sim, chip.id);
-      if (!found) continue;
+      if (!found) {
+        // Taken off the ship by a bounty party (H.2).
+        setText(chip.task, 'Taken');
+        chip.node.classList.add('is-dead');
+        chip.node.classList.remove('is-selected');
+        continue;
+      }
       const { member, ship } = found;
       const away = ship !== sim && member.alive;
       setText(chip.task, member.alive ? `${away ? 'Aboard: ' : ''}${CHIP_TASKS[member.task] ?? 'Standing by'}` : 'Dead');
@@ -1049,6 +1125,8 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
       setText(stats.skills.value, skillWords(member) || 'Nothing special');
       const memory = el('span', { class: 'status__hint status__hint--inline', id: 'crew-memory' });
       const suit = button('btn-suit', 'Suit up', () => order({ type: 'crew.suit', crew: member.id, on: !findCrew(sim, member.id).member.suit }));
+      // Hide where they stand (H.2): a locker, or a crawlway for an engineer.
+      const hide = button('btn-hide', 'Hide', () => order({ type: 'crew.hide', crew: member.id, on: !findCrew(sim, member.id).member.hidden }));
       const note = el('span', { class: 'status__note' });
       nodes.status.replaceChildren(
         el('div', { class: 'status__head' }, el('div', { class: 'status__title', id: 'status-title' }, member.name), el('div', { class: 'stencil', id: 'crew-role' }, `${roleOf(member)?.name ?? 'Crew'} · ${member.index + 1}`), note),
@@ -1057,12 +1135,13 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
           'div',
           { class: 'status__controls' },
           suit,
+          hide,
           debug && button('btn-dbg-hurt', 'Hurt', () => order({ type: 'debug.crew', crew: member.id, health: Math.max(0.05, findCrew(sim, member.id).member.health - 0.3) }), 'btn--debug'),
           el('span', { class: 'status__hint status__hint--inline', id: 'crew-hint' }, sim.state.fight ? 'Tap a room to send them there, or a room of theirs to board.' : 'Tap a room to send them there.'),
           memory,
         ),
       );
-      panel = { kind: 'crew', id: member.id, stats, suit, note, memory };
+      panel = { kind: 'crew', id: member.id, stats, suit, hide, note, memory };
       updatePanel();
       return;
     }
@@ -1128,13 +1207,15 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
           crateOrder({ type: 'crate.jettison', crate: id });
         } else panel.armedUntil = performance.now() + 4000;
       }, 'btn--danger');
+      // Under the deck plates of a compartment, out of a boarding party's sight (H.2).
+      const stash = layout.rooms.some((room) => room.compartment) ? button('btn-crate-stash', 'Stash', () => crateOrder({ type: 'crate.stash', crate: id })) : null;
       const note = el('span', { class: 'status__note' });
       nodes.status.replaceChildren(
         el('div', { class: 'status__head' }, el('div', { class: 'status__title', id: 'status-title' }, crate.label), el('div', { class: 'stencil' }, CRATE_KIND[crate.kind]), note),
         el('div', { class: 'status__stats' }, Object.values(stats).map((s) => s.node)),
-        el('div', { class: 'status__controls' }, crate.kind === 'ammo' ? load : open, move, jettison),
+        el('div', { class: 'status__controls' }, crate.kind === 'ammo' ? load : open, move, stash, jettison),
       );
-      panel = { kind: 'crate', id, stats, open, move, load, jettison, armedUntil: 0, note };
+      panel = { kind: 'crate', id, stats, open, move, load, stash, jettison, armedUntil: 0, note };
       updatePanel();
       return;
     }
@@ -1181,7 +1262,18 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
       if (sys) stats.system = stat(sys === 'reactor' ? 'Output' : POWERED.includes(sys) ? 'Power' : 'System');
       const lights = button('btn-lights', 'Lights off', () => order({ type: 'room.lights', room: room.id, on: !sim.state.rooms[room.id].lightsOn }));
       const note = el('span', { class: 'status__note' });
-      const controls = [lights];
+      // A whole deck's lamps at once, and the room's emergency vent (H.2). The deck is the one its floor is on.
+      const floor = room.y + room.h;
+      const deck = layout.decks.find((item) => floor > item.y && floor <= item.y + item.h) ?? null;
+      const deckLights = deck ? button('btn-deck-lights', 'Deck dark', () => order({ type: 'deck.lights', deck: deck.id, on: deckLit(deck) === 0 })) : null;
+      const vent = room.kind !== 'lift' ? button('btn-vent', 'Vent', () => {
+        const command = { type: 'room.vent', room: room.id, open: !sim.state.rooms[room.id].vent };
+        if (!command.open || panel.ventArmed > performance.now()) {
+          panel.ventArmed = 0;
+          order(command);
+        } else panel.ventArmed = wouldRefuse(command) ? 0 : performance.now() + 4000;
+      }, 'btn--danger') : null;
+      const controls = [lights, deckLights, vent].filter(Boolean);
       // A broken system is fixed by whoever stands in its room (D-118). This sends the nearest free hand.
       let repair = null;
       if (sys && !sim.state.systems[sys].absent) {
@@ -1231,7 +1323,7 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
         el('div', { class: 'status__stats' }, Object.values(stats).map((s) => s.node)),
         el('div', { class: 'status__controls' }, controls),
       );
-      panel = { kind: 'room', id: room.id, sys, stats, lights, repair, jettison, armedUntil: 0, note };
+      panel = { kind: 'room', id: room.id, sys, stats, lights, deckLights, deck, vent, ventArmed: 0, repair, jettison, armedUntil: 0, note };
     } else {
       const door = layout.door(selected.id);
       const stats = { state: stat('State'), opening: stat('Opening') };
@@ -1294,10 +1386,14 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
         return buildPanel();
       }
       const carrier = crate.by ? findCrew(sim, crate.by)?.member : null;
-      setText(panel.stats.where.value, carrier ? `${carrier.name}'s arms` : layout.room(crate.room).name);
+      setText(panel.stats.where.value, carrier ? `${carrier.name}'s arms` : `${layout.room(crate.room).name}${crate.hidden ? ', under the deck plates' : ''}`);
       setText(panel.stats.contents.value, crate.kind === 'ammo' ? `${crate.rounds} rounds` : crate.sealed ? 'sealed' : (crate.contents ?? 'opened'));
       panel.open.disabled = !crate.sealed;
       setText(panel.open, crate.sealed ? 'Open' : 'Opened');
+      if (panel.stash) {
+        setText(panel.stash, crate.hidden ? 'Stashed' : 'Stash');
+        panel.stash.disabled = crate.hidden;
+      }
       panel.move.classList.toggle('is-selected', movingCrate === panel.id);
       const armed = panel.armedUntil > performance.now();
       setText(panel.jettison, armed ? 'Confirm jettison' : 'Jettison');
@@ -1307,6 +1403,7 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
       if (!note && movingCrate === panel.id) note = 'Tap a room of ours to carry it there.';
       else if (!note && armed) note = crate.contract ? 'Contract cargo: losing it costs the fee. Press again to confirm.' : 'It goes out of the nearest airlock. Press again to confirm.';
       else if (!note && worker) note = `${worker.name}: ${describeJob(sim, worker).toLowerCase()}.`;
+      else if (!note && crate.hidden) note = 'Stashed under the deck plates. A careful search can still turn it up.';
       else if (!note && crate.sealed) note = crate.contract ? 'Contract cargo. The client will see a broken seal, and pay less for it.' : 'Breaking a company seal gets logged.';
       else if (!note && crate.contract) note = 'Contract cargo: it is what the drop pays for.';
       setText(panel.note, queuedFor('crate', panel.id) ? 'Order queued' : note);
@@ -1392,6 +1489,11 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
       setText(panel.stats.suit.value, member.suit ? 'on (slower)' : 'off');
       setText(panel.suit, member.suit ? 'Suit off' : 'Suit up');
       panel.suit.disabled = !member.alive;
+      setText(panel.hide, member.hidden ? 'Come out' : 'Hide');
+      const noHide = member.hidden || !member.alive || ship !== sim ? null : whyNoHide(sim, member);
+      panel.hide.disabled = !member.alive || ship !== sim;
+      panel.hide.title = noHide ? sentence(noHide) : member.hidden ? HIDING[member.hidden] : 'Into a locker, or a crawlway for an engineer, until someone looks hard enough.';
+      panel.hide.classList.toggle('is-on', Boolean(member.hidden));
       setText(panel.stats.nerve.value, member.alive ? nerveWord(member) : 'none');
       panel.stats.nerve.node.classList.toggle('is-alarm', member.alive && member.dread >= 0.66);
       const remembered = member.alive ? topMemory(ship, member) : null;
@@ -1422,6 +1524,18 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
       }
       setText(panel.lights, r.lightsOn ? 'Lights off' : 'Lights on');
       panel.lights.disabled = r.jettisoned;
+      if (panel.deckLights) {
+        setText(panel.deckLights, deckLit(panel.deck) === 0 ? 'Deck lights up' : 'Deck dark');
+        panel.deckLights.disabled = r.jettisoned;
+      }
+      const venting = Boolean(sim.state.rooms[panel.id].vent);
+      const ventArmed = panel.ventArmed > performance.now();
+      if (panel.vent) {
+        setText(panel.vent, venting ? 'Seal vent' : ventArmed ? 'Confirm vent' : 'Vent');
+        panel.vent.disabled = r.jettisoned;
+        panel.vent.classList.toggle('is-armed', ventArmed);
+        panel.vent.classList.toggle('is-on', venting);
+      }
       const armed = panel.armedUntil > performance.now();
       if (panel.jettison) {
         setText(panel.jettison, r.jettisoned ? 'Jettisoned' : armed ? 'Confirm jettison' : 'Jettison');
@@ -1439,6 +1553,8 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
       if (r.jettisoned) note = 'This section was cut loose. It is gone.';
       else if (queuedFor('room', panel.id)) note = 'Order queued';
       else if (armed) note = 'Everything inside will be lost. Press again to confirm.';
+      else if (ventArmed) note = 'The air in here goes out into space. Anyone without a suit has to get out. Press again to confirm.';
+      else if (venting && !refusalText()) note = 'The emergency vent is open: this room is losing its air.';
       setText(panel.note, note);
     } else {
       const d = sim.state.doors[panel.id];

@@ -117,7 +117,7 @@ export function checkBoardingInvariants(us, them) {
     for (const member of Object.values(ship.state.crew)) {
       if (seen.has(member.id)) problems.push(`crew ${member.id} is aboard both ships`);
       seen.add(member.id);
-      if (!them && !isHome(ship, member)) problems.push(`crew ${member.id} is aboard a ship not theirs with no fight on`);
+      if (!them && !isHome(ship, member) && !member.party) problems.push(`crew ${member.id} is aboard a ship not theirs with no fight on`);
       if (!them && member.board) problems.push(`crew ${member.id} is boarding with no fight on`);
       if (member.task === 'crossing' && !airlockRooms(ship).includes(member.room)) problems.push(`crew ${member.id} is crossing from ${member.room}, which has no airlock`);
     }

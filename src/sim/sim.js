@@ -39,6 +39,7 @@ import { attachSector, checkRunInvariants, newRunState, sectorCommands, stepSect
 import { CONTRACT_COMMANDS, attachContracts, checkContractInvariants, setUpContract } from './contracts.js';
 import { PORT_COMMANDS } from './port.js';
 import { ENCOUNTER_COMMANDS, attachEncounters, buildEncounters, checkEncounterInvariants, newHelmState, newScopeState, stepEncounters } from './encounters.js';
+import { BOARDING_COMMANDS, checkBoarderInvariants, roomsOnDeck, stepBoarders } from './boarders.js';
 import { buildLayout } from './ship.js';
 
 /** Sim ticks per second (DECISIONS D-002). */
@@ -78,6 +79,7 @@ function newRoomState() {
     scorch: 0, // 0 to 1 progress of a fire toward breaking the next bar of the room's system
     burning: false, // whether the current fire has been announced
     jettisoned: false, // cut loose and gone for good
+    vent: false, // its emergency vent is open to space (H.2, boarders.js)
   };
 }
 
@@ -181,6 +183,29 @@ const COMMANDS = {
       if (changed) sim.events.emit('lights.all', { on: cmd.on, rooms: changed, tick: sim.state.tick });
     },
   },
+  // Every lamp on one deck (H.2): a deck the boarders are on goes dark, or comes back up as far as the power goes.
+  'deck.lights': {
+    check(sim, cmd) {
+      const deck = sim.layout.decks.find((item) => item.id === cmd.deck);
+      if (!deck) return `no deck "${cmd.deck}"`;
+      if (typeof cmd.on !== 'boolean') return 'needs on: true or false';
+      const rooms = roomsOnDeck(sim, deck);
+      if (!rooms.some((id) => sim.state.rooms[id].lightsOn !== cmd.on)) return cmd.on ? 'every lamp on that deck is already on' : 'that deck is already dark';
+      if (!rooms.some((id) => sim.state.rooms[id].lightsOn !== cmd.on && !COMMANDS['room.lights'].check(sim, { type: 'room.lights', room: id, on: cmd.on }))) return cmd.on ? 'no spare power for more lights' : 'the only lamps left on that deck are ones the crew will not sit without';
+      return null;
+    },
+    apply(sim, cmd) {
+      const deck = sim.layout.decks.find((item) => item.id === cmd.deck);
+      let changed = 0;
+      for (const id of roomsOnDeck(sim, deck)) {
+        const order = { type: 'room.lights', room: id, on: cmd.on };
+        if (sim.state.rooms[id].lightsOn === cmd.on || COMMANDS['room.lights'].check(sim, order)) continue;
+        COMMANDS['room.lights'].apply(sim, order);
+        changed += 1;
+      }
+      sim.events.emit('deck.lights', { deck: cmd.deck, on: cmd.on, rooms: changed, tick: sim.state.tick });
+    },
+  },
   // Debug panel only (?debug=1): set room values directly, or jam and free a door.
   'debug.room': {
     check(sim, cmd) {
@@ -273,6 +298,7 @@ const COMMANDS = {
   ...CONTRACT_COMMANDS,
   ...PORT_COMMANDS,
   ...ENCOUNTER_COMMANDS,
+  ...BOARDING_COMMANDS,
 };
 
 /** Every kind of order the sim accepts, for the content checker (a risk rule names the kind it is about). */
@@ -314,7 +340,8 @@ function stepEnemy(sim) {
 
 // The chart comes after the fight, so an escape decided this tick is flown before anyone hears about it.
 // The scope comes after the chart: a jump clears it before any contact moves again.
-const SYSTEMS = [...SHIP_SYSTEMS, stepEnemy, (sim) => stepCombat(sim, TICK_SECONDS), (sim) => stepSector(sim, TICK_SECONDS, newShipState), (sim) => stepEncounters(sim, TICK_SECONDS, newShipState), stepJudgement, stepVoice];
+// A boarding party (H.2) decides what to do next after the crew have moved, with the ship as it now stands.
+const SYSTEMS = [...SHIP_SYSTEMS, stepEnemy, (sim) => stepCombat(sim, TICK_SECONDS), (sim) => stepSector(sim, TICK_SECONDS, newShipState), (sim) => stepEncounters(sim, TICK_SECONDS, newShipState), (sim) => stepBoarders(sim, TICK_SECONDS), stepJudgement, stepVoice];
 
 /**
  * Create a simulation.
@@ -392,6 +419,8 @@ export function createSim({ seed, ship, crew = [], lines = [], weapons = [], shi
       ai: newVoiceState(),
       helm: newHelmState(), // our heading, the drive and our velocity (encounters.js)
       scope: newScopeState(), // the contacts around us, and our decoys (encounters.js)
+      boarding: null, // a party docked with us, at the lock or aboard (boarders.js)
+      boardings: { next: 1, record: [] }, // how boardings have ended: { encounter, wants, outcome, reason, seconds, took, seized, tick }
       run: null, // the chart, fuel, jumps, deadline and pursuit (sector.js); set below when there is a sector
     },
     rng: createRngSet(seed),
@@ -513,7 +542,7 @@ export function checkInvariants(sim) {
   const problems = [];
   if (!Number.isInteger(sim.state.tick) || sim.state.tick < 0) problems.push(`tick is ${sim.state.tick}`);
   const enemy = enemyOf(sim);
-  problems.push(...shipProblems(sim, enemy), ...checkVoiceInvariants(sim), ...checkJudgementInvariants(sim), ...checkFightInvariants(sim), ...checkBoardingInvariants(sim, enemy), ...checkRunInvariants(sim), ...checkEventInvariants(sim), ...checkContractInvariants(sim), ...checkEncounterInvariants(sim));
+  problems.push(...shipProblems(sim, enemy), ...checkVoiceInvariants(sim), ...checkJudgementInvariants(sim), ...checkFightInvariants(sim), ...checkBoardingInvariants(sim, enemy), ...checkRunInvariants(sim), ...checkEventInvariants(sim), ...checkContractInvariants(sim), ...checkEncounterInvariants(sim), ...checkBoarderInvariants(sim));
   if (enemy) problems.push(...shipProblems(enemy, sim).map((problem) => `enemy: ${problem}`));
   return problems;
 }

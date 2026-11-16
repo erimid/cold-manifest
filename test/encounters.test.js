@@ -211,17 +211,21 @@ test('a contact that finds us runs through every state: unseen, shadowing, closi
   assert.equal(sim.state.scope.record.at(-1).outcome, 'docked');
 });
 
-test('until boarding is built, a ship that docks brings the old fight, and the scope holds still while it runs', () => {
-  const sim = newSim('dock-fight');
+test('a ship that docks puts its party at our lock (H.2), and a second one waits alongside until the first has gone', () => {
+  const sim = newSim('dock-party');
   seconds(sim, 1);
   spawn(sim, 'patrol-cutter', { range: 30, bearing: 0, state: 'closing' });
-  spawn(sim, 'scrap-hauler', { range: 90, bearing: 180, miss: 80 });
+  spawn(sim, 'raider-skiff', { range: 30, bearing: 180, state: 'closing' });
   const result = play(sim, 200);
   assert.equal(result.outcome, 'docked');
-  assert.equal(sim.state.fight?.enemy.ship, 'knife-cutter');
-  const other = { ...first(sim) };
-  seconds(sim, 5);
-  assert.equal(first(sim).x, other.x, 'the other contact waits out the fight');
+  assert.equal(sim.state.fight, null, 'no duel any more');
+  assert.equal(sim.state.boarding?.phase, 'demand');
+  const waiting = first(sim);
+  seconds(sim, 30);
+  assert.equal(waiting.state, 'alongside', 'the other one holds alongside while a party is at our lock');
+  go(sim, { type: 'debug.boarding', clear: true });
+  seconds(sim, 1);
+  assert.equal(sim.state.boarding?.encounter, 'raider-skiff', 'and docks once the clamp is free');
 });
 
 test('no jump with a ship alongside, and a jump leaves every contact behind', () => {

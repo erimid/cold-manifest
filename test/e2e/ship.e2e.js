@@ -2078,9 +2078,70 @@ async function scopeTests(browser) {
   await check('the scope: no page errors', async () => assert.deepEqual(errors, []));
 }
 
+async function boardedTests(browser) {
+  console.log('iPad: a boarding party at the lock, hiding a hand and casting them off (H.2)');
+  const context = await browser.newContext({ ...devices['iPad (gen 7) landscape'] });
+  const page = await context.newPage();
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  await page.goto(`http://localhost:${PORT}/?seed=E2E-BOARDED&autopause=0&debug=1`);
+  await page.waitForFunction(() => window.coldManifest?.machine.state === 'title');
+  await page.tap('#btn-ship');
+  await page.waitForFunction(() => window.coldManifest.machine.state === 'ship');
+  const shots = process.env.E2E_SHOTS;
+  const boarding = () => game(page, () => JSON.parse(JSON.stringify(window.coldManifest.sim.state.boarding)));
+  const party = () => game(page, () => Object.values(window.coldManifest.sim.state.crew).filter((m) => m.party).length);
+
+  await check('debug: a raider skiff docks, and the lock card asks what we do, every button 44px', async () => {
+    await page.tap('#btn-dbg-menu');
+    await page.tap('#btn-dbg-board-raider-skiff');
+    if (await page.isVisible('#sheet')) await page.tap('#btn-dbg-menu');
+    await page.waitForSelector('#boardcall', { state: 'visible', timeout: 3000 });
+    assert.equal((await boarding()).phase, 'demand');
+    assert.match(await page.textContent('#boardcall-text'), /crate|lock/i);
+    assert.equal(await page.isVisible('#btn-board-fight'), false, 'nothing to fight until they are aboard');
+    for (const id of ['#btn-board-bribe', '#btn-board-yield', '#btn-board-admit']) {
+      const box = await page.locator(id).boundingBox();
+      assert.ok(box && box.width >= 44 && box.height >= 44, `${id} is ${box && Math.round(box.width)}x${box && Math.round(box.height)}`);
+    }
+    if (shots) await page.screenshot({ path: `${shots}/h2-lock-ipad.png` });
+  });
+
+  await check('a crew member\'s panel has Hide, and the order puts them in a locker or a crawlway where they stand', async () => {
+    const id = await game(page, () => {
+      const { sim } = window.coldManifest;
+      const free = (m) => m.owner === 'player' && m.alive && !m.party && !m.path.length && !m.carry;
+      const can = (m) => sim.layout.room(m.room).hide || (m.engineer && sim.layout.crawlExits(m.room).length);
+      return Object.values(sim.state.crew).find((m) => free(m) && can(m))?.id;
+    });
+    assert.ok(id, 'somebody stands where they could hide');
+    const t = await game(page, (cid) => window.coldManifest.shipView.debug.targets().find((x) => x.kind === 'crew' && x.id === cid), id);
+    await page.touchscreen.tap(t.x + t.w / 2, t.y + t.h / 2);
+    await page.waitForSelector('#btn-hide', { state: 'visible', timeout: 2000 });
+    await page.tap('#btn-hide');
+    await page.waitForFunction((cid) => window.coldManifest.sim.state.crew[cid].hidden, id, { timeout: 3000 });
+  });
+
+  await check('Open the lock lets the party aboard, and Cast them off clears them and the card', async () => {
+    await page.tap('#btn-board-admit');
+    await page.waitForFunction(() => window.coldManifest.sim.state.boarding?.phase === 'aboard', null, { timeout: 3000 });
+    assert.equal(await party(), 3);
+    if (shots) await page.screenshot({ path: `${shots}/h2-aboard-ipad.png` });
+    await page.tap('#btn-dbg-menu');
+    await page.tap('#btn-dbg-board-clear');
+    if (await page.isVisible('#sheet')) await page.tap('#btn-dbg-menu');
+    await page.waitForFunction(() => window.coldManifest.sim.state.boarding === null, null, { timeout: 3000 });
+    await page.waitForSelector('#boardcall', { state: 'hidden', timeout: 2000 });
+    assert.equal(await party(), 0);
+  });
+
+  await context.close();
+  await check('boarded: no page errors', async () => assert.deepEqual(errors, []));
+}
+
 // E2E_ONLY=boarding (or a comma list of suite names) runs just those suites, for chasing one failure.
 const only = process.env.E2E_ONLY?.split(',');
-const suites = { touch: touchTests, desktop: desktopTests, voice: voiceTests, fight: fightTests, hit: hitTests, ending: endingTests, boarding: boardingTests, dark: darkTests, hold: holdTests, enemies: enemyTests, margo: margoTests, chart: chartTests, loop: loopTests, scope: scopeTests };
+const suites = { touch: touchTests, desktop: desktopTests, voice: voiceTests, fight: fightTests, hit: hitTests, ending: endingTests, boarding: boardingTests, dark: darkTests, hold: holdTests, enemies: enemyTests, margo: margoTests, chart: chartTests, loop: loopTests, scope: scopeTests, boarded: boardedTests };
 try {
   for (const [name, run] of Object.entries(suites)) if (!only || only.includes(name)) await run(browser);
 } finally {

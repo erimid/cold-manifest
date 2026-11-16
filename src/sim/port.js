@@ -96,6 +96,7 @@ function repair(sim, what) {
       const mend = Math.min(left, system.damage);
       if (!mend) break;
       system.damage -= mend;
+      if (system.damage === 0) delete system.stripped; // new parts fitted where a salvage crew cut the old ones out (H.2)
       left -= mend;
       sim.events.emit('system.repaired', { system: id, damage: system.damage, by: 'port', tick: sim.state.tick });
     }

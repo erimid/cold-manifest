@@ -310,6 +310,7 @@ function settleBoarders(sim, outcome) {
     } else if (member.board) Object.assign(member, { board: null, crossEnds: null, task: 'idle' });
   }
   for (const member of Object.values(sim.state.crew)) {
+    if (member.party) continue; // a boarding party off a docked contact (H.2) is not the fight's
     if (member.owner === 'player') {
       // Called back on their way to the airlock: they step back to their spot in whatever room they are in, off any lift or doorway.
       if (member.board) Object.assign(member, { board: null, crossEnds: null, task: 'idle', goal: null, path: [spotIn(sim.layout.room(member.room), member.index)] });

@@ -1,5 +1,5 @@
 {
-  "note": "Encounters (Stage H, H.1; D-151): the ships that turn up on the scope, and how each behaves. `wants` is what it is looking for (H.2 gives its boarding party that goal). `at` is the kinds of point it can turn up at and `weight` how often. `signature` is what it gives off on its own course and burning after us: what our scope has to read. `sensors`, `reach`, `keen`, `notice` and `sure` are how hard it looks: our signature times `sensors`, falling to nothing at `reach`, has to pass `notice` before it takes an interest and `sure` before it is certain; `keen` is how fast it makes its mind up. `speed` is its cruise and its chase, against our 1.0 at full engine power (a stern chase closes only by the difference). `standoff` is how far off it shadows us, and `shadow` how many seconds it looks before it comes in anyway. `patience` is the seconds it will search with nothing to go on, and `chase` the seconds of pursuit before it gives up. `decoys` is how hard each kind of decoy pulls it (0 not at all; a ship that wants cargo takes a crate and goes). `bluffs` is the chance each lie works, before the crew's negotiation. `alongside` is the seconds before its clamp goes on, what it says first, and (until boarding in H.2 and H.3) the old enemy ship that fights us when it docks.",
+  "note": "Encounters (Stage H, H.1; D-151): the ships that turn up on the scope, and how each behaves. `wants` is what it is looking for (H.2 gives its boarding party that goal). `at` is the kinds of point it can turn up at and `weight` how often. `signature` is what it gives off on its own course and burning after us: what our scope has to read. `sensors`, `reach`, `keen`, `notice` and `sure` are how hard it looks: our signature times `sensors`, falling to nothing at `reach`, has to pass `notice` before it takes an interest and `sure` before it is certain; `keen` is how fast it makes its mind up. `speed` is its cruise and its chase, against our 1.0 at full engine power (a stern chase closes only by the difference). `standoff` is how far off it shadows us, and `shadow` how many seconds it looks before it comes in anyway. `patience` is the seconds it will search with nothing to go on, and `chase` the seconds of pursuit before it gives up. `decoys` is how hard each kind of decoy pulls it (0 not at all; a ship that wants cargo takes a crate and goes). `bluffs` is the chance each lie works, before the crew's negotiation. `alongside` is the seconds before its clamp goes on, what it says first, and (until H.3 retires the duel) the enemy ship it stands for. `party` (H.2, src/sim/boarders.js) is who comes through the lock when it docks: how many, their names, skills and suits, what they say at the lock (`demand`; {crew_name} is the one a bounty is for, {system} what a wrecker wants), the `bribe` that sends them away from the lock, how many seconds they `stay` looking, how `thorough` a search is, and by goal: the `rooms` an inspection goes over with its `fine` and `faction`, the crates a raid means to `take`, and the systems a wrecker would `strip` first.",
   "items": [
     {
       "id": "patrol-cutter",
@@ -22,7 +22,23 @@
       "chase": 240,
       "decoys": { "flare": 0.5, "crate": 0.3 },
       "bluffs": { "transponder": 0.45, "manifest": 0.7 },
-      "alongside": { "seconds": 12, "hail": "Hauler, this is the cutter off your beam. Cut your drive and stand by your lock for inspection.", "fight": "knife-cutter" }
+      "alongside": {
+        "seconds": 12,
+        "hail": "Hauler, this is the cutter off your beam. Cut your drive and stand by your lock for inspection.",
+        "fight": "knife-cutter"
+      },
+      "party": {
+        "size": 3,
+        "names": ["Officer Brandt", "Scanner Ileri", "Scanner Moss"],
+        "suits": false,
+        "demand": "Receivers customs. Three of us are coming through your lock to go over the hold. Keep your people out of our way.",
+        "bribe": { "cost": 150, "chance": 0.75 },
+        "stay": 200,
+        "thorough": 1.1,
+        "rooms": 5,
+        "fine": 80,
+        "faction": "receivers"
+      }
     },
     {
       "id": "raider-skiff",
@@ -45,7 +61,21 @@
       "chase": 160,
       "decoys": { "flare": 0.8, "crate": 2.5 },
       "bluffs": { "transponder": 0.25 },
-      "alongside": { "seconds": 10, "hail": "Open your hold and nobody has to come looking for it.", "fight": "salvager-skiff" }
+      "alongside": {
+        "seconds": 10,
+        "hail": "Open your hold and nobody has to come looking for it.",
+        "fight": "salvager-skiff"
+      },
+      "party": {
+        "size": 3,
+        "names": ["Kett", "Orla", "Spar"],
+        "skills": { "combat": 1 },
+        "suits": false,
+        "demand": "Two crates through the lock and we never came aboard. Make us look, and we take what we find.",
+        "bribe": { "cost": 120, "chance": 0.6 },
+        "stay": 160,
+        "take": 2
+      }
     },
     {
       "id": "bounty-tender",
@@ -68,7 +98,21 @@
       "chase": 200,
       "decoys": { "flare": 0.9, "crate": 0.1 },
       "bluffs": { "transponder": 0.5 },
-      "alongside": { "seconds": 14, "hail": "We hold a warrant for one of your crew. Send them across and you keep your ship.", "fight": "grapple-tender" }
+      "alongside": {
+        "seconds": 14,
+        "hail": "We hold a warrant for one of your crew. Send them across and you keep your ship.",
+        "fight": "grapple-tender"
+      },
+      "party": {
+        "size": 3,
+        "names": ["Warrant Officer Haas", "Tracker Venn", "Tracker Oduya"],
+        "skills": { "combat": 2 },
+        "suits": true,
+        "demand": "The warrant is for {crew_name}. Send them to the lock and nobody else is touched.",
+        "bribe": { "cost": 250, "chance": 0.45 },
+        "stay": 220,
+        "thorough": 1.4
+      }
     },
     {
       "id": "scrap-hauler",
@@ -91,7 +135,20 @@
       "chase": 90,
       "decoys": { "flare": 1.6, "crate": 1 },
       "bluffs": { "transponder": 0.6, "manifest": 0.3 },
-      "alongside": { "seconds": 16, "hail": "No answer on any channel. Logging her as abandoned and making fast.", "fight": "salvager-skiff" }
+      "alongside": {
+        "seconds": 16,
+        "hail": "No answer on any channel. Logging her as abandoned and making fast.",
+        "fight": "salvager-skiff"
+      },
+      "party": {
+        "size": 2,
+        "names": ["Cutter Dubois", "Cutter Pym"],
+        "suits": true,
+        "demand": "Wrecker crew coming aboard to take her {system}. If anyone is alive in there, now is the time to say so.",
+        "bribe": { "cost": 90, "chance": 0.8 },
+        "stay": 150,
+        "strip": ["sensors", "shields", "medbay", "weapons"]
+      }
     }
   ]
 }

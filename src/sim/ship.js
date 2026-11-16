@@ -12,6 +12,9 @@
 //           tiles. `jettison: true` marks a section that can be cut loose.
 //           `kind: "lift"` is a lift shaft: crew ride it fast while door control
 //           has power, and crank it slowly by hand while it has none (D-093).
+//           `hide: n` is how many of the crew can hide there (lockers, bunks,
+//           a gap behind the crates), and `compartment: n` how many crates fit
+//           under its deck plates, out of a boarding party's sight (H.2).
 //   doors   { id, a, b, x, y, vertical } where (x, y) is the middle of the
 //           doorway on the wall the two rooms share, and `vertical` says the
 //           wall runs up and down. `b` may be "space" for an airlock. A door
@@ -143,6 +146,9 @@ export function validateLayout(data) {
       continue;
     }
     if (room.jettison !== undefined && typeof room.jettison !== 'boolean') problems.push(`${label}: "jettison" must be true or false`);
+    // Where our people and crates can be hidden from a boarding party (H.2, agents.js).
+    for (const key of ['hide', 'compartment']) if (room[key] !== undefined && !(Number.isInteger(room[key]) && room[key] >= 1 && room[key] <= 6)) problems.push(`${label}: "${key}" must be a whole number, 1 to 6`);
+    if (room.kind === 'lift' && (room.hide || room.compartment)) problems.push(`${label}: nothing hides in a lift shaft`);
     if (room.system !== undefined && !SYSTEM_IDS.includes(room.system)) problems.push(`${label}: unknown system "${room.system}"`);
     if (room.kind === 'lift' && room.system !== undefined) problems.push(`${label}: a lift shaft holds no system`);
     for (const other of rooms.values()) {
