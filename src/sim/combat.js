@@ -61,7 +61,7 @@ import { addCrate } from './hold.js';
 import { CREW_COMMANDS, isHome } from './crew.js';
 import { stepPower } from './power.js';
 import { FLARE, NOISE, bang, contactView, flare, missChance, newContact, stepContact } from './senses.js';
-import { THINK_SECONDS, braceAgainst, planOf, think } from './tactics.js';
+import { THINK_SECONDS, braceAgainst, droneTarget, planOf, think } from './tactics.js';
 
 /** The shield capacitor (D-075): each bar routed to shields puts one unit in over `seconds`, and holds one unit. */
 export const CAPACITOR = Object.freeze({ seconds: 8 });
@@ -81,6 +81,20 @@ export const HIT = Object.freeze({
   crewHarmPerDamage: 0.2, // health taken from someone caught in the room, per point of damage
 });
 /** Seconds the enemy waits on a hail before it opens fire, and on a surrender offer before it takes the silence as a no. */
+/**
+ * Running dark has a price (S2.5, D-096): crew at a station in an unlit room
+ * work it at this share of the pace. A gun charges, a capacitor fills and a
+ * sensor fix builds slower when the gun deck, the shield room or the bridge
+ * is dark. A ship with nobody aboard does not care.
+ */
+export const DARK_STATION = 0.6;
+/** Light enough to work a station by. */
+export const STATION_LIGHT = 0.5;
+export function stationPace(ship, room) {
+  if (!room || !Object.keys(ship.state.crew).length) return 1;
+  return ship.state.rooms[room.id].light >= STATION_LIGHT ? 1 : DARK_STATION;
+}
+const helmOf = (ship) => ship.layout.rooms.find((room) => room.kind === 'helm');
 export const HAIL_SECONDS = 30;
 export const OFFER_SECONDS = 30;
 /** Seconds of shooting with no hull damage on either side before the fight is called off. */
@@ -260,6 +274,9 @@ export function startFight(sim, enemyId, newShipState) {
     lastHarm: tick, // the last tick either hull lost a point
     engaged: tick, // when the shooting started (or will have: set again when a hail ends)
     over: null, // { outcome, tick, ... } once it is decided (OUTCOMES)
+    drones: [], // a carrier's drones out (S2.5): { id, next } where next is the tick it fires again
+    nextDrone: 1,
+    droneAt: tick, // the last launch
   };
   // Neither ship knows the other yet: no lock, and nothing of its rooms made out.
   const enemy = enemyOf(sim);
@@ -657,17 +674,18 @@ function stepShield(ship, dt) {
     shield.field = 0;
   }
   if (shield.field > 0) shield.charge = Math.min(shield.charge, max);
-  else shield.charge = shield.charge >= max ? max : Math.min(max, shield.charge + (dt * ship.state.systems.shields.power) / CAPACITOR.seconds);
+  else shield.charge = shield.charge >= max ? max : Math.min(max, shield.charge + (dt * stationPace(ship, ship.layout.roomOfSystem('shields')) * ship.state.systems.shields.power) / CAPACITOR.seconds);
 }
 
 function stepWeapons(sim, ship, side, dt) {
   const fight = sim.state.fight;
   const powered = weaponsPowered(ship);
+  const pace = stationPace(ship, ship.layout.roomOfSystem('weapons'));
   ship.state.weapons.forEach((slot, index) => {
     const weapon = ship.catalog.weapon(slot.id);
     const wasReady = slot.charge >= weapon.charge - EPS;
     slot.powered = powered[index];
-    slot.charge = slot.powered ? Math.min(weapon.charge, slot.charge + dt) : Math.max(0, slot.charge - dt * DISCHARGE_RATE);
+    slot.charge = slot.powered ? Math.min(weapon.charge, slot.charge + dt * pace) : Math.max(0, slot.charge - dt * DISCHARGE_RATE);
     const ready = slot.charge >= weapon.charge - EPS;
     if (ready && !wasReady && side === 'player') sim.events.emit('weapon.ready', { slot: index, weapon: slot.id, tick: sim.state.tick });
     if (!ready || slot.target === null || !fight || fight.over || fight.shots.length >= MAX_SHOTS) return;
@@ -777,14 +795,19 @@ function land(sim, shot, { force = false } = {}) {
     if (!force) shield.field = 0; // what is left of a brace is not enough: it gives way, and the shot gets through
     effects = applyHit(sim, target, shot.room, weapon);
   }
-  sim.events.emit('shot.resolved', { id: shot.id, side: shot.side, slot: shot.slot, weapon: shot.weapon, room: shot.room, blind: Boolean(shot.blind), result, damage: result === 'hit' ? weapon.damage : 0, effects, tick: sim.state.tick });
+  // A drone that flies its zap into a brace burns itself out.
+  if (shot.drone && result === 'shield' && fight?.drones.some((d) => d.id === shot.drone)) {
+    fight.drones = fight.drones.filter((d) => d.id !== shot.drone);
+    sim.events.emit('drone.lost', { drone: shot.drone, cause: 'brace', tick: sim.state.tick });
+  }
+  sim.events.emit('shot.resolved', { id: shot.id, side: shot.side, slot: shot.slot, drone: shot.drone ?? null, weapon: shot.weapon, room: shot.room, blind: Boolean(shot.blind), result, damage: result === 'hit' ? weapon.damage : 0, effects, tick: sim.state.tick });
   if (fight && target.state.hull.points === 0) decide(sim, shot.side === 'player' ? 'destroyed' : 'lost');
 }
 
 /** The sensors work on a fix while they have power and someone is at the helm; otherwise it slips away. */
 function stepFix(ship, dt) {
   const before = ship.state.fix;
-  ship.state.fix = canFix(ship) ? Math.min(1, before + (dt * fixBars(ship)) / FIX.seconds) : Math.max(0, before - FIX.drain * dt);
+  ship.state.fix = canFix(ship) ? Math.min(1, before + (dt * stationPace(ship, helmOf(ship)) * fixBars(ship)) / FIX.seconds) : Math.max(0, before - FIX.drain * dt);
   if (before < 1 && ship.state.fix >= 1) ship.events.emit('fix.ready', { tick: ship.state.tick });
   if (before >= 1 && ship.state.fix < 1) ship.events.emit('fix.lost', { tick: ship.state.tick });
 }
@@ -819,6 +842,45 @@ function stepFight(sim, enemy, dt) {
   else if (fight.phase === 'battle' && !fight.offer && tick - fight.lastHarm >= STALEMATE_SECONDS * 20) decide(sim, 'stalemate');
 }
 
+/**
+ * A carrier's drones (S2.5, D-097). While its bay (the weapons system) has
+ * power and the shooting is on, it launches one every `every` seconds, up to
+ * `max`. Each drone zaps a room of ours it has made out every `fire` seconds.
+ * A zap that a brace stops burns the drone out, and the drones fall dead when
+ * the bay loses its power.
+ */
+export const DRONE_WEAPON = 'drone-zap';
+function stepDrones(sim, enemy) {
+  const fight = sim.state.fight;
+  const spec = planOf(enemy.layout).drones;
+  if (!spec) return;
+  const { tick } = sim.state;
+  const bay = enemy.state.systems.weapons;
+  if (fight.drones.length && (!bay || bay.power === 0 || enemy.state.hull.points === 0)) {
+    for (const drone of fight.drones) sim.events.emit('drone.lost', { drone: drone.id, cause: 'bay', tick });
+    fight.drones = [];
+  }
+  if (fight.phase !== 'battle' || fight.offer || fight.fleeing || !bay || bay.power === 0) return;
+  if (fight.drones.length < spec.max && tick - fight.droneAt >= Math.round(spec.every * 20)) {
+    fight.droneAt = tick;
+    const drone = { id: fight.nextDrone++, next: tick + Math.round(spec.fire * 20) };
+    fight.drones.push(drone);
+    sim.events.emit('drone.launched', { drone: drone.id, out: fight.drones.length, tick });
+  }
+  const zap = sim.catalog.weapon(DRONE_WEAPON);
+  for (const drone of fight.drones) {
+    if (tick < drone.next || fight.shots.length >= MAX_SHOTS) continue;
+    drone.next = tick + Math.round(spec.fire * 20);
+    const standing = sim.layout.rooms.filter((room) => !sim.state.rooms[room.id].jettisoned);
+    const stray = sim.rng.stream('combat').pick(standing.length ? standing : sim.layout.rooms).id;
+    const aimed = droneTarget(enemy, sim);
+    const blind = !enemy.state.contact?.locked || !aimed;
+    const shot = { id: fight.nextShot++, side: 'enemy', slot: -1, drone: drone.id, weapon: DRONE_WEAPON, room: blind ? stray : aimed, blind, born: tick, lands: tick + Math.max(1, Math.round(zap.flight * 20)) };
+    fight.shots.push(shot);
+    sim.events.emit('drone.fired', { ...shot, tick });
+  }
+}
+
 /** Shields, weapons and shots in the air for both ships, then the enemy's turn. */
 export function stepCombat(sim, dt) {
   const enemy = enemyOf(sim);
@@ -833,6 +895,7 @@ export function stepCombat(sim, dt) {
   }
   stepShield(enemy, dt);
   stepWeapons(sim, enemy, 'enemy', dt);
+  if (!fight.over) stepDrones(sim, enemy);
   const flying = [];
   for (const shot of fight.shots) {
     if (fight.over) break; // it is decided: whatever was in the air is lost in the wreckage
@@ -875,6 +938,8 @@ export function checkFightInvariants(sim) {
     if (shot.lands < sim.state.tick) problems.push(`shot ${shot.id} should have landed at tick ${shot.lands}`);
   }
   if (fight.over && fight.shots.length) problems.push('shots are still flying after the fight was decided');
+  const spec = sim.state.fight.enemy && planOf(sim.catalog.layout(fight.enemy.ship)).drones;
+  if (fight.drones.length > (spec?.max ?? 0)) problems.push(`${fight.drones.length} drones out`);
   if (fight.over && !OUTCOMES[fight.over.outcome]) problems.push(`the fight ended an unknown way: "${fight.over.outcome}"`);
   if (!['hail', 'battle'].includes(fight.phase)) problems.push(`fight phase is "${fight.phase}"`);
   if (fight.offer && !fight.offered) problems.push('an offer stands that was never made');

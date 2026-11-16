@@ -42,11 +42,21 @@ function strip(sim) {
   enemy.shield.charge = 0;
 }
 
-test('weapons are content: three of them, each sound', () => {
-  assert.equal(content.count('weapons'), 3);
+test('weapons are content: three to mount and a drone\'s zap, each sound', () => {
+  assert.equal(content.count('weapons'), 4);
+  assert.deepEqual(content.all('weapons').filter((w) => w.mount === false).map((w) => w.id), ['drone-zap']);
   const broken = { ...LASER, id: 'broken', power: 0, charge: -1, effects: { fire: 2 } };
   const { errors } = validateContent([{ path: 'weapons/x.json', data: { items: [broken] } }]);
   assert.equal(errors.length, 3, errors.join('\n'));
+});
+
+test('a ship that fits a weapon no ship can mount is caught by the content check', () => {
+  const data = { ...shipCopy(), weapons: ['pulse-laser', 'drone-zap'] };
+  const { errors } = validateContent([
+    { path: 'ships/x.json', data: { items: [data] } },
+    { path: 'weapons/x.json', data: { items: [LASER, { ...LASER, id: 'drone-zap', mount: false }] } },
+  ]);
+  assert.ok(errors.some((e) => /which no ship can mount/.test(e)), errors.join('\n'));
 });
 
 test('a ship that fits a weapon nobody made is caught by the content check', () => {

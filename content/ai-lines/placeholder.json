@@ -124,6 +124,12 @@
     { "id": "ph.crate_opened.003", "category": "cargo", "placeholder": true, "conditions": { "trigger": "crate.opened" }, "text": "{crew_name} has it open. You'll want to read the contents before anyone asks what we were carrying." },
     { "id": "ph.crate_jettisoned.001", "category": "cargo", "placeholder": true, "conditions": { "trigger": "crate.jettisoned" }, "text": "Crate's out the airlock. It's somebody else's problem now, or nobody's." },
     { "id": "ph.crate_jettisoned.002", "category": "cargo", "placeholder": true, "conditions": { "trigger": "crate.jettisoned" }, "text": "Cycled out. I've struck it from the manifest. Someone may want to know why." },
-    { "id": "ph.crate_jettisoned.003", "category": "cargo", "placeholder": true, "conditions": { "trigger": "crate.jettisoned" }, "text": "That's one less crate. I hope it wasn't the one we're being paid for." }
+    { "id": "ph.crate_jettisoned.003", "category": "cargo", "placeholder": true, "conditions": { "trigger": "crate.jettisoned" }, "text": "That's one less crate. I hope it wasn't the one we're being paid for." },
+    { "id": "ph.drone_launched.001", "category": "combat_progress", "placeholder": true, "conditions": { "trigger": "drone.launched" }, "text": "Something small just left their bay. It's coming our way." },
+    { "id": "ph.drone_launched.002", "category": "combat_progress", "placeholder": true, "conditions": { "trigger": "drone.launched" }, "text": "Drone out. They're cheap, and they bite. A brace burns them." },
+    { "id": "ph.drone_launched.003", "category": "combat_progress", "placeholder": true, "conditions": { "trigger": "drone.launched" }, "text": "Another drone. I'd stop counting if counting weren't my job." },
+    { "id": "ph.drone_lost.001", "category": "combat_progress", "placeholder": true, "conditions": { "trigger": "drone.lost" }, "text": "One drone fewer. It flew into the field and didn't fly out." },
+    { "id": "ph.drone_lost.002", "category": "combat_progress", "placeholder": true, "conditions": { "trigger": "drone.lost" }, "text": "Drone's dead. Cheap things break cheaply." },
+    { "id": "ph.drone_lost.003", "category": "combat_progress", "placeholder": true, "conditions": { "trigger": "drone.lost" }, "text": "That drone is scrap. Their bay will send another if it can." }
   ]
 }

@@ -338,7 +338,15 @@
           "name": "Teague"
         }
       ],
-      "crates": [{ "kind": "ammo", "room": "engines", "count": 2, "rounds": 3, "label": "Slug crate" }],
+      "crates": [
+        {
+          "kind": "ammo",
+          "room": "engines",
+          "count": 2,
+          "rounds": 3,
+          "label": "Slug crate"
+        }
+      ],
       "crewStart": [
         "bridge",
         "weapons",
@@ -419,6 +427,1059 @@
         },
         "board": {
           "party": 2
+        }
+      },
+      "hull": [
+        [
+          -1.3,
+          4.8
+        ],
+        [
+          -1.3,
+          1.2000000000000002
+        ],
+        [
+          1.6,
+          -0.5999999999999996
+        ],
+        [
+          7.3,
+          -0.5999999999999996
+        ],
+        [
+          7.3,
+          0.40000000000000036
+        ],
+        [
+          9.6,
+          0.40000000000000036
+        ],
+        [
+          9.6,
+          5.6
+        ],
+        [
+          7.3,
+          5.6
+        ],
+        [
+          7.3,
+          6.6
+        ],
+        [
+          1.6,
+          6.6
+        ]
+      ]
+    },
+    {
+      "id": "knife-cutter",
+      "name": "Knife cutter",
+      "class": "Privateer cutter: all gun, no armour, no patience",
+      "enemy": true,
+      "facing": "left",
+      "rooms": [
+        {
+          "id": "bridge",
+          "name": "Bridge",
+          "kind": "helm",
+          "x": 0,
+          "y": 1,
+          "w": 2,
+          "h": 3
+        },
+        {
+          "id": "weapons",
+          "name": "Gun deck",
+          "system": "weapons",
+          "x": 2,
+          "y": 0,
+          "w": 4,
+          "h": 3
+        },
+        {
+          "id": "shields",
+          "name": "Shields",
+          "system": "shields",
+          "x": 2,
+          "y": 3,
+          "w": 2,
+          "h": 2
+        },
+        {
+          "id": "reactor",
+          "name": "Reactor",
+          "system": "reactor",
+          "x": 4,
+          "y": 3,
+          "w": 2,
+          "h": 2
+        },
+        {
+          "id": "engines",
+          "name": "Engines",
+          "system": "engines",
+          "x": 6,
+          "y": 1,
+          "w": 2,
+          "h": 3
+        },
+        {
+          "id": "life_support",
+          "name": "Life support",
+          "system": "life_support",
+          "x": 8,
+          "y": 1,
+          "w": 2,
+          "h": 3
+        }
+      ],
+      "doors": [
+        {
+          "id": "d_bridge_weapons",
+          "a": "bridge",
+          "b": "weapons",
+          "x": 2,
+          "y": 2,
+          "vertical": true
+        },
+        {
+          "id": "d_bridge_shields",
+          "a": "bridge",
+          "b": "shields",
+          "x": 2,
+          "y": 3.5,
+          "vertical": true
+        },
+        {
+          "id": "d_weapons_shields",
+          "a": "weapons",
+          "b": "shields",
+          "x": 3,
+          "y": 3,
+          "vertical": false
+        },
+        {
+          "id": "d_weapons_reactor",
+          "a": "weapons",
+          "b": "reactor",
+          "x": 5,
+          "y": 3,
+          "vertical": false
+        },
+        {
+          "id": "d_shields_reactor",
+          "a": "shields",
+          "b": "reactor",
+          "x": 4,
+          "y": 4,
+          "vertical": true
+        },
+        {
+          "id": "d_weapons_engines",
+          "a": "weapons",
+          "b": "engines",
+          "x": 6,
+          "y": 2,
+          "vertical": true
+        },
+        {
+          "id": "d_reactor_engines",
+          "a": "reactor",
+          "b": "engines",
+          "x": 6,
+          "y": 3.5,
+          "vertical": true
+        },
+        {
+          "id": "d_engines_o2",
+          "a": "engines",
+          "b": "life_support",
+          "x": 8,
+          "y": 2.5,
+          "vertical": true
+        },
+        {
+          "id": "airlock_port",
+          "name": "Boarding hatch",
+          "a": "weapons",
+          "b": "space",
+          "x": 4,
+          "y": 0,
+          "vertical": false
+        }
+      ],
+      "crawlways": [],
+      "crew": [
+        {
+          "id": "rook",
+          "name": "Rook"
+        },
+        {
+          "id": "sable",
+          "name": "Sable"
+        }
+      ],
+      "crates": [
+        {
+          "kind": "ammo",
+          "room": "reactor",
+          "count": 2,
+          "rounds": 2,
+          "label": "Lance cells"
+        }
+      ],
+      "crewStart": [
+        "bridge",
+        "weapons"
+      ],
+      "hullPoints": 7,
+      "hardpoints": [
+        {
+          "id": "hp_dorsal_fore",
+          "x": 2.6,
+          "y": -0.6
+        },
+        {
+          "id": "hp_dorsal_mid",
+          "x": 3.8,
+          "y": -0.6
+        },
+        {
+          "id": "hp_dorsal_aft",
+          "x": 5.0,
+          "y": -0.6
+        }
+      ],
+      "weapons": [
+        "pulse-laser",
+        "pulse-laser",
+        "breaching-lance"
+      ],
+      "power": {
+        "reactor": 9,
+        "lightsPerBar": 6,
+        "systems": {
+          "shields": {
+            "level": 1,
+            "power": 1
+          },
+          "engines": {
+            "level": 1,
+            "power": 1
+          },
+          "weapons": {
+            "level": 5,
+            "power": 5
+          },
+          "life_support": {
+            "level": 1,
+            "power": 1
+          }
+        }
+      },
+      "tactics": {
+        "archetype": "gunner",
+        "flee": {
+          "at": 0.3
+        }
+      },
+      "hull": [
+        [
+          -1.3,
+          3.6
+        ],
+        [
+          -1.3,
+          1.4
+        ],
+        [
+          1.6,
+          -0.6
+        ],
+        [
+          8.2,
+          -0.6
+        ],
+        [
+          8.2,
+          0.6
+        ],
+        [
+          10.6,
+          0.6
+        ],
+        [
+          10.6,
+          4.4
+        ],
+        [
+          8.2,
+          4.4
+        ],
+        [
+          8.2,
+          5.6
+        ],
+        [
+          1.6,
+          5.6
+        ]
+      ]
+    },
+    {
+      "id": "grapple-tender",
+      "name": "Grapple tender",
+      "class": "Wreck-rights crew with a long docking tube and short tempers",
+      "enemy": true,
+      "facing": "left",
+      "rooms": [
+        {
+          "id": "bridge",
+          "name": "Bridge",
+          "kind": "helm",
+          "x": 0,
+          "y": 1,
+          "w": 2,
+          "h": 4
+        },
+        {
+          "id": "weapons",
+          "name": "Weapons",
+          "system": "weapons",
+          "x": 2,
+          "y": 3,
+          "w": 3,
+          "h": 3
+        },
+        {
+          "id": "shields",
+          "name": "Shields",
+          "system": "shields",
+          "x": 2,
+          "y": 0,
+          "w": 3,
+          "h": 3
+        },
+        {
+          "id": "life_support",
+          "name": "Life support",
+          "system": "life_support",
+          "x": 5,
+          "y": 3,
+          "w": 2,
+          "h": 3
+        },
+        {
+          "id": "reactor",
+          "name": "Reactor",
+          "system": "reactor",
+          "x": 5,
+          "y": 0,
+          "w": 2,
+          "h": 3
+        },
+        {
+          "id": "engines",
+          "name": "Engines",
+          "system": "engines",
+          "x": 7,
+          "y": 1,
+          "w": 2,
+          "h": 4
+        }
+      ],
+      "doors": [
+        {
+          "id": "d_bridge_weapons",
+          "a": "bridge",
+          "b": "weapons",
+          "x": 2,
+          "y": 4,
+          "vertical": true
+        },
+        {
+          "id": "d_bridge_shields",
+          "a": "bridge",
+          "b": "shields",
+          "x": 2,
+          "y": 2,
+          "vertical": true
+        },
+        {
+          "id": "d_weapons_shields",
+          "a": "weapons",
+          "b": "shields",
+          "x": 3.5,
+          "y": 3,
+          "vertical": false
+        },
+        {
+          "id": "d_weapons_o2",
+          "a": "weapons",
+          "b": "life_support",
+          "x": 5,
+          "y": 4.5,
+          "vertical": true
+        },
+        {
+          "id": "d_shields_reactor",
+          "a": "shields",
+          "b": "reactor",
+          "x": 5,
+          "y": 1.5,
+          "vertical": true
+        },
+        {
+          "id": "d_o2_reactor",
+          "a": "life_support",
+          "b": "reactor",
+          "x": 6,
+          "y": 3,
+          "vertical": false
+        },
+        {
+          "id": "d_o2_engines",
+          "a": "life_support",
+          "b": "engines",
+          "x": 7,
+          "y": 4,
+          "vertical": true
+        },
+        {
+          "id": "d_reactor_engines",
+          "a": "reactor",
+          "b": "engines",
+          "x": 7,
+          "y": 2,
+          "vertical": true
+        },
+        {
+          "id": "airlock_port",
+          "name": "Boarding hatch",
+          "a": "weapons",
+          "b": "space",
+          "x": 3.5,
+          "y": 6,
+          "vertical": false
+        }
+      ],
+      "crawlways": [],
+      "crew": [
+        {
+          "id": "harrow",
+          "name": "Harrow"
+        },
+        {
+          "id": "pell",
+          "name": "Pell"
+        },
+        {
+          "id": "juno",
+          "name": "Juno"
+        },
+        {
+          "id": "crake",
+          "name": "Crake"
+        },
+        {
+          "id": "odd",
+          "name": "Odd"
+        }
+      ],
+      "crewStart": [
+        "bridge",
+        "weapons",
+        "weapons",
+        "shields",
+        "engines"
+      ],
+      "hullPoints": 14,
+      "hardpoints": [
+        {
+          "id": "hp_port_fore",
+          "x": 2.6,
+          "y": 6.6
+        },
+        {
+          "id": "hp_port_aft",
+          "x": 4.4,
+          "y": 6.6
+        }
+      ],
+      "weapons": [
+        "pulse-laser"
+      ],
+      "power": {
+        "reactor": 7,
+        "lightsPerBar": 5,
+        "systems": {
+          "shields": {
+            "level": 1,
+            "power": 1
+          },
+          "engines": {
+            "level": 1,
+            "power": 1
+          },
+          "weapons": {
+            "level": 1,
+            "power": 1
+          },
+          "life_support": {
+            "level": 1,
+            "power": 1
+          }
+        }
+      },
+      "tactics": {
+        "archetype": "boarder",
+        "hail": {
+          "text": "We have a claim on your hull. Stand down and nobody gets cut.",
+          "talk": 0.2,
+          "bribe": 120
+        },
+        "surrender": {
+          "at": 0.35,
+          "offers": [
+            {
+              "kind": "money",
+              "amount": [
+                30,
+                70
+              ]
+            },
+            {
+              "kind": "cargo",
+              "name": "Coil of docking cable",
+              "qty": [
+                1,
+                2
+              ]
+            }
+          ]
+        },
+        "flee": {
+          "at": 0.15
+        },
+        "board": {
+          "party": 3,
+          "after": 8
+        }
+      },
+      "hull": [
+        [
+          -1.3,
+          4.8
+        ],
+        [
+          -1.3,
+          1.2000000000000002
+        ],
+        [
+          1.6,
+          -0.5999999999999996
+        ],
+        [
+          7.3,
+          -0.5999999999999996
+        ],
+        [
+          7.3,
+          0.40000000000000036
+        ],
+        [
+          9.6,
+          0.40000000000000036
+        ],
+        [
+          9.6,
+          5.6
+        ],
+        [
+          7.3,
+          5.6
+        ],
+        [
+          7.3,
+          6.6
+        ],
+        [
+          1.6,
+          6.6
+        ]
+      ]
+    },
+    {
+      "id": "bulwark",
+      "name": "Bulwark",
+      "class": "Ex-navy picket refitted as a toll gate, all plating and patience",
+      "enemy": true,
+      "facing": "left",
+      "rooms": [
+        {
+          "id": "bridge",
+          "name": "Bridge",
+          "kind": "helm",
+          "x": 0,
+          "y": 1,
+          "w": 2,
+          "h": 4
+        },
+        {
+          "id": "weapons",
+          "name": "Weapons",
+          "system": "weapons",
+          "x": 2,
+          "y": 3,
+          "w": 3,
+          "h": 3
+        },
+        {
+          "id": "shields",
+          "name": "Shields",
+          "system": "shields",
+          "x": 2,
+          "y": 0,
+          "w": 3,
+          "h": 3
+        },
+        {
+          "id": "life_support",
+          "name": "Life support",
+          "system": "life_support",
+          "x": 5,
+          "y": 3,
+          "w": 2,
+          "h": 3
+        },
+        {
+          "id": "reactor",
+          "name": "Reactor",
+          "system": "reactor",
+          "x": 5,
+          "y": 0,
+          "w": 2,
+          "h": 3
+        },
+        {
+          "id": "engines",
+          "name": "Engines",
+          "system": "engines",
+          "x": 7,
+          "y": 1,
+          "w": 2,
+          "h": 4
+        }
+      ],
+      "doors": [
+        {
+          "id": "d_bridge_weapons",
+          "a": "bridge",
+          "b": "weapons",
+          "x": 2,
+          "y": 4,
+          "vertical": true
+        },
+        {
+          "id": "d_bridge_shields",
+          "a": "bridge",
+          "b": "shields",
+          "x": 2,
+          "y": 2,
+          "vertical": true
+        },
+        {
+          "id": "d_weapons_shields",
+          "a": "weapons",
+          "b": "shields",
+          "x": 3.5,
+          "y": 3,
+          "vertical": false
+        },
+        {
+          "id": "d_weapons_o2",
+          "a": "weapons",
+          "b": "life_support",
+          "x": 5,
+          "y": 4.5,
+          "vertical": true
+        },
+        {
+          "id": "d_shields_reactor",
+          "a": "shields",
+          "b": "reactor",
+          "x": 5,
+          "y": 1.5,
+          "vertical": true
+        },
+        {
+          "id": "d_o2_reactor",
+          "a": "life_support",
+          "b": "reactor",
+          "x": 6,
+          "y": 3,
+          "vertical": false
+        },
+        {
+          "id": "d_o2_engines",
+          "a": "life_support",
+          "b": "engines",
+          "x": 7,
+          "y": 4,
+          "vertical": true
+        },
+        {
+          "id": "d_reactor_engines",
+          "a": "reactor",
+          "b": "engines",
+          "x": 7,
+          "y": 2,
+          "vertical": true
+        },
+        {
+          "id": "airlock_port",
+          "name": "Boarding hatch",
+          "a": "weapons",
+          "b": "space",
+          "x": 3.5,
+          "y": 6,
+          "vertical": false
+        }
+      ],
+      "crawlways": [],
+      "crew": [
+        {
+          "id": "maren",
+          "name": "Maren"
+        },
+        {
+          "id": "tobin",
+          "name": "Tobin"
+        },
+        {
+          "id": "ives",
+          "name": "Ives"
+        }
+      ],
+      "crewStart": [
+        "bridge",
+        "shields",
+        "weapons"
+      ],
+      "hullPoints": 16,
+      "hardpoints": [
+        {
+          "id": "hp_port_fore",
+          "x": 2.6,
+          "y": 6.6
+        },
+        {
+          "id": "hp_port_aft",
+          "x": 4.4,
+          "y": 6.6
+        }
+      ],
+      "weapons": [
+        "slug-thrower"
+      ],
+      "power": {
+        "reactor": 9,
+        "lightsPerBar": 5,
+        "systems": {
+          "shields": {
+            "level": 3,
+            "power": 3
+          },
+          "engines": {
+            "level": 1,
+            "power": 1
+          },
+          "weapons": {
+            "level": 2,
+            "power": 2
+          },
+          "life_support": {
+            "level": 1,
+            "power": 1
+          }
+        }
+      },
+      "tactics": {
+        "archetype": "tank",
+        "hail": {
+          "text": "This lane is tolled. Pay, or turn around, or we sit here and wear you down.",
+          "talk": 0.5,
+          "bribe": 60
+        },
+        "surrender": {
+          "at": 0.3,
+          "offers": [
+            {
+              "kind": "money",
+              "amount": [
+                50,
+                110
+              ]
+            },
+            {
+              "kind": "info",
+              "text": "The toll goes nowhere. Nobody has collected from this gate in a year."
+            }
+          ]
+        }
+      },
+      "hull": [
+        [
+          -1.3,
+          4.8
+        ],
+        [
+          -1.3,
+          1.2000000000000002
+        ],
+        [
+          1.6,
+          -0.5999999999999996
+        ],
+        [
+          7.3,
+          -0.5999999999999996
+        ],
+        [
+          7.3,
+          0.40000000000000036
+        ],
+        [
+          9.6,
+          0.40000000000000036
+        ],
+        [
+          9.6,
+          5.6
+        ],
+        [
+          7.3,
+          5.6
+        ],
+        [
+          7.3,
+          6.6
+        ],
+        [
+          1.6,
+          6.6
+        ]
+      ],
+      "crates": [
+        {
+          "kind": "ammo",
+          "room": "engines",
+          "count": 3,
+          "rounds": 3,
+          "label": "Slug crate"
+        }
+      ]
+    },
+    {
+      "id": "drone-carrier",
+      "name": "Drone carrier",
+      "class": "Survey tender whose drones learned to bite",
+      "enemy": true,
+      "facing": "left",
+      "rooms": [
+        {
+          "id": "bridge",
+          "name": "Bridge",
+          "kind": "helm",
+          "x": 0,
+          "y": 1,
+          "w": 2,
+          "h": 4
+        },
+        {
+          "id": "weapons",
+          "name": "Drone bay",
+          "system": "weapons",
+          "x": 2,
+          "y": 3,
+          "w": 3,
+          "h": 3
+        },
+        {
+          "id": "shields",
+          "name": "Shields",
+          "system": "shields",
+          "x": 2,
+          "y": 0,
+          "w": 3,
+          "h": 3
+        },
+        {
+          "id": "life_support",
+          "name": "Life support",
+          "system": "life_support",
+          "x": 5,
+          "y": 3,
+          "w": 2,
+          "h": 3
+        },
+        {
+          "id": "reactor",
+          "name": "Reactor",
+          "system": "reactor",
+          "x": 5,
+          "y": 0,
+          "w": 2,
+          "h": 3
+        },
+        {
+          "id": "engines",
+          "name": "Engines",
+          "system": "engines",
+          "x": 7,
+          "y": 1,
+          "w": 2,
+          "h": 4
+        }
+      ],
+      "doors": [
+        {
+          "id": "d_bridge_weapons",
+          "a": "bridge",
+          "b": "weapons",
+          "x": 2,
+          "y": 4,
+          "vertical": true
+        },
+        {
+          "id": "d_bridge_shields",
+          "a": "bridge",
+          "b": "shields",
+          "x": 2,
+          "y": 2,
+          "vertical": true
+        },
+        {
+          "id": "d_weapons_shields",
+          "a": "weapons",
+          "b": "shields",
+          "x": 3.5,
+          "y": 3,
+          "vertical": false
+        },
+        {
+          "id": "d_weapons_o2",
+          "a": "weapons",
+          "b": "life_support",
+          "x": 5,
+          "y": 4.5,
+          "vertical": true
+        },
+        {
+          "id": "d_shields_reactor",
+          "a": "shields",
+          "b": "reactor",
+          "x": 5,
+          "y": 1.5,
+          "vertical": true
+        },
+        {
+          "id": "d_o2_reactor",
+          "a": "life_support",
+          "b": "reactor",
+          "x": 6,
+          "y": 3,
+          "vertical": false
+        },
+        {
+          "id": "d_o2_engines",
+          "a": "life_support",
+          "b": "engines",
+          "x": 7,
+          "y": 4,
+          "vertical": true
+        },
+        {
+          "id": "d_reactor_engines",
+          "a": "reactor",
+          "b": "engines",
+          "x": 7,
+          "y": 2,
+          "vertical": true
+        },
+        {
+          "id": "airlock_port",
+          "name": "Boarding hatch",
+          "a": "weapons",
+          "b": "space",
+          "x": 3.5,
+          "y": 6,
+          "vertical": false
+        }
+      ],
+      "crawlways": [],
+      "crew": [
+        {
+          "id": "wick",
+          "name": "Wick"
+        },
+        {
+          "id": "nalo",
+          "name": "Nalo"
+        }
+      ],
+      "crewStart": [
+        "bridge",
+        "weapons"
+      ],
+      "hullPoints": 13,
+      "hardpoints": [],
+      "weapons": [],
+      "power": {
+        "reactor": 7,
+        "lightsPerBar": 5,
+        "systems": {
+          "shields": {
+            "level": 1,
+            "power": 1
+          },
+          "engines": {
+            "level": 1,
+            "power": 1
+          },
+          "weapons": {
+            "level": 2,
+            "power": 2
+          },
+          "life_support": {
+            "level": 1,
+            "power": 1
+          }
+        }
+      },
+      "tactics": {
+        "archetype": "carrier",
+        "drones": {
+          "every": 9,
+          "max": 3,
+          "fire": 5
+        },
+        "surrender": {
+          "at": 0.35,
+          "offers": [
+            {
+              "kind": "money",
+              "amount": [
+                40,
+                80
+              ]
+            },
+            {
+              "kind": "info",
+              "text": "The drones were never ours. They came with the hull, and they don't listen."
+            }
+          ]
         }
       },
       "hull": [

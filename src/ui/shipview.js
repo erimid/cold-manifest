@@ -570,8 +570,11 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
     };
     const shield = !seen('shields') ? 'Capacitor ?' : braced(ship) ? `Braced · holds ${Math.round(ship.state.shield.field * 10) / 10}` : capacity(ship) ? `Capacitor ${percent(capacitorOf(ship))}` : 'No shields';
     const guns = !ours && ship.state.weapons.length ? ` · Guns ${seen('weapons') ? percent(Math.max(...ship.state.weapons.map((_, i) => chargeOf(ship, i)))) : '?'}` : '';
+    // A carrier's drones are out in the open: the sensors see them whatever is resolved (D-097).
+    const out = sim.state.fight?.drones?.length ?? 0;
+    const drones = !ours && out ? ` · ${out} drone${out === 1 ? '' : 's'} out` : '';
     setText(part.line, `${shield}${guns} · Signature ${percent(signature(ship).total)}`);
-    setText(part.lock, !contact || sim.state.fight?.over ? '' : contact.locked ? `${ours ? 'Their' : 'Our'} lock on ${ours ? 'us' : 'them'} ${percent(contact.lock)}` : ours ? 'They have no lock on us' : 'We have no lock on them');
+    setText(part.lock, !contact || sim.state.fight?.over ? '' : `${contact.locked ? `${ours ? 'Their' : 'Our'} lock on ${ours ? 'us' : 'them'} ${percent(contact.lock)}` : ours ? 'They have no lock on us' : 'We have no lock on them'}${drones}`);
     // Good news on our side is no lock; on theirs it is a lock.
     part.lock.classList.toggle('is-good', Boolean(contact) && contact.locked !== ours);
   }

@@ -37,9 +37,11 @@ export const THINK_SECONDS = 0.5;
 
 /**
  * Archetypes (brief §7: glass cannon, boarders, drone carriers, shield tanks, stealth).
+ * A carrier's ship file adds `drones: { every, max, fire }` (S2.5, combat.js).
  *   power    systems in the order bars go to them
  *   targets  weights for picking a room of ours to shoot: a system id, "helm", or "other" for anything else
  *   brace    the chance it braces against a volley of ours, when its capacitor can (S2.8)
+ *   volley   false: each gun fires as soon as it is charged, instead of waiting to fire together (S2.5)
  */
 export const ARCHETYPES = Object.freeze({
   // Nobody aboard and no orders: a hulk that sits there and takes it. Its point defence braces on a coin toss.
@@ -47,6 +49,7 @@ export const ARCHETYPES = Object.freeze({
   // Shoot first, shoot often: guns before shields, and at our guns and shields.
   gunner: {
     label: 'Glass cannon',
+    volley: false,
     power: ['weapons', 'engines', 'life_support', 'shields', 'doors', 'sensors', 'medbay', 'ai_core'],
     targets: { weapons: 4, shields: 3, engines: 1, helm: 1, other: 0.5 },
     brace: 0.3,
@@ -64,6 +67,13 @@ export const ARCHETYPES = Object.freeze({
     power: ['shields', 'life_support', 'weapons', 'engines', 'doors', 'medbay', 'sensors', 'ai_core'],
     targets: { weapons: 4, reactor: 2, other: 0.5 },
     brace: 0.9,
+  },
+  // Drones do the shooting (S2.5): the bay before everything, and the drones go for our guns and shields.
+  carrier: {
+    label: 'Drone carrier',
+    power: ['weapons', 'shields', 'engines', 'life_support', 'doors', 'medbay', 'sensors', 'ai_core'],
+    targets: { weapons: 3, shields: 3, sensors: 1, other: 1 },
+    brace: 0.4,
   },
   // Soften us up for a boarding party (S2.4): doors, medbay and shields.
   boarder: {
@@ -91,7 +101,13 @@ export function validateTactics(tactics, { crewed }) {
   if (!tactics || typeof tactics !== 'object') return ['"tactics" must be an object'];
   const problems = [];
   if (!ARCHETYPES[tactics.archetype]) problems.push(`tactics.archetype must be one of ${Object.keys(ARCHETYPES).join(', ')}`);
-  const { hail, surrender, flee, board } = tactics;
+  const { hail, surrender, flee, board, drones } = tactics;
+  if (drones !== undefined) {
+    const positive = (v) => typeof v === 'number' && v > 0;
+    if (!positive(drones?.every)) problems.push('tactics.drones.every must be seconds between launches, above 0');
+    if (!Number.isInteger(drones?.max) || drones.max < 1) problems.push('tactics.drones.max must be a whole number of drones, at least 1');
+    if (!positive(drones?.fire)) problems.push('tactics.drones.fire must be seconds between a drone\'s shots, above 0');
+  }
   if (board !== undefined) {
     if (!crewed) problems.push('tactics.board: a ship needs crew to send a boarding party');
     if (!Number.isInteger(board?.party) || board.party < 1) problems.push('tactics.board.party must be a whole number of crew, at least 1');
@@ -128,7 +144,12 @@ export function validateTactics(tactics, { crewed }) {
 /** The fight plan for a ship: its archetype's power order and target weights, with its own hail, surrender and flee rules. */
 export function planOf(layout) {
   const tactics = layout.tactics ?? { archetype: 'drone' };
-  return { ...ARCHETYPES[tactics.archetype], archetype: tactics.archetype, hail: tactics.hail ?? null, surrender: tactics.surrender ?? null, flee: tactics.flee ?? null, board: tactics.board ?? null };
+  return { ...ARCHETYPES[tactics.archetype], archetype: tactics.archetype, hail: tactics.hail ?? null, surrender: tactics.surrender ?? null, flee: tactics.flee ?? null, board: tactics.board ?? null, drones: tactics.drones ?? null };
+}
+
+/** A room of `foe` for a drone to zap: one the carrier's sensors have made out, by the plan's weights, or null if none. */
+export function droneTarget(ship, foe) {
+  return pickTarget(ship, foe, planOf(ship.layout), (room) => contactView(ship, room.id)?.resolved);
 }
 
 // ---------- the captain's decisions ----------
@@ -285,13 +306,14 @@ export function think(ship, foe, { fleeing = false, boarding = false, battleSeco
   const plan = planOf(ship.layout);
   if (plan.archetype === 'drone') return;
   routePower(ship, fleeing ? ['engines', ...plan.power.filter((id) => id !== 'engines')] : plan.power);
-  // Guns fire together, so the first shot takes down a shield layer and the next gets through.
-  // A gun that is ready waits, unaimed, for the others with power.
+  // Guns fire together, so the first shot drains a brace and the next gets through.
+  // A gun that is ready waits, unaimed, for the others with power. A glass cannon
+  // (`volley: false`) does not wait: every gun fires the moment it is charged.
   const guns = ship.state.weapons.filter((slot) => slot.powered && (slot.rounds === null || slot.rounds > 0)); // a dry gun waits for its rounds
   const ready = (slot) => slot.charge >= ship.catalog.weapon(slot.id).charge - 1e-9;
   const volley = guns.length > 0 && guns.every(ready);
   ship.state.weapons.forEach((slot) => {
-    if (!volley) {
+    if (!volley && !(plan.volley === false && guns.includes(slot) && ready(slot))) {
       if (ready(slot)) slot.target = null;
       return;
     }

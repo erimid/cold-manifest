@@ -419,6 +419,8 @@ function playScenario(seed, { incoming = false } = {}) {
 
 // Braces (S2.8) make some fights a long grind; the stalemate rule still ends every one, but slowly (each hull point lost buys up to 90 s).
 const DUEL_MINUTES = 12;
+/** Which way each ending went for us, for the enemy table. */
+const OUTCOME_KIND = Object.freeze({ destroyed: 'won', 'crew-dead': 'won', surrendered: 'won', escaped: 'parted', fled: 'parted', talked: 'parted', bribed: 'parted', stalemate: 'parted', lost: 'lost' });
 
 /**
  * A duel: one enemy alongside, and a bot that fights it. It answers a hail
@@ -715,6 +717,20 @@ for (const [enemyId, boarding] of enemyIds.flatMap((id) => (crewedIds.includes(i
   out.push(`    their shots:    ${mean(mine.map((d) => d.incoming)).toFixed(1)} per fight, ${mean(mine.map((d) => d.incomingHits)).toFixed(1)} hit; our hull at the end ${mean(mine.map((d) => d.ourHull)).toFixed(1)} of ${ship.hullPoints}, crew alive ${mean(mine.map((d) => d.alive)).toFixed(2)} of ${roster.length}`);
   if (crewedIds.includes(enemyId)) out.push(`    boarding:       ${mean(mine.map((d) => d.boardedUs)).toFixed(1)} of theirs crossed to us, ${mean(mine.map((d) => d.boarded)).toFixed(1)} of ours to them per fight; ${mine.reduce((n, d) => n + d.killedAboard, 0)} of theirs and ${mine.reduce((n, d) => n + d.lostAboard, 0)} of ours killed hand to hand, ${mine.reduce((n, d) => n + d.captured, 0)} captured`);
   if (Object.keys(hails).length) out.push(`    hails answered: ${Object.entries(hails).map(([k, n]) => `${k} ${n}`).join(', ')}; ${mine.reduce((n, d) => n + d.offers, 0)} surrender offers made`);
+}
+out.push('');
+out.push('Enemy types (S2.5): the plain duels side by side, lit and dark together');
+out.push('  enemy              won   parted  lost   median length   our hull lost   their shots that hit');
+for (const enemyId of enemyIds) {
+  const mine = duels.filter((d) => d.enemy === enemyId && !d.boarding);
+  if (!mine.length) continue;
+  const kinds = { won: 0, parted: 0, lost: 0 };
+  for (const d of mine) kinds[OUTCOME_KIND[d.outcome]] += 1;
+  const times = mine.map((d) => d.seconds).sort((a, b) => a - b);
+  const median = Math.round(times[Math.floor(times.length / 2)]);
+  const name = ships.find((item) => item.id === enemyId).name;
+  const shots = mine.reduce((n, d) => n + d.incoming, 0);
+  out.push(`  ${name.padEnd(18)} ${pct(kinds.won, mine.length).padStart(4)}  ${pct(kinds.parted, mine.length).padStart(5)}  ${pct(kinds.lost, mine.length).padStart(5)}   ${`${median}s`.padStart(13)}   ${mean(mine.map((d) => ship.hullPoints - d.ourHull)).toFixed(1).padStart(13)}   ${shots ? pct(mine.reduce((n, d) => n + d.incomingHits, 0), shots) : 'never fired'}`);
 }
 out.push('');
 out.push('Running dark (S2.7): the same duels, split by how the bot fought. Odd seeds lit (every lamp on, drive burning), even seeds dark (lamps off, drive cold)');

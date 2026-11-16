@@ -1377,11 +1377,45 @@ async function holdTests(browser) {
   await context.close();
 }
 
+async function enemyTests(browser) {
+  console.log('iPad: four new enemy types, and a carrier\'s drones (S2.5)');
+  const context = await browser.newContext({ ...devices['iPad (gen 7) landscape'] });
+  const page = await context.newPage();
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  await page.goto(`http://localhost:${PORT}/?seed=E2E-ENEMIES&autopause=0&debug=1`);
+  await page.waitForFunction(() => window.coldManifest?.machine.state === 'title');
+  await page.tap('#btn-ship');
+  await page.waitForFunction(() => window.coldManifest.machine.state === 'ship');
+  const shots = process.env.E2E_SHOTS;
+
+  await check('the debug sheet can start a fight with every enemy, each button big enough to tap', async () => {
+    await page.tap('#btn-dbg-menu');
+    const ids = await game(page, () => window.coldManifest.sim.catalog.enemies);
+    for (const id of ['knife-cutter', 'grapple-tender', 'bulwark', 'drone-carrier']) assert.ok(ids.includes(id), `no ${id}`);
+    for (const id of ids) {
+      const box = await page.locator(`#btn-dbg-fight-${id}`).boundingBox();
+      assert.ok(box && box.width >= 44 && box.height >= 44, `${id} button ${JSON.stringify(box)}`);
+    }
+  });
+
+  await check('the drone carrier launches drones, and the fight bar counts them', async () => {
+    await page.tap('#btn-dbg-fight-drone-carrier');
+    await page.waitForFunction(() => window.coldManifest.sim.state.fight?.enemy.ship === 'drone-carrier', null, { timeout: 2000 });
+    await scan(page);
+    await page.waitForFunction(() => /\d drones? out/.test(document.querySelector('#fight-foe').textContent), null, { timeout: 15000 });
+    if (shots) await page.screenshot({ path: `${shots}/s2-5-carrier-ipad.png` });
+  });
+
+  await check('no page errors', async () => assert.deepEqual(errors, []));
+  await context.close();
+}
+
 const server = await startServer();
 const browser = await chromium.launch(process.env.PW_CHROMIUM ? { executablePath: process.env.PW_CHROMIUM } : {});
 // E2E_ONLY=boarding (or a comma list of suite names) runs just those suites, for chasing one failure.
 const only = process.env.E2E_ONLY?.split(',');
-const suites = { touch: touchTests, desktop: desktopTests, voice: voiceTests, fight: fightTests, hit: hitTests, ending: endingTests, boarding: boardingTests, dark: darkTests, hold: holdTests };
+const suites = { touch: touchTests, desktop: desktopTests, voice: voiceTests, fight: fightTests, hit: hitTests, ending: endingTests, boarding: boardingTests, dark: darkTests, hold: holdTests, enemies: enemyTests };
 try {
   for (const [name, run] of Object.entries(suites)) if (!only || only.includes(name)) await run(browser);
 } finally {
