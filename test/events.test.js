@@ -7,7 +7,7 @@ import test from 'node:test';
 import { gatherRefs, validateContent } from '../src/engine/content-schema.js';
 import { hashState } from '../src/engine/hash.js';
 import { validateEffects, EFFECTS } from '../src/narrative/effects.js';
-import { MAX_ABOARD, RESULT_SECONDS, checkEvent, eventView, roomsFor, situationViews, whyNoChoice } from '../src/narrative/events.js';
+import { MAX_ABOARD, RESULT_SECONDS, checkEvent, eventView, nearestHand, roomsFor, situationViews, whyNoChoice } from '../src/narrative/events.js';
 import { recall } from '../src/sim/memory.js';
 import { heldReason, neighbours, nodeOf } from '../src/sim/sector.js';
 import { checkInvariants, createSim } from '../src/sim/sim.js';
@@ -339,6 +339,29 @@ test('a place can be a room, a system, a kind, a lock, anywhere, or where one of
   fallback.state.rooms.medbay.jettisoned = true;
   give(fallback, { type: 'debug.event', event: 'test.one' });
   assert.equal(only(fallback).room, 'quarters');
+});
+
+test('the hand to send is a spare one before one holding a station, then the nearest; nobody asleep, hidden or laden', () => {
+  const sim = runSim();
+  const others = Object.values(sim.state.crew).filter((member) => !['ilse', 'pruitt'].includes(member.id));
+  for (const member of others) member.asleep = true;
+  sim.state.crew.pruitt.asleep = true;
+  assert.equal(nearestHand(sim, 'bridge').id, 'ilse', 'only the pilot is up: she is on the bridge already');
+  standIn(sim, 'pruitt', 'engines');
+  sim.state.crew.pruitt.post = null;
+  sim.step();
+  assert.equal(sim.state.stations.helm.by, 'ilse');
+  assert.equal(nearestHand(sim, 'bridge').id, 'pruitt', 'a spare hand from the far end, not the pilot off the helm');
+  assert.equal(nearestHand(sim, 'bridge', (member) => member.id !== 'pruitt').id, 'ilse');
+  for (const change of [{ asleep: true }, { hidden: 'locker' }, { alive: false }, { carry: 'c1' }, { task: 'walking' }]) {
+    const was = { ...sim.state.crew.pruitt };
+    Object.assign(sim.state.crew.pruitt, change);
+    assert.equal(nearestHand(sim, 'bridge').id, 'ilse', JSON.stringify(change));
+    Object.assign(sim.state.crew.pruitt, was);
+  }
+  for (const member of Object.values(sim.state.crew)) member.asleep = true;
+  assert.equal(nearestHand(sim, 'bridge'), null);
+  assert.equal(others.length, 4);
 });
 
 test('the lanes bring no more while the decks are busy, and a follow-up is placed in its own room', () => {

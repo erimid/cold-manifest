@@ -154,15 +154,20 @@ function attendants(sim, room) {
 }
 
 /**
- * The hand who would get to a room soonest: one of ours, awake, in plain sight, with nothing in their arms and
- * not already walking somewhere, by the fewest doors on the way (the first aboard among equals). Null if nobody can.
+ * The hand to send to a room: one of ours, awake, in plain sight, with nothing in their arms and not already
+ * walking somewhere. Somebody who is not holding a station before somebody who is (the helm is not left for a
+ * drip in the hold while anyone else can go), then by the fewest doors on the way, then the first aboard.
+ * `fit(member)` can rule people out. Null if nobody can go.
  */
-export function nearestHand(sim, room) {
+export function nearestHand(sim, room, fit = () => true) {
+  const posted = new Set(Object.values(sim.state.stations ?? {}).map((station) => station.by));
   let best = null;
   for (const member of Object.values(sim.state.crew).sort((a, b) => a.index - b.index)) {
-    if (member.owner !== 'player' || !member.alive || member.asleep || member.hidden || member.job || member.carry || member.task === 'walking' || !sim.state.rooms[member.room]) continue;
+    if (member.owner !== 'player' || !member.alive || member.asleep || member.hidden || member.job || member.carry || member.task === 'walking' || !sim.state.rooms[member.room] || !fit(member)) continue;
     const route = findRoute(sim, member.room, room, member);
-    if (route && (!best || route.length < best.steps)) best = { member, steps: route.length };
+    if (!route) continue;
+    const cost = (posted.has(member.id) ? 1000 : 0) + route.length;
+    if (!best || cost < best.cost) best = { member, cost };
   }
   return best?.member ?? null;
 }

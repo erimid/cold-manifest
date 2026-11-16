@@ -52,7 +52,7 @@
 
 import { createClock } from '../src/engine/clock.js';
 import { createContent } from '../src/engine/content.js';
-import { eventView } from '../src/narrative/events.js';
+import { eventView, nearestHand, situationViews } from '../src/narrative/events.js';
 import { findBadNumbers, hashState } from '../src/engine/hash.js';
 import { createRng } from '../src/engine/rng.js';
 import { OUTPUT_LEVELS } from '../src/sim/power.js';
@@ -517,7 +517,7 @@ function playCrossing(seed, index) {
   const { run } = sim.state;
   const contract = run.contract;
   const end = CROSSING_MINUTES * 60 * TICK_RATE;
-  const tally = { caught: 0, escapes: 0, quick: 0, routes: 0, strikes: 0, risks: {}, time: { under: 0, coast: 0, held: 0, off: 0, port: 0, pace: 0 }, sighted: 0, lines: 0, outcomes: {}, events: 0, lapsed: 0, eventContacts: 0, shots: 0, braces: 0, tolls: 0, hooks: 0, met: {}, picked: {}, locked: 0, offered: 0, inspections: 0, seized: 0, fuelBought: 0, fuelSpent: 0, repairSpent: 0, claimLeft: false, contacts: {}, contactKinds: {}, boardings: {}, staff: { crew: 0, margo: 0, dark: 0, well: 0, samples: 0 }, tired: 0, watchChanges: 0, mode: crewMode, margo: { quiet: 0, book: 0, push: 0, rating: 0, held: 0, samples: 0, hunted: 0, found: 0, stretched: 0, ownWay: 0, doubt: 0, changes: 0 } };
+  const tally = { caught: 0, escapes: 0, quick: 0, routes: 0, strikes: 0, risks: {}, time: { under: 0, coast: 0, held: 0, off: 0, port: 0, pace: 0 }, sighted: 0, lines: 0, outcomes: {}, events: 0, lapsed: 0, placed: 0, attended: 0, sends: 0, eventContacts: 0, shots: 0, braces: 0, tolls: 0, hooks: 0, met: {}, picked: {}, locked: 0, offered: 0, inspections: 0, seized: 0, fuelBought: 0, fuelSpent: 0, repairSpent: 0, claimLeft: false, contacts: {}, contactKinds: {}, boardings: {}, staff: { crew: 0, margo: 0, dark: 0, well: 0, samples: 0 }, tired: 0, watchChanges: 0, mode: crewMode, margo: { quiet: 0, book: 0, push: 0, rating: 0, held: 0, samples: 0, hunted: 0, found: 0, stretched: 0, ownWay: 0, doubt: 0, changes: 0 } };
   sim.events.on('margo.own_way', () => (tally.margo.ownWay += 1));
   sim.events.on('margo.doubt', () => (tally.margo.doubt += 1));
   sim.events.on('margo.manner', (event) => event.why !== 'order' && (tally.margo.changes += 1));
@@ -535,6 +535,9 @@ function playCrossing(seed, index) {
   });
   sim.events.on('event.chosen', (event) => (tally.picked[`${event.event}/${event.choice}`] = (tally.picked[`${event.event}/${event.choice}`] ?? 0) + 1));
   sim.events.on('event.lapsed', () => (tally.lapsed += 1));
+  sim.events.on('event.opened', (event) => event.situation !== undefined && (tally.placed += 1));
+  sim.events.on('situation.attended', () => (tally.attended += 1));
+  const sent = new Map(); // situation number -> the tick somebody was last sent to it
   sim.events.on('effect.applied', (event) => {
     if (event.effect === 'contact') tally.eventContacts += 1;
     if (event.effect === 'scene' || event.effect === 'threat') tally.hooks += 1;
@@ -628,8 +631,28 @@ function playCrossing(seed, index) {
         if (threat && rounds !== null && rounds < 1 && roundsInHold(sim) && hand) give({ type: 'weapon.load', crew: hand.id, slot });
       }
     }
+    // Situations aboard (H.7), alongside whatever else is going on: send the nearest hand to each one nobody is
+    // at (again if they never got there), answer the ones somebody is at, and put the answered ones away.
+    for (const item of situationViews(sim)) {
+      if (item.state === 'answered') give({ type: 'event.dismiss', situation: item.n });
+      else if (item.state === 'attended') {
+        const open = item.choices.filter((choice) => choice.available);
+        tally.offered += item.choices.length;
+        tally.locked += item.choices.length - open.length;
+        const pick = bot.pick(open).id;
+        give({ type: 'event.choose', situation: item.n, choice: pick });
+        if (contract.claim && item.id === contract.claim.event && pick === 'leave') tally.claimLeft = true;
+      } else if (sim.state.tick - (sent.get(item.n) ?? -1e9) > 30 * TICK_RATE) {
+        // Never whoever is flying her: the bot keeps the helm held (below), and would only call them back.
+        const hand = nearestHand(sim, item.room, (member) => sim.layout.room(member.room)?.kind !== 'helm');
+        if (hand && give({ type: 'crew.move', crew: hand.id, room: item.room, ship: 'us' }) !== false) {
+          sent.set(item.n, sim.state.tick);
+          tally.sends += 1;
+        }
+      }
+    }
     if (view) {
-      // An event on the table (S3.3): answer it with any choice that is open to us, then put it away.
+      // A decision over the radio (S3.3): answer it with any choice that is open to us, then put it away.
       if (view.result) give({ type: 'event.dismiss' });
       else {
         const open = view.choices.filter((choice) => choice.available);
@@ -1116,6 +1139,7 @@ const merged = (key) => {
 out.push('');
 out.push(`Events (S3.3): what the crossings met, from content/events/ (${transitEvents.length} events)`);
 out.push(`  met:               ${mean(crossings.map((c) => c.events)).toFixed(1)} a crossing (${sumOf('events')} in all), ${sumOf('lapsed')} left behind unanswered; crew all dead in ${crossings.filter((c) => c.crewDead).length} crossings`);
+out.push(`  aboard (H.7):      ${sumOf('placed')} situations put in a room, ${sumOf('attended')} had somebody get to them (the bot sent a hand ${sumOf('sends')} times)`);
 out.push(`  choices:           ${sumOf('offered')} shown, ${sumOf('locked')} of them locked behind a requirement the crew did not meet (${pct(sumOf('locked'), sumOf('offered'))})`);
 out.push(`  led to:            ${sumOf('eventContacts')} ships put on the scope, ${sumOf('hooks')} scene or threat hooks`);
 out.push(`  by event:          ${merged('met').map(([k, n]) => `${k} ${n}`).join(', ') || 'none'}`);

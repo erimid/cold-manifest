@@ -75,6 +75,8 @@ const helmOf = (ship) => ship.layout.rooms.find((room) => room.kind === 'helm');
  * A hit on the ship knocks `hit` off the fix and each round we fire `shot`; with the sensors or the helm dark it drains away.
  */
 export const FIX = Object.freeze({ seconds: 25, hit: 0.25, shot: 0.1, drain: 0.05 });
+/** How well a fix goes with the sensors stripped out of the ship: the helm's dead reckoning, against sensors run by the book at 1. */
+export const DEAD_RECKONING = 0.25;
 /** Money aboard at the start, until runs and contracts set it (Stage 3). */
 export const START_MONEY = 120;
 
@@ -129,7 +131,13 @@ export function weaponsPowered(ship) {
 }
 
 /** How well the sensors are working on a fix: their station's rating; a ship built without a sensors room has a fixed navigation set worth one. */
-const fixBars = (ship) => (ship.state.systems.sensors.absent ? 1 : rating(ship, 'sensors'));
+const fixBars = (ship) => {
+  const { sensors } = ship.state.systems;
+  if (sensors.absent) return 1;
+  // Cut out by a salvage crew (H.2) they cannot be mended short of a port, and a port cannot be reached without a
+  // fix: the helm works one out by dead reckoning, slowly (D-205).
+  return rating(ship, 'sensors') || (sensors.stripped ? DEAD_RECKONING : 0);
+};
 /** Can this ship take a sensor fix right now? Sensors running and the helm held. */
 export const canFix = (ship) => fixBars(ship) > 0 && hasPilot(ship);
 /** The sensor fix as a fraction, 0 to 1. */
