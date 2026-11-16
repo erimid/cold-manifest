@@ -1,12 +1,13 @@
-// Draws the ship: a top-down cutaway (brief §6, §17). All art is drawn in
-// code. The parts that never change (hull, floors, walls, stencils) are drawn
-// once to an offscreen canvas; lighting, doors and hazards are drawn on top
-// every frame.
+// Draws a ship. Ours is seen side-on, as stacked decks (D-071): back walls,
+// pipes, deck plates, ladders under the hatches, the lift shaft, crawlway
+// hatches and the old company's stencils. The enemy is drawn as a sensor
+// return (D-073): room outlines in phosphor green, nothing else. All art is
+// drawn in code. The parts that never change are drawn once to an offscreen
+// canvas; lighting, doors, hazards, the lift car and crew go on top every frame.
 //
 // The renderer only reads sim state. It never changes it.
 
 import { createRng } from '../engine/rng.js';
-import { SYSTEMS } from '../sim/systems.js';
 
 const MONO = "ui-monospace, 'SF Mono', Menlo, Consolas, 'Liberation Mono', 'Courier New', monospace";
 
@@ -25,6 +26,10 @@ const C = {
   alarm: '#ff4136',
   frost: '#cfe9ff',
   vent: '#9bd15a',
+  hold: '#2a2e33',
+  deck: '#46505c',
+  ladder: '#8a929e',
+  phosphor: '#7fe39a',
   shield: '#7fd4ff',
   doorLeaf: '#8d6a34',
   doorLocked: '#b3372f',
@@ -32,14 +37,60 @@ const C = {
 };
 
 const DOOR_THICKNESS = 0.3;
+/** How thick the deck plate under every room is drawn, in tiles. */
+const FLOOR = 0.16;
+
+/** The stencils the company painted on its walls, by room or by system: [big, small]. */
+const STENCILS = {
+  engines: ['DRIVE', 'NO NAKED FLAME'],
+  reactor: ['REACTOR', 'KEEP CLEAR · RADIATION'],
+  life_support: ['AIR PLANT', 'DO NOT OBSTRUCT INTAKES'],
+  medbay: ['FIRST AID', 'REPORT ALL INJURIES'],
+  quarters: ['BERTHS', 'LIGHTS OUT 22:00'],
+  ai_core: ['M.A.R.G.O.', 'AUTHORISED STAFF ONLY'],
+  sensors: ['SENSORS', 'DO NOT TOUCH THE DISH'],
+  helm: ['BRIDGE', 'COMPANY PROPERTY'],
+  cargo: ['CARGO 1', 'MAX LOAD 40 T'],
+  hold: ['MAIN HOLD', 'STACK NO HIGHER THAN 3'],
+  brig: ['DETENTION', 'ONE PER CELL'],
+  doors: ['DOOR CONTROL', 'DO NOT JAM'],
+  shields: ['SHIELDING', 'HIGH VOLTAGE'],
+  weapons: ['DEFENCE', 'SAFETY ON WHEN DOCKED'],
+};
+const CRATE_MARKS = ['THIS WAY UP', 'FRAGILE', 'ORE', 'COMPANY', 'NO HOOKS', ''];
 const AIRLOCK_THICKNESS = 0.42;
 
 /** Crew are drawn as numbered discs this many tiles across (radius). */
 const CREW_RADIUS = 0.42;
 const CREW_COLOURS = ['#5ec8ff', '#ffd166', '#ef7bbf', '#8be28b', '#c9a0ff', '#ff9f5e', '#7fe3d0', '#e6e6e6'];
 
-export function createShipRenderer(layout) {
+/** A renderer for `layout`. `sensor` draws it as a sensor return (the enemy). */
+export function createShipRenderer(layout, { sensor = false } = {}) {
   let cache = null; // { canvas, key }
+  let liftCar = null; // where the lift car was last drawn, in tiles: the top of the car
+  /** Places along the floor that must stay clear of crates: ladders, doorways and crawlway hatches. */
+  const clearOf = (room) => {
+    const xs = [];
+    for (const door of layout.doors) if (door.a === room.id || door.b === room.id) xs.push(door.x);
+    for (const way of layout.crawlways ?? []) if (way.hatches?.[room.id]) xs.push(way.hatches[room.id].x);
+    return xs;
+  };
+  const crateArt = (room, rng) => {
+    if (room.kind !== 'hold' && room.kind !== 'cargo') return [];
+    const crates = [];
+    const avoid = clearOf(room);
+    for (let x = 0.5; x + 1.3 < room.w - 0.4; x += 1.45) {
+      const left = room.x + x;
+      if (avoid.some((ax) => ax > left - 0.9 && ax < left + 1.3 + 0.9)) continue;
+      if (rng.next() < 0.25) continue;
+      const w = rng.range(1.0, 1.3);
+      const h = rng.range(0.7, 1.0);
+      const colour = ['#4a3f2c', '#3e4636', '#4b3a33', '#3a424c'][rng.int(4)];
+      crates.push({ x, w, h, lift: 0, colour, mark: CRATE_MARKS[rng.int(CRATE_MARKS.length)] });
+      if (rng.next() < 0.45) crates.push({ x: x + 0.1, w: w - 0.2, h: rng.range(0.6, 0.85), lift: h, colour, mark: '' });
+    }
+    return crates;
+  };
   const roomArt = new Map(
     layout.rooms.map((room) => {
       const rng = createRng(`ship-art:${layout.id}:${room.id}`);
@@ -51,6 +102,8 @@ export function createShipRenderer(layout) {
           // Where the hull crack runs: along one wall.
           crack: { side: rng.int(4), at: rng.range(0.25, 0.75), kinks: Array.from({ length: 6 }, () => rng.range(-1, 1)) },
           scuffs: Array.from({ length: 2 + rng.int(3) }, () => ({ x: rng.next(), y: rng.next(), w: rng.range(0.1, 0.4), h: rng.range(0.03, 0.08), a: rng.range(0.05, 0.14) })),
+          pipes: Array.from({ length: 1 + rng.int(2) }, () => ({ colour: ['#3f4854', '#4d4436', '#3a4a44'][rng.int(3)], width: rng.range(0.07, 0.12) })),
+          crates: crateArt(room, rng),
         },
       ];
     }),
@@ -70,14 +123,15 @@ export function createShipRenderer(layout) {
    */
   function fit(area) {
     const { bounds } = layout;
-    const extra = 1.6; // room for engine nozzles: on the left, or underneath a ship whose bow points up
+    const extra = sensor ? 0 : 1.6; // room for engine nozzles: on the left, on the right of a ship facing left, or underneath one whose bow points up
     const up = layout.facing === 'up';
     const w = bounds.w + (up ? 0 : extra);
     const h = bounds.h + (up ? extra : 0);
     const scale = Math.min(area.w / w, area.h / h);
+    const lead = up || layout.facing === 'left' ? 0 : extra;
     return {
       scale,
-      ox: area.x + (area.w - w * scale) / 2 + ((up ? 0 : extra) - bounds.x) * scale,
+      ox: area.x + (area.w - w * scale) / 2 + (lead - bounds.x) * scale,
       oy: area.y + (area.h - h * scale) / 2 - bounds.y * scale,
     };
   }
@@ -141,7 +195,7 @@ export function createShipRenderer(layout) {
     const { bounds } = layout;
 
     // Engine nozzles, behind the hull.
-    const engines = layout.roomOfSystem('engines');
+    const engines = sensor ? null : layout.roomOfSystem('engines');
     if (engines && layout.facing === 'up') {
       const base = bounds.y + bounds.h;
       for (const cx of [engines.x + 1, engines.x + engines.w - 1]) {
@@ -163,59 +217,199 @@ export function createShipRenderer(layout) {
         ctx.stroke();
       }
     } else if (engines) {
-      for (const cy of [engines.y + 1.5, engines.y + engines.h - 1.5]) {
-        const glow = ctx.createLinearGradient(bounds.x - 1.5, 0, bounds.x, 0);
+      // Facing right, the nozzles stick out of the left end; facing left, out of the right.
+      const dir = layout.facing === 'left' ? -1 : 1;
+      const edge = dir > 0 ? bounds.x : bounds.x + bounds.w;
+      const pairs = engines.h >= 6 ? [engines.y + 1.5, engines.y + engines.h - 1.5] : [engines.y + engines.h / 2];
+      for (const cy of pairs) {
+        const glow = ctx.createLinearGradient(edge - dir * 1.5, 0, edge, 0);
         glow.addColorStop(0, 'rgba(255, 138, 43, 0)');
-        glow.addColorStop(1, 'rgba(255, 138, 43, 0.5)');
+        glow.addColorStop(1, sensor ? 'rgba(127, 227, 154, 0.35)' : 'rgba(255, 138, 43, 0.5)');
         ctx.fillStyle = glow;
-        ctx.fillRect(bounds.x - 1.5, cy - 0.6, 1.5, 1.2);
-        ctx.fillStyle = '#10141a';
-        ctx.strokeStyle = C.hullEdge;
+        ctx.fillRect(Math.min(edge, edge - dir * 1.5), cy - 0.6, 1.5, 1.2);
+        ctx.fillStyle = sensor ? '#06100a' : '#10141a';
+        ctx.strokeStyle = sensor ? C.phosphor : C.hullEdge;
         ctx.lineWidth = 2 * px;
         ctx.beginPath();
-        ctx.moveTo(bounds.x + 0.1, cy - 0.75);
-        ctx.lineTo(bounds.x - 0.8, cy - 0.95);
-        ctx.lineTo(bounds.x - 0.8, cy + 0.95);
-        ctx.lineTo(bounds.x + 0.1, cy + 0.75);
+        ctx.moveTo(edge + dir * 0.1, cy - 0.75);
+        ctx.lineTo(edge - dir * 0.8, cy - 0.95);
+        ctx.lineTo(edge - dir * 0.8, cy + 0.95);
+        ctx.lineTo(edge + dir * 0.1, cy + 0.75);
         ctx.closePath();
         ctx.fill();
         ctx.stroke();
       }
     }
 
-    // Hull
-    const steel = ctx.createLinearGradient(0, bounds.y, 0, bounds.y + bounds.h);
-    steel.addColorStop(0, C.hullTop);
-    steel.addColorStop(1, C.hullBottom);
-    hullPath(ctx);
-    ctx.fillStyle = steel;
-    ctx.fill();
-    ctx.save();
-    hullPath(ctx);
-    ctx.clip();
-    ctx.strokeStyle = 'rgba(0, 0, 0, 0.28)';
-    ctx.lineWidth = px;
-    ctx.beginPath();
-    for (let x = Math.ceil(bounds.x); x < bounds.x + bounds.w; x += 2) {
-      ctx.moveTo(x + 0.5, bounds.y);
-      ctx.lineTo(x + 0.5, bounds.y + bounds.h);
+    if (sensor) {
+      hullPath(ctx);
+      ctx.fillStyle = 'rgba(4, 16, 9, 0.9)';
+      ctx.fill();
+      ctx.strokeStyle = C.phosphor;
+      ctx.lineWidth = 2 * px;
+      ctx.setLineDash([0.4, 0.25]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    } else {
+      // Hull
+      const steel = ctx.createLinearGradient(0, bounds.y, 0, bounds.y + bounds.h);
+      steel.addColorStop(0, C.hullTop);
+      steel.addColorStop(1, C.hullBottom);
+      hullPath(ctx);
+      ctx.fillStyle = steel;
+      ctx.fill();
+      ctx.save();
+      hullPath(ctx);
+      ctx.clip();
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.28)';
+      ctx.lineWidth = px;
+      ctx.beginPath();
+      for (let x = Math.ceil(bounds.x); x < bounds.x + bounds.w; x += 2) {
+        ctx.moveTo(x + 0.5, bounds.y);
+        ctx.lineTo(x + 0.5, bounds.y + bounds.h);
+      }
+      ctx.stroke();
+      ctx.restore();
+      hullPath(ctx);
+      ctx.strokeStyle = C.hullEdge;
+      ctx.lineWidth = 2 * px;
+      ctx.lineJoin = 'round';
+      ctx.stroke();
     }
-    ctx.stroke();
-    ctx.restore();
-    hullPath(ctx);
-    ctx.strokeStyle = C.hullEdge;
-    ctx.lineWidth = 2 * px;
-    ctx.lineJoin = 'round';
-    ctx.stroke();
 
-    // Rooms
+    if (sensor) {
+      drawSensorRooms(ctx, px);
+      ctx.restore();
+      drawRoomNames(ctx, view, 'rgba(150, 230, 170, 0.75)');
+      return;
+    }
+
+    // Rooms, seen side-on: the back wall, pipes under the ceiling, a deck plate underfoot.
     for (const room of layout.rooms) {
       const art = roomArt.get(room.id);
-      ctx.fillStyle = room.kind === 'corridor' ? C.corridor : room.kind === 'helm' ? C.helm : C.floor;
+      if (room.kind === 'lift') {
+        drawShaft(ctx, room, px);
+        continue;
+      }
+      ctx.fillStyle = room.kind === 'corridor' ? C.corridor : room.kind === 'helm' ? C.helm : room.kind === 'hold' || room.kind === 'cargo' ? C.hold : C.floor;
       ctx.fillRect(room.x, room.y, room.w, room.h);
 
-      // Deck plating, one plate per tile, and some wear.
-      ctx.strokeStyle = 'rgba(0, 0, 0, 0.2)';
+      // Wall panels, and some grime.
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.22)';
+      ctx.lineWidth = px;
+      ctx.beginPath();
+      for (let x = 1.5; x < room.w - 0.2; x += 1.5) {
+        ctx.moveTo(room.x + x, room.y + 0.45);
+        ctx.lineTo(room.x + x, room.y + room.h - FLOOR);
+      }
+      ctx.stroke();
+      for (const scuff of art.scuffs) {
+        ctx.fillStyle = `rgba(0, 0, 0, ${scuff.a})`;
+        ctx.fillRect(room.x + scuff.x * room.w * (1 - scuff.w), room.y + 0.5 + scuff.y * (room.h - 1) * (1 - scuff.h), scuff.w * room.w, scuff.h * room.h);
+      }
+
+      // Pipes and cable trays under the ceiling.
+      for (const [i, pipe] of art.pipes.entries()) {
+        const py = room.y + 0.14 + i * 0.16;
+        ctx.strokeStyle = pipe.colour;
+        ctx.lineWidth = pipe.width;
+        ctx.beginPath();
+        ctx.moveTo(room.x, py);
+        ctx.lineTo(room.x + room.w, py);
+        ctx.stroke();
+      }
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
+      for (let x = 0.7; x < room.w; x += 1.6) ctx.fillRect(room.x + x, room.y + 0.06, 0.06, 0.42);
+
+      // Cargo: crates stacked against the back wall, clear of ladders and hatches.
+      for (const crate of art.crates) drawCrate(ctx, room, crate, px);
+
+      // The old owners' stencils, faded into the paint.
+      const stencil = STENCILS[room.id] ?? (room.system && STENCILS[room.system]) ?? null;
+      if (stencil) {
+        const [big, small] = stencil;
+        const size = Math.min(room.h * 0.2, (room.w * 0.8) / (big.length * 0.64));
+        const cx = room.x + room.w / 2;
+        const cy = room.y + room.h * 0.45;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = 'rgba(255, 179, 71, 0.16)';
+        ctx.font = `700 ${size}px ${MONO}`;
+        ctx.fillText(big, cx, cy);
+        if (small) {
+          ctx.fillStyle = 'rgba(233, 220, 195, 0.13)';
+          ctx.font = `700 ${Math.min(0.24, size * 0.42)}px ${MONO}`;
+          ctx.fillText(small, cx, cy + size * 0.75);
+        }
+        // Hazard chevrons under the big ones.
+        if (room.system) {
+          ctx.fillStyle = 'rgba(255, 179, 71, 0.08)';
+          for (let k = -2; k < 2; k++) ctx.fillRect(cx + k * 0.5 + 0.1, room.y + room.h - FLOOR - 0.22, 0.3, 0.12);
+        }
+      }
+
+      // The deck plate.
+      ctx.fillStyle = C.deck;
+      ctx.fillRect(room.x, room.y + room.h - FLOOR, room.w, FLOOR);
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.4)';
+      ctx.lineWidth = px;
+      ctx.beginPath();
+      for (let x = 0.25; x < room.w; x += 0.25) {
+        ctx.moveTo(room.x + x, room.y + room.h - FLOOR);
+        ctx.lineTo(room.x + x, room.y + room.h);
+      }
+      ctx.stroke();
+    }
+
+    // Ladders under the hatches, in the room below.
+    for (const door of layout.doors) {
+      if (door.vertical || door.airlock) continue;
+      const below = [door.a, door.b].map((id) => layout.room(id)).find((r) => r && Math.abs(r.y - door.y) < 1e-6);
+      const above = [door.a, door.b].map((id) => layout.room(id)).find((r) => r && Math.abs(r.y + r.h - door.y) < 1e-6);
+      if (below) drawLadder(ctx, door.x, door.y, below.y + below.h - FLOOR, px);
+      if (above) drawLadder(ctx, door.x, door.y - 0.75, door.y, px, true);
+    }
+
+    // Service crawlway hatches, and the narrow ducts only the creature fits.
+    for (const way of layout.crawlways ?? []) {
+      for (const id of [way.a, way.b]) drawCrawlHatch(ctx, way.hatches[id], way.creature, px);
+    }
+
+    // Walls
+    for (const room of layout.rooms) {
+      ctx.strokeStyle = C.wall;
+      ctx.lineWidth = 3.5 * px;
+      ctx.strokeRect(room.x, room.y, room.w, room.h);
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.045)';
+      ctx.lineWidth = px;
+      ctx.strokeRect(room.x + 3 * px, room.y + 3 * px, room.w - 6 * px, room.h - 6 * px);
+    }
+    ctx.restore();
+    drawRoomNames(ctx, view, 'rgba(233, 220, 195, 0.62)');
+  }
+
+  /** Room names, in screen pixels so the text stays crisp. */
+  function drawRoomNames(ctx, view, colour) {
+    const s = view.scale;
+    const fontPx = Math.max(9, Math.min(13, s * 0.36));
+    ctx.font = `700 ${fontPx}px ${MONO}`;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.fillStyle = colour;
+    for (const room of layout.rooms) {
+      const text = room.name.toUpperCase();
+      const maxWidth = room.w * s - 12;
+      if (ctx.measureText(text).width > maxWidth && (room.kind === 'corridor' || room.kind === 'lift')) continue;
+      ctx.fillText(text, view.ox + room.x * s + 7, view.oy + room.y * s + (sensor ? 5 : 0.5 * s), maxWidth);
+    }
+  }
+
+  /** A sensor return: room outlines in phosphor green on black, nothing of the paint or the clutter. */
+  function drawSensorRooms(ctx, px) {
+    for (const room of layout.rooms) {
+      ctx.fillStyle = 'rgba(20, 60, 36, 0.55)';
+      ctx.fillRect(room.x, room.y, room.w, room.h);
+      ctx.strokeStyle = 'rgba(120, 230, 150, 0.16)';
       ctx.lineWidth = px;
       ctx.beginPath();
       for (let x = 1; x < room.w; x++) {
@@ -227,70 +421,107 @@ export function createShipRenderer(layout) {
         ctx.lineTo(room.x + room.w, room.y + y);
       }
       ctx.stroke();
-      for (const scuff of art.scuffs) {
-        ctx.fillStyle = `rgba(0, 0, 0, ${scuff.a})`;
-        ctx.fillRect(room.x + scuff.x * room.w * (1 - scuff.w), room.y + scuff.y * room.h * (1 - scuff.h), scuff.w * room.w, scuff.h * room.h);
-      }
-
-      if (room.kind === 'corridor') {
-        // A worn guide line down the middle.
-        ctx.strokeStyle = 'rgba(168, 116, 44, 0.45)';
-        ctx.lineWidth = 2 * px;
-        ctx.setLineDash([0.5, 0.35]);
-        ctx.beginPath();
-        ctx.moveTo(room.x + 0.4, room.y + room.h / 2);
-        ctx.lineTo(room.x + room.w - 0.4, room.y + room.h / 2);
-        ctx.stroke();
-        ctx.setLineDash([]);
-      } else {
-        // The company's stencil, big and faded, on the floor.
-        const code = room.system ? SYSTEMS[room.system].code : room.kind === 'helm' ? 'HELM' : '';
-        const size = Math.min(room.h * 0.5, (room.w * 0.82) / (code.length * 0.62));
-        ctx.fillStyle = 'rgba(255, 179, 71, 0.13)';
-        ctx.font = `700 ${size}px ${MONO}`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(code, room.x + room.w / 2, room.y + room.h / 2 + 0.15);
-      }
-
-      // Vent grille, in rooms the crawlspaces reach.
-      if (layout.ventExits(room.id).length) {
-        const gx = room.x + room.w - 0.95;
-        const gy = room.y + room.h - 0.65;
-        ctx.fillStyle = '#0d1116';
-        ctx.fillRect(gx, gy, 0.7, 0.42);
-        ctx.strokeStyle = 'rgba(160, 172, 188, 0.5)';
-        ctx.lineWidth = px;
-        ctx.strokeRect(gx, gy, 0.7, 0.42);
-        ctx.beginPath();
-        for (let i = 1; i < 5; i++) {
-          ctx.moveTo(gx + i * 0.14, gy + 0.06);
-          ctx.lineTo(gx + i * 0.14, gy + 0.36);
-        }
-        ctx.stroke();
-      }
-
-      // Walls
-      ctx.strokeStyle = C.wall;
-      ctx.lineWidth = 3.5 * px;
-      ctx.strokeRect(room.x, room.y, room.w, room.h);
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.045)';
-      ctx.lineWidth = px;
-      ctx.strokeRect(room.x + 3 * px, room.y + 3 * px, room.w - 6 * px, room.h - 6 * px);
     }
-    ctx.restore();
-
-    // Room names, in screen pixels so the text stays crisp.
-    const fontPx = Math.max(9, Math.min(13, s * 0.36));
-    ctx.font = `700 ${fontPx}px ${MONO}`;
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'top';
-    ctx.fillStyle = 'rgba(233, 220, 195, 0.62)';
     for (const room of layout.rooms) {
-      const text = room.name.toUpperCase();
-      const maxWidth = room.w * s - 12;
-      if (ctx.measureText(text).width > maxWidth && room.kind === 'corridor') continue;
-      ctx.fillText(text, view.ox + room.x * s + 7, view.oy + room.y * s + 6, maxWidth);
+      ctx.strokeStyle = C.phosphor;
+      ctx.lineWidth = 2 * px;
+      ctx.strokeRect(room.x, room.y, room.w, room.h);
+    }
+  }
+
+  function drawShaft(ctx, room, px) {
+    ctx.fillStyle = '#12161c';
+    ctx.fillRect(room.x, room.y, room.w, room.h);
+    ctx.strokeStyle = '#3d4552';
+    ctx.lineWidth = 3 * px;
+    ctx.beginPath();
+    for (const x of [room.x + 0.18, room.x + room.w - 0.18]) {
+      ctx.moveTo(x, room.y);
+      ctx.lineTo(x, room.y + room.h);
+    }
+    ctx.stroke();
+    // A landing sill at every deck the shaft passes.
+    ctx.fillStyle = C.deck;
+    for (const deck of layout.decks ?? []) {
+      const bottom = deck.y + deck.h;
+      if (bottom > room.y + 1e-6 && bottom <= room.y + room.h + 1e-6) ctx.fillRect(room.x, bottom - FLOOR / 2, 0.35, FLOOR / 2);
+    }
+    ctx.fillStyle = 'rgba(255, 179, 71, 0.14)';
+    ctx.font = `700 0.34px ${MONO}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.save();
+    ctx.translate(room.x + room.w / 2, room.y + room.h / 2);
+    ctx.rotate(-Math.PI / 2);
+    ctx.fillText('LIFT · MIND THE GAP', 0, 0);
+    ctx.restore();
+  }
+
+  function drawLadder(ctx, x, top, bottom, px, handles = false) {
+    ctx.strokeStyle = C.ladder;
+    ctx.lineWidth = 2.5 * px;
+    ctx.beginPath();
+    for (const rx of [x - 0.27, x + 0.27]) {
+      ctx.moveTo(rx, top);
+      ctx.lineTo(rx, bottom);
+    }
+    if (!handles) {
+      for (let y = top + 0.3; y < bottom - 0.05; y += 0.34) {
+        ctx.moveTo(x - 0.27, y);
+        ctx.lineTo(x + 0.27, y);
+      }
+    }
+    ctx.stroke();
+  }
+
+  function drawCrawlHatch(ctx, at, creatureOnly, px) {
+    if (creatureOnly) {
+      // A duct grille: round, small, nothing written on it.
+      ctx.fillStyle = '#0b0e12';
+      ctx.beginPath();
+      ctx.arc(at.x, at.y, 0.2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(160, 172, 188, 0.4)';
+      ctx.lineWidth = px;
+      ctx.stroke();
+      return;
+    }
+    const w = 0.62;
+    const h = 0.46;
+    ctx.fillStyle = '#0d1116';
+    ctx.fillRect(at.x - w / 2, at.y - h / 2, w, h);
+    ctx.strokeStyle = 'rgba(155, 209, 90, 0.55)';
+    ctx.lineWidth = 1.5 * px;
+    ctx.strokeRect(at.x - w / 2, at.y - h / 2, w, h);
+    ctx.beginPath();
+    for (let i = 1; i < 5; i++) {
+      ctx.moveTo(at.x - w / 2 + (i * w) / 5, at.y - h / 2 + 0.06);
+      ctx.lineTo(at.x - w / 2 + (i * w) / 5, at.y + h / 2 - 0.06);
+    }
+    ctx.stroke();
+  }
+
+  function drawCrate(ctx, room, crate, px) {
+    const x = room.x + crate.x;
+    const y = room.y + room.h - FLOOR - crate.h - crate.lift;
+    ctx.fillStyle = crate.colour;
+    ctx.fillRect(x, y, crate.w, crate.h);
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.5)';
+    ctx.lineWidth = 1.5 * px;
+    ctx.strokeRect(x, y, crate.w, crate.h);
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + crate.w, y + crate.h);
+    ctx.moveTo(x + crate.w, y);
+    ctx.lineTo(x, y + crate.h);
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.22)';
+    ctx.stroke();
+    if (crate.mark) {
+      ctx.fillStyle = 'rgba(233, 220, 195, 0.18)';
+      ctx.font = `700 ${crate.h * 0.24}px ${MONO}`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(crate.mark, x + crate.w / 2, y + crate.h / 2);
     }
   }
 
@@ -345,8 +576,10 @@ export function createShipRenderer(layout) {
       return;
     }
 
-    // Lamp light: a warm pool, strongest in the middle.
-    if (r.light > 0) {
+    // Lamp light: a warm pool, strongest in the middle. A sensor return shows no lamps.
+    if (sensor) {
+      // nothing: hazards only
+    } else if (r.light > 0) {
       const pool = ctx.createRadialGradient(x + w / 2, y + h / 2, 0, x + w / 2, y + h / 2, Math.max(w, h) * 0.7);
       pool.addColorStop(0, `rgba(255, 190, 110, ${0.2 * r.light})`);
       pool.addColorStop(1, 'rgba(255, 150, 60, 0)');
@@ -354,7 +587,7 @@ export function createShipRenderer(layout) {
       ctx.fillRect(x, y, w, h);
     }
     // Darkness where the lamps are off.
-    if (r.light < 1) {
+    if (r.light < 1 && !sensor) {
       ctx.fillStyle = `rgba(3, 5, 9, ${0.82 * (1 - r.light)})`;
       ctx.fillRect(x, y, w, h);
     }
@@ -453,6 +686,81 @@ export function createShipRenderer(layout) {
       if (r.breach > 0) badge((cx, cy) => { ctx.moveTo(cx, cy - 10); ctx.lineTo(cx + 10, cy); ctx.lineTo(cx, cy + 10); ctx.lineTo(cx - 10, cy); ctx.closePath(); }, 'B');
       if (lowAir) badge((cx, cy) => ctx.arc(cx, cy, 9, 0, Math.PI * 2), 'O');
     }
+  }
+
+  /** The lift car: with whoever is riding it, or parked where it last stopped. Lit while door control has power. */
+  function drawLift(ctx, view, state, alpha) {
+    const s = view.scale;
+    for (const room of layout.rooms) {
+      if (room.kind !== 'lift') continue;
+      const deckH = (layout.decks ?? []).find((d) => Math.abs(d.y - room.y) < 1e-6)?.h ?? 3;
+      const carH = deckH - 0.2;
+      const rider = Object.values(state.crew).find((m) => m.room === room.id && m.alive);
+      const bottom = room.y + room.h;
+      let top = liftCar ?? bottom - carH;
+      if (rider) top = crewAt(rider, alpha).y + 0.5 - carH;
+      top = Math.max(room.y + 0.05, Math.min(bottom - carH, top));
+      liftCar = top;
+      const powered = (state.systems.doors?.power ?? 0) > 0;
+      const x = view.ox + (room.x + 0.3) * s;
+      const y = view.oy + top * s;
+      const w = (room.w - 0.6) * s;
+      const h = carH * s;
+      ctx.fillStyle = powered ? 'rgba(255, 190, 110, 0.12)' : 'rgba(10, 12, 16, 0.6)';
+      ctx.fillRect(x, y, w, h);
+      ctx.strokeStyle = powered ? C.amberDim : '#3d4552';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(x, y, w, h);
+      // The cage: bars, and the cable it hangs from.
+      ctx.beginPath();
+      for (let i = 1; i < 4; i++) {
+        ctx.moveTo(x + (w * i) / 4, y);
+        ctx.lineTo(x + (w * i) / 4, y + h * 0.35);
+      }
+      ctx.moveTo(x + w / 2, view.oy + room.y * s);
+      ctx.lineTo(x + w / 2, y);
+      ctx.stroke();
+      if (!powered) {
+        ctx.fillStyle = C.alarm;
+        ctx.font = `700 ${Math.max(9, Math.min(12, s * 0.3))}px ${MONO}`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.save();
+        ctx.translate(x + w / 2, y + h / 2);
+        ctx.rotate(-Math.PI / 2);
+        ctx.fillText('NO POWER', 0, 0);
+        ctx.restore();
+        ctx.textAlign = 'start';
+        ctx.textBaseline = 'alphabetic';
+      }
+    }
+  }
+
+  /** The crawlways overlaid: a dashed run from hatch to hatch, labelled. */
+  function drawCrawlways(ctx, view) {
+    const s = view.scale;
+    ctx.lineWidth = 2;
+    ctx.setLineDash([5, 5]);
+    for (const way of layout.crawlways ?? []) {
+      const a = way.hatches[way.a];
+      const b = way.hatches[way.b];
+      ctx.strokeStyle = way.creature ? 'rgba(255, 65, 54, 0.75)' : C.vent;
+      ctx.beginPath();
+      ctx.moveTo(view.ox + a.x * s, view.oy + a.y * s);
+      ctx.lineTo(view.ox + b.x * s, view.oy + b.y * s);
+      ctx.stroke();
+    }
+    ctx.setLineDash([]);
+    ctx.font = `700 ${Math.max(8, Math.min(11, s * 0.28))}px ${MONO}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    for (const way of layout.crawlways ?? []) {
+      const at = way.hatches[way.a];
+      ctx.fillStyle = way.creature ? 'rgba(255, 65, 54, 0.9)' : C.vent;
+      ctx.fillText(way.creature ? 'DUCT' : 'SERVICE WAY', view.ox + at.x * s, view.oy + (at.y - 0.3) * s);
+    }
+    ctx.textAlign = 'start';
+    ctx.textBaseline = 'alphabetic';
   }
 
   function drawDoor(ctx, view, door, d, openness) {
@@ -728,28 +1036,16 @@ export function createShipRenderer(layout) {
    * Crew are drawn by whose they are: the enemy's in alarm red with an initial,
    * wherever they stand. Anyone in the docking tube is drawn faded.
    */
-  function draw(ctx, { view, width, height, dpr, state, time, alpha = 1, selected, selectedCrew = null, showVents = false, reduceFlicker = false, clear = true, charges = [], chosenWeapon = null, aimed = null, inviting = false }) {
+  function draw(ctx, { view, width, height, dpr, state, time, alpha = 1, selected, selectedCrew = null, showCrawlways = false, reduceFlicker = false, clear = true, charges = [], chosenWeapon = null, aimed = null, inviting = false }) {
     if (clear) ctx.clearRect(0, 0, width, height);
     ctx.drawImage(staticLayer(view, width, height, dpr), 0, 0, width, height);
     const s = view.scale;
 
     for (const room of layout.rooms) drawRoomLive(ctx, view, room, state.rooms[room.id], time, reduceFlicker);
+    drawLift(ctx, view, state, alpha);
     for (const door of layout.doors) drawDoor(ctx, view, door, state.doors[door.id], state.doors[door.id].openness);
 
-    if (showVents) {
-      ctx.strokeStyle = C.vent;
-      ctx.lineWidth = 2;
-      ctx.setLineDash([5, 5]);
-      ctx.beginPath();
-      for (const vent of layout.vents) {
-        const a = layout.room(vent.a);
-        const b = layout.room(vent.b);
-        ctx.moveTo(view.ox + (a.x + a.w / 2) * s, view.oy + (a.y + a.h / 2) * s);
-        ctx.lineTo(view.ox + (b.x + b.w / 2) * s, view.oy + (b.y + b.h / 2) * s);
-      }
-      ctx.stroke();
-      ctx.setLineDash([]);
-    }
+    if (showCrawlways) drawCrawlways(ctx, view);
 
     // The dead first, so the living are drawn over them.
     const crew = Object.values(state.crew);

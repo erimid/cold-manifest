@@ -122,7 +122,7 @@ async function touchTests(browser) {
       assert.ok(t.x >= 0 && t.x + t.w <= 1080, `${t.id} is off the side`);
       assert.ok(t.y >= top && t.y + t.h <= dock, `${t.id} runs under a bar`);
     }
-    assert.equal(all.filter((t) => t.kind === 'room').length, 15);
+    assert.equal(all.filter((t) => t.kind === 'room').length, 17);
   });
 
   await check('tap a room to see its status', async () => {
@@ -328,15 +328,16 @@ async function touchTests(browser) {
   await check('crew: a locked door on the only way refuses the order and says why', async () => {
     await game(page, () => window.coldManifest.sim.enqueue({ type: 'door.set', door: 'd_door_control', state: 'locked' }));
     await doorIs(page, 'd_door_control', 'locked', 0);
-    await page.tap('#crew-dace');
+    // Okoro: Dace is the engineer, and would simply crawl in through the service way.
+    await page.tap('#crew-okoro');
     const t = await target(page, 'door_control');
     await page.touchscreen.tap(t.mx, t.my);
     await sleep(200);
     assert.match(await page.textContent('#status'), /no way through/i);
-    assert.equal(await game(page, () => window.coldManifest.sim.state.crew.dace.goal), null);
+    assert.equal(await game(page, () => window.coldManifest.sim.state.crew.okoro.goal), null);
     await game(page, () => window.coldManifest.sim.enqueue({ type: 'door.set', door: 'd_door_control', state: 'closed' }));
     await doorIs(page, 'd_door_control', 'closed', 0);
-    await page.tap('#crew-dace');
+    await page.tap('#crew-okoro');
   });
 
   await check('venting: opening the airlock from the panel empties the room, closing it lets the air back', async () => {
@@ -1089,7 +1090,10 @@ async function boardingTests(browser) {
     await page.tap('#btn-dbg-menu');
     await page.tap('#btn-dbg-end-boardUs');
     // (Their captain may have sent a party of its own already: our shields start unpowered.)
-    await page.waitForFunction(() => Object.values(window.coldManifest.sim.state.crew).some((m) => m.owner === 'enemy' && m.alive), null, { timeout: 4000 });
+    await page.waitForFunction(() => Object.values(window.coldManifest.sim.state.crew).some((m) => m.owner === 'enemy' && m.alive), null, { timeout: 4000 }).catch(async (err) => {
+      const why = await game(page, () => ({ status: document.querySelector('#status')?.textContent, them: Object.values(window.coldManifest.sim.state.fight?.enemy.crew ?? {}).map((m) => `${m.id}:${m.room}:${m.task}:${m.alive}`) }));
+      throw new Error(`${err.message}\n${JSON.stringify(why)}`);
+    });
     const tappable = await game(page, () => window.coldManifest.shipView.debug.targets().filter((x) => x.kind === 'crew').map((x) => x.id).sort());
     assert.deepEqual(tappable, ['dace', 'ilse', 'okoro']);
     assert.equal(await page.$$eval('.crewchip:not(.weapon)', (nodes) => nodes.length), 3, 'no chips for their crew');
@@ -1110,14 +1114,11 @@ async function boardingTests(browser) {
 
 const server = await startServer();
 const browser = await chromium.launch(process.env.PW_CHROMIUM ? { executablePath: process.env.PW_CHROMIUM } : {});
+// E2E_ONLY=boarding (or a comma list of suite names) runs just those suites, for chasing one failure.
+const only = process.env.E2E_ONLY?.split(',');
+const suites = { touch: touchTests, desktop: desktopTests, voice: voiceTests, fight: fightTests, hit: hitTests, ending: endingTests, boarding: boardingTests };
 try {
-  await touchTests(browser);
-  await desktopTests(browser);
-  await voiceTests(browser);
-  await fightTests(browser);
-  await hitTests(browser);
-  await endingTests(browser);
-  await boardingTests(browser);
+  for (const [name, run] of Object.entries(suites)) if (!only || only.includes(name)) await run(browser);
 } finally {
   await browser.close();
   server.kill();

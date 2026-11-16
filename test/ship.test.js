@@ -15,11 +15,13 @@ const door = (data, id) => data.doors.find((d) => d.id === id);
 
 test('the Margin of Error is a sound layout of the size the brief asks for', () => {
   assert.deepEqual(validateLayout(SHIP), []);
-  assert.ok(SHIP.rooms.length >= 12 && SHIP.rooms.length <= 16, `${SHIP.rooms.length} rooms`);
+  const rooms = SHIP.rooms.filter((r) => r.kind !== 'lift').length; // the lift shaft is not a room you work in
+  assert.ok(rooms >= 12 && rooms <= 16, `${rooms} rooms`);
   const layout = buildLayout(SHIP);
   for (const system of SYSTEM_IDS) assert.ok(layout.roomOfSystem(system), `no room for ${system}`);
   assert.equal(layout.doors.filter((d) => d.airlock).length, 4);
-  assert.equal(layout.vents.length, 9);
+  assert.equal(layout.crawlways.length, 12);
+  assert.deepEqual(layout.decks.map((d) => d.id), ['upper', 'main', 'lower', 'hold']);
 });
 
 test('the built layout answers the questions the sim will ask', () => {
@@ -32,17 +34,33 @@ test('the built layout answers the questions the sim will ask', () => {
     layout.exits('engines').map((e) => e.to).sort(),
     ['aft_corridor', 'cargo', 'reactor', 'space'],
   );
-  assert.deepEqual(layout.ventExits('cargo').map((e) => e.to).sort(), ['brig', 'engines', 'reactor']);
-  assert.deepEqual(layout.ventExits('medbay'), [], 'the medbay has no vent');
+  assert.deepEqual(layout.crawlExits('cargo').map((e) => e.to).sort(), ['brig', 'engines']);
+  assert.deepEqual(layout.crawlExits('medbay').map((e) => e.to), ['life_support']);
+  assert.deepEqual(layout.crawlExits('brig').filter((e) => e.creature).map((e) => e.to), ['hold'], 'a duct only the creature fits');
+  assert.equal(layout.room('lift').kind, 'lift');
   assert.deepEqual(layout.exits('nowhere'), []);
   assert.ok(layout.bounds.w > 30 && layout.bounds.h > 12);
 });
 
-test('the vent network reaches places the doors would make you walk around to', () => {
+test('the crawlways reach places the doors would make you walk around to', () => {
   const layout = buildLayout(SHIP);
-  // Cargo to reactor is one crawl, but two doors by foot.
-  assert.ok(layout.ventExits('cargo').some((e) => e.to === 'reactor'));
-  assert.ok(!layout.exits('cargo').some((e) => e.to === 'reactor'));
+  // Cargo to the brig is one crawl through the wall, but no door.
+  assert.ok(layout.crawlExits('cargo').some((e) => e.to === 'brig'));
+  assert.ok(!layout.exits('cargo').some((e) => e.to === 'brig'));
+  // Every crawlway has a hatch on each side, inside its room.
+  for (const c of layout.crawlways) {
+    for (const id of [c.a, c.b]) {
+      const r = layout.room(id);
+      const h = c.hatches[id];
+      assert.ok(h.x > r.x && h.x < r.x + r.w && h.y > r.y && h.y < r.y + r.h, `${c.id} hatch outside ${id}`);
+    }
+  }
+});
+
+test('rooms sit on decks, and the lift is no place for a system', () => {
+  assert.ok(problemsAfter((d) => (room(d, 'brig').h = 2)).some((p) => /deck/.test(p)));
+  assert.ok(problemsAfter((d) => (d.decks[1].y = 2)).some((p) => /deck/.test(p)));
+  assert.ok(problemsAfter((d) => (room(d, 'lift').system = 'sensors')).some((p) => /lift/.test(p)));
 });
 
 test('wallOf finds the wall a doorway sits on', () => {
@@ -85,11 +103,13 @@ test('every system needs exactly one room', () => {
   assert.ok(problemsAfter((d) => (room(d, 'bridge').system = 'teleporter')).some((p) => /unknown system/.test(p)));
 });
 
-test('duplicate ids, bad vents and a missing hull are caught', () => {
+test('duplicate ids, bad crawlways and a missing hull are caught', () => {
   assert.ok(problemsAfter((d) => d.rooms.push({ ...room(d, 'brig'), x: 40 })).some((p) => /duplicate room id/.test(p)));
   assert.ok(problemsAfter((d) => d.doors.push({ ...door(d, 'd_brig') })).some((p) => /duplicate door id/.test(p)));
-  assert.ok(problemsAfter((d) => (d.vents[0].b = 'attic')).some((p) => /both ends must be rooms/.test(p)));
-  assert.ok(problemsAfter((d) => (d.vents[0].b = d.vents[0].a)).some((p) => /same room/.test(p)));
+  assert.ok(problemsAfter((d) => (d.crawlways[0].b = 'attic')).some((p) => /both ends must be rooms|room/.test(p)));
+  assert.ok(problemsAfter((d) => (d.crawlways[0].b = d.crawlways[0].a)).some((p) => /same room/.test(p)));
+  assert.ok(problemsAfter((d) => Object.assign(d.crawlways[0], { a: 'engines', b: 'bridge' })).some((p) => /wall/.test(p)));
+  assert.ok(problemsAfter((d) => (d.vents = [])).some((p) => /crawlways/.test(p)));
   assert.ok(problemsAfter((d) => (d.hull = [[0, 0]])).some((p) => /hull/.test(p)));
   assert.ok(problemsAfter((d) => (room(d, 'brig').w = 2.5)).some((p) => /whole tiles/.test(p)));
 });

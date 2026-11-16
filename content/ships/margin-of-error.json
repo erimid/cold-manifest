@@ -1,88 +1,122 @@
 {
-  "note": "The starting ship. Bow points right. Coordinates are whole tiles; door x and y are the middle of the doorway on the shared wall. See src/sim/ship.js for the format.",
+  "note": "The starting ship, drawn side-on (D-071): bow to the right, decks stacked top to bottom, so a room's floor is its bottom edge. Coordinates are whole tiles; door x and y are the middle of the doorway on the shared wall, and a door in a floor or ceiling is a hatch with a ladder. See src/sim/ship.js for the format.",
   "items": [
     {
       "id": "margin-of-error",
       "name": "Margin of Error",
       "class": "Halloran-pattern bulk freighter, third owner",
+      "decks": [
+        { "id": "upper", "name": "Upper deck", "y": 0, "h": 3 },
+        { "id": "main", "name": "Main deck", "y": 3, "h": 3 },
+        { "id": "lower", "name": "Lower deck", "y": 6, "h": 3 },
+        { "id": "hold", "name": "Hold deck", "y": 9, "h": 3 }
+      ],
       "rooms": [
-        { "id": "engines", "name": "Engines", "system": "engines", "x": 0, "y": 4, "w": 4, "h": 6 },
-        { "id": "reactor", "name": "Reactor", "system": "reactor", "x": 4, "y": 1, "w": 5, "h": 5 },
-        { "id": "life_support", "name": "Life support", "system": "life_support", "x": 9, "y": 2, "w": 4, "h": 4 },
-        { "id": "medbay", "name": "Medbay", "system": "medbay", "x": 13, "y": 2, "w": 4, "h": 4, "jettison": true },
-        { "id": "quarters", "name": "Quarters and mess", "system": "quarters", "x": 17, "y": 2, "w": 5, "h": 4, "jettison": true },
-        { "id": "ai_core", "name": "AI core", "system": "ai_core", "x": 22, "y": 2, "w": 4, "h": 4 },
-        { "id": "sensors", "name": "Sensors", "system": "sensors", "x": 27, "y": 2, "w": 3, "h": 3, "jettison": true },
-        { "id": "bridge", "name": "Bridge", "kind": "helm", "x": 27, "y": 5, "w": 4, "h": 4 },
-        { "id": "aft_corridor", "name": "Aft corridor", "kind": "corridor", "x": 4, "y": 6, "w": 12, "h": 2 },
-        { "id": "fore_corridor", "name": "Fore corridor", "kind": "corridor", "x": 16, "y": 6, "w": 11, "h": 2 },
-        { "id": "cargo", "name": "Cargo hold", "system": "cargo", "x": 4, "y": 8, "w": 7, "h": 5, "jettison": true },
-        { "id": "brig", "name": "Brig", "system": "brig", "x": 11, "y": 8, "w": 3, "h": 3, "jettison": true },
-        { "id": "door_control", "name": "Door control", "system": "doors", "x": 14, "y": 8, "w": 3, "h": 3, "jettison": true },
-        { "id": "shields", "name": "Shields", "system": "shields", "x": 17, "y": 8, "w": 4, "h": 4, "jettison": true },
-        { "id": "weapons", "name": "Weapons", "system": "weapons", "x": 21, "y": 8, "w": 5, "h": 4, "jettison": true }
+        { "id": "engines", "name": "Engines", "system": "engines", "x": 0, "y": 0, "w": 4, "h": 9 },
+        { "id": "reactor", "name": "Reactor", "system": "reactor", "x": 4, "y": 0, "w": 5, "h": 3 },
+        { "id": "life_support", "name": "Life support", "system": "life_support", "x": 9, "y": 0, "w": 3, "h": 3 },
+        { "id": "medbay", "name": "Medbay", "system": "medbay", "jettison": true, "x": 12, "y": 0, "w": 4, "h": 3 },
+        { "id": "quarters", "name": "Quarters and mess", "system": "quarters", "jettison": true, "x": 16, "y": 0, "w": 5, "h": 3 },
+        { "id": "ai_core", "name": "AI core", "system": "ai_core", "x": 21, "y": 0, "w": 3, "h": 3 },
+        { "id": "sensors", "name": "Sensors", "system": "sensors", "jettison": true, "x": 24, "y": 0, "w": 3, "h": 3 },
+        { "id": "bridge", "name": "Bridge", "kind": "helm", "x": 27, "y": 0, "w": 4, "h": 6 },
+        { "id": "aft_corridor", "name": "Aft corridor", "kind": "corridor", "x": 4, "y": 3, "w": 14, "h": 3 },
+        { "id": "fore_corridor", "name": "Fore corridor", "kind": "corridor", "x": 18, "y": 3, "w": 9, "h": 3 },
+        { "id": "cargo", "name": "Cargo hold", "system": "cargo", "jettison": true, "x": 4, "y": 6, "w": 8, "h": 6 },
+        { "id": "brig", "name": "Brig", "system": "brig", "jettison": true, "x": 12, "y": 6, "w": 3, "h": 3 },
+        { "id": "door_control", "name": "Door control", "system": "doors", "jettison": true, "x": 15, "y": 6, "w": 3, "h": 3 },
+        { "id": "shields", "name": "Shields", "system": "shields", "jettison": true, "x": 18, "y": 6, "w": 4, "h": 3 },
+        { "id": "weapons", "name": "Weapons", "system": "weapons", "jettison": true, "x": 22, "y": 6, "w": 5, "h": 3 },
+        { "id": "hold", "name": "Main hold", "kind": "hold", "jettison": true, "x": 12, "y": 9, "w": 15, "h": 3 },
+        { "id": "lift", "name": "Lift", "kind": "lift", "x": 27, "y": 6, "w": 2, "h": 6 }
       ],
       "doors": [
-        { "id": "d_engines_reactor", "a": "engines", "b": "reactor", "x": 4, "y": 5, "vertical": true },
-        { "id": "d_engines_corridor", "a": "engines", "b": "aft_corridor", "x": 4, "y": 7, "vertical": true },
-        { "id": "d_engines_cargo", "a": "engines", "b": "cargo", "x": 4, "y": 9, "vertical": true },
-        { "id": "d_reactor", "a": "reactor", "b": "aft_corridor", "x": 6.5, "y": 6, "vertical": false },
-        { "id": "d_life_support", "a": "life_support", "b": "aft_corridor", "x": 11, "y": 6, "vertical": false },
-        { "id": "d_medbay", "a": "medbay", "b": "aft_corridor", "x": 14.5, "y": 6, "vertical": false },
-        { "id": "d_medbay_quarters", "a": "medbay", "b": "quarters", "x": 17, "y": 4, "vertical": true },
-        { "id": "d_quarters", "a": "quarters", "b": "fore_corridor", "x": 19.5, "y": 6, "vertical": false },
-        { "id": "d_ai_core", "a": "ai_core", "b": "fore_corridor", "x": 24, "y": 6, "vertical": false },
-        { "id": "d_sensors", "a": "sensors", "b": "bridge", "x": 28.5, "y": 5, "vertical": false },
-        { "id": "d_bridge", "a": "fore_corridor", "b": "bridge", "x": 27, "y": 7, "vertical": true },
-        { "id": "d_bulkhead", "a": "aft_corridor", "b": "fore_corridor", "x": 16, "y": 7, "vertical": true },
-        { "id": "d_cargo", "a": "aft_corridor", "b": "cargo", "x": 7.5, "y": 8, "vertical": false },
-        { "id": "d_brig", "a": "aft_corridor", "b": "brig", "x": 12.5, "y": 8, "vertical": false },
-        { "id": "d_door_control", "a": "aft_corridor", "b": "door_control", "x": 15, "y": 8, "vertical": false },
-        { "id": "d_shields", "a": "fore_corridor", "b": "shields", "x": 19, "y": 8, "vertical": false },
-        { "id": "d_weapons", "a": "fore_corridor", "b": "weapons", "x": 23.5, "y": 8, "vertical": false },
-        { "id": "airlock_aft", "name": "Aft airlock", "a": "engines", "b": "space", "x": 0, "y": 7, "vertical": true },
-        { "id": "airlock_cargo", "name": "Cargo airlock", "a": "cargo", "b": "space", "x": 7.5, "y": 13, "vertical": false },
-        { "id": "airlock_dorsal", "name": "Dorsal hatch", "a": "quarters", "b": "space", "x": 19.5, "y": 2, "vertical": false },
-        { "id": "airlock_weapons", "name": "Ordnance hatch", "a": "weapons", "b": "space", "x": 23.5, "y": 12, "vertical": false }
+        { "id": "d_engines_reactor", "a": "engines", "b": "reactor", "x": 4, "y": 2.5, "vertical": true },
+        { "id": "d_engines_corridor", "a": "engines", "b": "aft_corridor", "x": 4, "y": 5.5, "vertical": true },
+        { "id": "d_engines_cargo", "a": "engines", "b": "cargo", "x": 4, "y": 8.5, "vertical": true },
+        { "id": "d_reactor", "a": "reactor", "b": "aft_corridor", "x": 6.5, "y": 3, "vertical": false },
+        { "id": "d_life_support", "a": "life_support", "b": "aft_corridor", "x": 10.5, "y": 3, "vertical": false },
+        { "id": "d_medbay", "a": "medbay", "b": "aft_corridor", "x": 14.5, "y": 3, "vertical": false },
+        { "id": "d_medbay_quarters", "a": "medbay", "b": "quarters", "x": 16, "y": 2.5, "vertical": true },
+        { "id": "d_quarters", "a": "quarters", "b": "fore_corridor", "x": 19.5, "y": 3, "vertical": false },
+        { "id": "d_ai_core", "a": "ai_core", "b": "fore_corridor", "x": 22.5, "y": 3, "vertical": false },
+        { "id": "d_sensors", "a": "sensors", "b": "bridge", "x": 27, "y": 2.5, "vertical": true },
+        { "id": "d_bridge", "a": "fore_corridor", "b": "bridge", "x": 27, "y": 5.5, "vertical": true },
+        { "id": "d_bulkhead", "a": "aft_corridor", "b": "fore_corridor", "x": 18, "y": 5.5, "vertical": true },
+        { "id": "d_cargo", "a": "aft_corridor", "b": "cargo", "x": 7.5, "y": 6, "vertical": false },
+        { "id": "d_brig", "a": "aft_corridor", "b": "brig", "x": 13.5, "y": 6, "vertical": false },
+        { "id": "d_door_control", "a": "aft_corridor", "b": "door_control", "x": 16.5, "y": 6, "vertical": false },
+        { "id": "d_shields", "a": "fore_corridor", "b": "shields", "x": 19.5, "y": 6, "vertical": false },
+        { "id": "d_weapons", "a": "fore_corridor", "b": "weapons", "x": 24.5, "y": 6, "vertical": false },
+        { "id": "d_hold", "a": "cargo", "b": "hold", "x": 12, "y": 11.5, "vertical": true },
+        { "id": "d_lift_bridge", "name": "Lift hatch", "a": "bridge", "b": "lift", "x": 28, "y": 6, "vertical": false },
+        { "id": "d_lift_hold", "name": "Lift gate", "a": "hold", "b": "lift", "x": 27, "y": 11.5, "vertical": true },
+        { "id": "airlock_aft", "name": "Aft airlock", "a": "engines", "b": "space", "x": 0, "y": 8.5, "vertical": true },
+        { "id": "airlock_cargo", "name": "Cargo airlock", "a": "cargo", "b": "space", "x": 7.5, "y": 12, "vertical": false },
+        { "id": "airlock_dorsal", "name": "Dorsal hatch", "a": "quarters", "b": "space", "x": 18.5, "y": 0, "vertical": false },
+        { "id": "airlock_hold", "name": "Cargo ramp", "a": "hold", "b": "space", "x": 20.5, "y": 12, "vertical": false }
       ],
-      "vents": [
-        { "id": "v_engines_cargo", "a": "engines", "b": "cargo" },
-        { "id": "v_cargo_reactor", "a": "cargo", "b": "reactor" },
-        { "id": "v_reactor_life", "a": "reactor", "b": "life_support" },
-        { "id": "v_life_quarters", "a": "life_support", "b": "quarters" },
-        { "id": "v_quarters_ai", "a": "quarters", "b": "ai_core" },
-        { "id": "v_cargo_brig", "a": "cargo", "b": "brig" },
-        { "id": "v_brig_shields", "a": "brig", "b": "shields" },
-        { "id": "v_shields_weapons", "a": "shields", "b": "weapons" },
-        { "id": "v_weapons_bridge", "a": "weapons", "b": "bridge" }
+      "crawlways": [
+        { "id": "c_engines_reactor", "a": "engines", "b": "reactor" },
+        { "id": "c_reactor_life", "a": "reactor", "b": "life_support" },
+        { "id": "c_life_medbay", "a": "life_support", "b": "medbay" },
+        { "id": "c_quarters_ai", "a": "quarters", "b": "ai_core" },
+        { "id": "c_ai_sensors", "a": "ai_core", "b": "sensors" },
+        { "id": "c_engines_cargo", "a": "engines", "b": "cargo" },
+        { "id": "c_cargo_brig", "a": "cargo", "b": "brig" },
+        { "id": "c_brig_door_control", "a": "brig", "b": "door_control" },
+        { "id": "c_door_control_shields", "a": "door_control", "b": "shields" },
+        { "id": "c_shields_weapons", "a": "shields", "b": "weapons" },
+        { "id": "c_weapons_lift", "a": "weapons", "b": "lift", "creature": true },
+        { "id": "c_brig_hold", "a": "brig", "b": "hold", "creature": true }
       ],
       "crewStart": ["bridge", "reactor", "quarters"],
       "hullPoints": 20,
       "hardpoints": [
-        { "id": "hp_fore", "x": 26.7, "y": 10.4 },
-        { "id": "hp_mid", "x": 26.7, "y": 11.9 },
-        { "id": "hp_keel", "x": 24, "y": 12.7 }
+        { "id": "hp_fore", "x": 32.6, "y": 5.0 },
+        { "id": "hp_mid", "x": 30.6, "y": 6.8 },
+        { "id": "hp_keel", "x": 29.3, "y": 10.0 }
       ],
       "weapons": ["pulse-laser", "slug-thrower"],
       "power": {
         "reactor": 8,
-        "lightsPerBar": 5,
+        "lightsPerBar": 6,
         "systems": {
-          "shields": { "level": 2, "power": 0 },
-          "engines": { "level": 2, "power": 1 },
-          "weapons": { "level": 3, "power": 0 },
-          "life_support": { "level": 1, "power": 1 },
-          "doors": { "level": 1, "power": 1 },
-          "sensors": { "level": 1, "power": 1 },
-          "medbay": { "level": 1, "power": 0 },
-          "ai_core": { "level": 1, "power": 1 }
+          "shields": {
+            "level": 2,
+            "power": 0
+          },
+          "engines": {
+            "level": 2,
+            "power": 1
+          },
+          "weapons": {
+            "level": 3,
+            "power": 0
+          },
+          "life_support": {
+            "level": 1,
+            "power": 1
+          },
+          "doors": {
+            "level": 1,
+            "power": 1
+          },
+          "sensors": {
+            "level": 1,
+            "power": 1
+          },
+          "medbay": {
+            "level": 1,
+            "power": 0
+          },
+          "ai_core": {
+            "level": 1,
+            "power": 1
+          }
         }
       },
-      "hull": [
-        [-0.7, 3.3], [3.3, 3.3], [3.3, 0.3], [9.7, 0.3], [9.7, 1.3], [30.7, 1.3], [30.7, 4.3], [31.7, 4.3],
-        [33.6, 6.1], [33.6, 7.9], [31.7, 9.7], [26.7, 9.7], [26.7, 12.7], [16.3, 12.7], [16.3, 11.7],
-        [11.7, 11.7], [11.7, 13.7], [3.3, 13.7], [3.3, 10.7], [-0.7, 10.7]
-      ]
+      "hull": [[-0.3, -0.3], [31.3, -0.3], [32.8, 2.0], [33.3, 3.5], [32.6, 5.2], [31.3, 6.3], [29.3, 6.3], [29.3, 12.3], [3.7, 12.3], [3.7, 9.3], [-0.3, 9.3]]
     }
   ]
 }

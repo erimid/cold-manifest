@@ -18,11 +18,17 @@
 // nothing. Crossing between ships is boarding.js.
 
 import { crewEmit, harmCrew } from './atmosphere.js';
+import { isPowered } from './power.js';
 import { SPACE, SYSTEMS } from './systems.js';
 
 /** Tiles per second on foot. A suit is heavy. */
 export const WALK_SPEED = 3;
 export const SUIT_SPEED = 0.7;
+/** On a ladder, or a lift shaft with no power, crew climb at this share of walking speed; a powered lift carries them at this many times it (D-071). */
+export const CLIMB_SPEED = 0.4;
+export const LIFT_SPEED = 2;
+/** Seconds an engineer takes to squeeze through a service crawlway (D-072). */
+export const CRAWL_SECONDS = 2.5;
 /** Work rates, per second, for one healthy crew member in a lit room. */
 export const EXTINGUISH_RATE = 0.09; // fire intensity
 export const PATCH_RATE = 0.06; // breach size
@@ -40,27 +46,27 @@ export const MELEE_SECONDS = 14;
 /** A boarder left alone with a system breaks a bar of it every this many seconds. */
 export const SABOTAGE_SECONDS = 9;
 
-/** Where crew stand in a room, as offsets from its middle, by their place on the roster. */
-const SPOTS = [[0, 0], [-1, 0.6], [1, 0.6], [-1, -0.6], [1, -0.6], [0, 1.1], [0, -1.1], [1.6, 0]];
+/** Where crew stand in a room, as offsets along its floor from the middle, by their place on the roster. Side-on, everyone stands on the deck. */
+const SPOTS = [0, -1, 1, -2, 2, -0.5, 0.5, 1.5];
 const EDGE = 0.6; // how close to a wall anyone stands
+/** How far above the floor a standing crew member's middle is. */
+export const STAND = 0.5;
 
 export function spotIn(room, index) {
-  const [dx, dy] = SPOTS[index % SPOTS.length];
+  const dx = SPOTS[index % SPOTS.length];
   const clamp = (value, low, high) => (high < low ? (low + high) / 2 : Math.max(low, Math.min(high, value)));
-  return {
-    x: clamp(room.x + room.w / 2 + dx, room.x + EDGE, room.x + room.w - EDGE),
-    y: clamp(room.y + room.h / 2 + dy, room.y + EDGE, room.y + room.h - EDGE),
-  };
+  return { x: clamp(room.x + room.w / 2 + dx, room.x + EDGE, room.x + room.w - EDGE), y: room.y + room.h - STAND };
 }
 
 /** A new crew member standing in `roomId`. `index` is their place on the roster. */
-export function newCrewMember(layout, { id, name }, roomId, index = 0, owner = 'player') {
+export function newCrewMember(layout, { id, name, engineer = false }, roomId, index = 0, owner = 'player') {
   const { x, y } = spotIn(layout.room(roomId), index);
   return {
     id,
     name: name ?? id,
     index,
     owner, // whose crew: 'player' or 'enemy'. Not always the ship they are aboard
+    engineer: engineer === true, // may use the service crawlways (D-072); from S4.1 a skill or trait decides
 
     room: roomId,
     x,
@@ -104,26 +110,66 @@ export function isPassable(sim, doorId) {
   return true;
 }
 
-/** The doors to go through from one room to another, fewest first, or null if there is no way. */
-export function findRoute(sim, from, to) {
+/** A lift shaft with power carries crew; without it, it is no way through (they take the ladders). */
+const liftShut = (sim, room) => room.kind === 'lift' && !isPowered(sim, 'doors');
+
+/** The middle of a room's floor, for estimating how long a trip takes. */
+const floorMid = (room) => ({ x: room.x + room.w / 2, y: room.y + room.h - STAND });
+
+/**
+ * The quickest way from one room to another, or null if there is no way: a list of
+ * steps { door, from } or { crawlway, from }. Trips are costed in seconds on foot:
+ * ladders and the lift are slower or faster than walking, and crawlways, open only
+ * to an engineer (`who.engineer`), are slow.
+ */
+export function findRoute(sim, from, to, who = null) {
   if (from === to) return [];
-  const cameBy = new Map([[from, null]]);
-  const queue = [from];
-  while (queue.length) {
-    const here = queue.shift();
-    for (const exit of sim.layout.exits(here)) {
-      if (exit.to === SPACE || cameBy.has(exit.to) || !isPassable(sim, exit.door)) continue;
-      if (sim.state.rooms[exit.to].jettisoned) continue;
-      cameBy.set(exit.to, { door: exit.door, from: here });
-      if (exit.to === to) {
-        const route = [];
-        for (let step = cameBy.get(to); step; step = cameBy.get(step.from)) route.unshift({ door: step.door, from: step.from });
-        return route;
+  const { layout } = sim;
+  const best = new Map([[from, { cost: 0, step: null }]]);
+  const done = new Set();
+  const open = [from];
+  const speedIn = (room, vertical) => (room.kind === 'lift' ? LIFT_SPEED : vertical ? CLIMB_SPEED : 1);
+  while (open.length) {
+    open.sort((a, b) => best.get(a).cost - best.get(b).cost || (a < b ? -1 : 1));
+    const here = open.shift();
+    if (here === to) break;
+    if (done.has(here)) continue;
+    done.add(here);
+    const room = layout.room(here);
+    const at = floorMid(room);
+    const edges = [];
+    for (const exit of layout.exits(here)) {
+      if (exit.to === SPACE || !isPassable(sim, exit.door)) continue;
+      const door = layout.door(exit.door);
+      const next = layout.room(exit.to);
+      const there = floorMid(next);
+      const climb = door.vertical ? 0 : Math.abs(there.y - at.y) / (WALK_SPEED * CLIMB_SPEED);
+      const walk = (Math.abs(door.x - at.x) + Math.abs(there.x - door.x)) / WALK_SPEED;
+      const ride = room.kind === 'lift' || next.kind === 'lift' ? Math.abs(there.y - at.y) / (WALK_SPEED * speedIn(room.kind === 'lift' ? room : next, true)) : 0;
+      edges.push({ to: exit.to, cost: walk + (room.kind === 'lift' || next.kind === 'lift' ? ride : climb), step: { door: exit.door, from: here } });
+    }
+    if (who?.engineer) {
+      for (const exit of layout.crawlExits(here)) {
+        if (exit.creature) continue;
+        const there = floorMid(layout.room(exit.to));
+        edges.push({ to: exit.to, cost: CRAWL_SECONDS + (Math.abs(there.x - at.x) + Math.abs(there.y - at.y)) / WALK_SPEED, step: { crawlway: exit.crawlway, from: here } });
       }
-      queue.push(exit.to);
+    }
+    for (const edge of edges) {
+      const next = layout.room(edge.to);
+      // A dead lift shaft can be the end of a trip (someone can stand in it), but not the way through.
+      if (sim.state.rooms[edge.to].jettisoned || (edge.to !== to && liftShut(sim, next))) continue;
+      const cost = best.get(here).cost + edge.cost;
+      if (!best.has(edge.to) || cost < best.get(edge.to).cost - 1e-9) {
+        best.set(edge.to, { cost, step: edge.step });
+        open.push(edge.to);
+      }
     }
   }
-  return null;
+  if (!best.has(to)) return null;
+  const route = [];
+  for (let at = to; at !== from; at = best.get(at).step.from) route.unshift(best.get(at).step);
+  return route;
 }
 
 /** The point half a tile inside `roomId` from a door. */
@@ -135,16 +181,44 @@ function besideDoor(layout, door, roomId) {
 
 /** Waypoints from where a crew member stands to their spot in `to`, or null if there is no way. */
 export function planPath(sim, member, to) {
-  const route = findRoute(sim, member.room, to);
+  const route = findRoute(sim, member.room, to, member);
   if (!route) return null;
+  const { layout } = sim;
   const path = [];
   for (const step of route) {
-    const door = sim.layout.door(step.door);
+    const here = layout.room(step.from);
+    if (step.crawlway) {
+      // Up to the service hatch, through, and down the other side.
+      const crawl = layout.crawlway(step.crawlway);
+      const next = crawl.a === step.from ? crawl.b : crawl.a;
+      const a = crawl.hatches[step.from];
+      const b = crawl.hatches[next];
+      path.push({ x: a.x, y: here.y + here.h - STAND });
+      path.push({ ...a });
+      path.push({ ...b, enter: next, crawl: step.crawlway, length: Math.hypot(b.x - a.x, b.y - a.y) });
+      const room = layout.room(next);
+      path.push({ x: b.x, y: room.y + room.h - STAND });
+      continue;
+    }
+    const door = layout.door(step.door);
     const next = door.a === step.from ? door.b : door.a;
-    path.push({ ...besideDoor(sim.layout, door, step.from), door: door.id });
-    path.push({ ...besideDoor(sim.layout, door, next), enter: next, through: door.id });
+    const there = layout.room(next);
+    if (!door.vertical && door.y === here.y) {
+      // A hatch overhead: to the foot of the ladder, then up.
+      path.push({ x: door.x, y: here.y + here.h - STAND });
+      path.push({ ...besideDoor(layout, door, step.from), door: door.id });
+      path.push({ ...besideDoor(layout, door, next), enter: next, through: door.id });
+    } else if (!door.vertical) {
+      // A hatch underfoot: down through it to the floor below.
+      path.push({ ...besideDoor(layout, door, step.from), door: door.id });
+      path.push({ ...besideDoor(layout, door, next), enter: next, through: door.id });
+      path.push({ x: door.x, y: there.y + there.h - STAND });
+    } else {
+      path.push({ ...besideDoor(layout, door, step.from), door: door.id });
+      path.push({ ...besideDoor(layout, door, next), enter: next, through: door.id });
+    }
   }
-  path.push(spotIn(sim.layout.room(to), member.index));
+  path.push(spotIn(layout.room(to), member.index));
   return path;
 }
 
@@ -166,7 +240,7 @@ export const CREW_COMMANDS = {
       const room = sim.state.rooms[cmd.room];
       if (!room) return `no room "${cmd.room}"`;
       if (room.jettisoned) return 'that section is gone';
-      if (!findRoute(sim, sim.state.crew[cmd.crew].room, cmd.room)) return 'there is no way through: a door on the way is locked or jammed';
+      if (!findRoute(sim, sim.state.crew[cmd.crew].room, cmd.room, sim.state.crew[cmd.crew])) return 'there is no way through: a door on the way is locked or jammed, or the lift has no power';
       return null;
     },
     apply(sim, cmd) {
@@ -224,20 +298,35 @@ function stop(sim, member, reason, door) {
   crewEmit(sim, member, 'crew.blocked', { crew: member.id, room: member.room, door, reason, tick: sim.state.tick });
 }
 
+/** How fast a leg of a trip goes, as a share of walking: up a ladder, in the lift, or through a crawlway. */
+function legSpeed(sim, member, next) {
+  const dx = Math.abs(next.x - member.x);
+  const dy = Math.abs(next.y - member.y);
+  if (next.crawl) return next.length / CRAWL_SECONDS / WALK_SPEED; // the same squeeze whatever the wall
+  if (dy <= dx) return 1;
+  const room = sim.layout.room(member.room);
+  if (room.kind === 'lift' && isPowered(sim, 'doors')) return LIFT_SPEED;
+  return CLIMB_SPEED;
+}
+
 function walk(sim, member, seconds) {
-  let left = WALK_SPEED * (member.suit ? SUIT_SPEED : 1) * seconds;
+  // Time left this tick, spent leg by leg, as each leg has its own pace.
+  let time = seconds;
+  const pace = WALK_SPEED * (member.suit ? SUIT_SPEED : 1);
   member.task = 'walking';
   while (member.path.length) {
     const next = member.path[0];
+    if (next.crawl) member.task = 'crawling';
+    const left = pace * legSpeed(sim, member, next) * time;
     const distance = Math.hypot(next.x - member.x, next.y - member.y);
     if (distance > left) {
       member.x += ((next.x - member.x) * left) / distance;
       member.y += ((next.y - member.y) * left) / distance;
       return;
     }
+    if (left > 0) time -= (time * distance) / left;
     member.x = next.x;
     member.y = next.y;
-    left -= distance;
 
     if (next.door) {
       // Standing at a door. Is it still a way through, and is it open yet?
@@ -377,6 +466,8 @@ export function describeTask(sim, member) {
   if (!member.alive) return 'Dead';
   const room = sim.layout.room(member.room);
   switch (member.task) {
+    case 'crawling':
+      return 'In a service crawlway';
     case 'walking':
       if (member.board) return 'Heading for the airlock';
       return `Walking to ${sim.layout.room(member.goal)?.name ?? 'somewhere'}`;

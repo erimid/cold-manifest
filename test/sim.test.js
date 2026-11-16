@@ -19,8 +19,8 @@ test('the sim runs with no DOM', () => {
 
 test('a new ship is whole, lit, breathable and shut', () => {
   const sim = newSim();
-  assert.equal(Object.keys(sim.state.rooms).length, 15);
-  assert.equal(Object.keys(sim.state.doors).length, 21);
+  assert.equal(Object.keys(sim.state.rooms).length, 17);
+  assert.equal(Object.keys(sim.state.doors).length, 24);
   for (const room of Object.values(sim.state.rooms)) {
     assert.deepEqual(room, { oxygen: 1, temperature: 20, light: 1, lightsOn: true, noise: 0, hull: 1, fire: 0, breach: 0, breached: false, scorch: 0, burning: false, jettisoned: false });
   }

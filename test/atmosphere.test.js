@@ -100,9 +100,9 @@ test('venting through an outer door puts a fire out', () => {
   give(sim, { type: 'debug.room', room: 'cargo', set: { fire: 0.9 } });
   seconds(sim, 1);
   give(sim, { type: 'door.set', door: 'airlock_cargo', state: 'open' });
-  seconds(sim, 12);
+  seconds(sim, 30); // the hold is the biggest room aboard (D-071)
   assert.equal(sim.state.rooms.cargo.fire, 0);
-  assert.ok(o2(sim, 'cargo') < 0.02);
+  assert.ok(o2(sim, 'cargo') < 0.05, 'life support cannot keep up with an open airlock');
   assert.equal(isExposed(sim, 'cargo'), true);
   give(sim, { type: 'door.set', door: 'airlock_cargo', state: 'closed' });
   seconds(sim, 90);
@@ -196,7 +196,7 @@ test('jettison removes the section and everything in it', () => {
   assert.deepEqual([r.oxygen, r.fire, r.breach, r.lightsOn, r.hull], [0, 0, 0, false, 0]);
   assert.deepEqual(sim.state.systems.shields, { level: 2, damage: 2, power: 0, lost: true });
   assert.equal(free(sim), 1, 'its power comes back to the pool');
-  assert.equal(litRooms(sim), 14);
+  assert.equal(litRooms(sim), 16);
   assert.equal(sim.state.crew.inside.alive, false, 'a suit does not help');
   assert.equal(sim.state.crew.outside.alive, true);
   assert.deepEqual(deaths.map((e) => [e.crew, e.cause]), [['inside', 'jettison']]);

@@ -314,30 +314,127 @@ body {
   position: relative;
 }
 
+/* Margo's own corner of the monitor: her face, and her words in amber phosphor (D-073). */
 .aibox {
+  flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 14px;
-  min-height: 56px;
-  padding: 6px 8px 6px 14px;
+  min-height: 60px;
+  padding: 4px 8px 4px 8px;
   border-left: 8px solid var(--amber-dim);
+  background:
+    repeating-linear-gradient(180deg, rgba(0, 0, 0, 0) 0 2px, rgba(0, 0, 0, 0.18) 2px 3px),
+    radial-gradient(ellipse at 30% 50%, rgba(255, 179, 71, 0.08), rgba(0, 0, 0, 0) 70%),
+    #0b0f14;
+}
+
+.no-scanlines .aibox {
+  background: #0b0f14;
 }
 
 .aibox.is-urgent {
   border-left-color: var(--alarm);
 }
 
+.aibox__body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.aibox__buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.aibox__buttons .btn {
+  min-height: var(--tap);
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+
 .aibox__name {
-  font-size: 0.72em;
+  font-size: 0.68em;
   white-space: nowrap;
 }
 
 .aibox__text {
-  flex: 1;
-  min-width: 0;
   line-height: 1.35;
-  color: var(--paper);
+  color: var(--amber);
+  text-shadow: 0 0 6px rgba(255, 179, 71, 0.45);
 }
+
+/* Her face: a camera eye in a cheap housing. It widens while she speaks, and goes red when it is bad. */
+.margo-face {
+  position: relative;
+  flex: none;
+  width: 52px;
+  height: 52px;
+  border-radius: 8px;
+  background: #151a21;
+  border: 2px solid var(--hull-edge);
+  display: grid;
+  place-items: center;
+}
+
+.margo-face__eye {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: radial-gradient(circle, #1d1306 0 40%, #3a2a12 41% 62%, #0b0f14 63%);
+  border: 2px solid var(--amber-dim);
+  display: grid;
+  place-items: center;
+}
+
+.margo-face__iris {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--amber);
+  box-shadow: 0 0 10px 3px rgba(255, 179, 71, 0.6);
+  transition: transform 0.2s;
+}
+
+.margo-face__mouth {
+  position: absolute;
+  bottom: 3px;
+  left: 15px;
+  right: 15px;
+  height: 3px;
+  background: var(--amber-dim);
+}
+
+.aibox.is-typing .margo-face__iris {
+  transform: scale(1.35);
+}
+
+.aibox.is-typing .margo-face__mouth {
+  background: var(--amber);
+  animation: margo-talk 0.18s steps(2) infinite alternate;
+}
+
+.aibox.is-urgent .margo-face__iris {
+  background: var(--alarm);
+  box-shadow: 0 0 10px 3px rgba(255, 65, 54, 0.6);
+}
+
+@keyframes margo-talk {
+  to {
+    transform: scaleX(0.4);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .aibox.is-typing .margo-face__mouth {
+    animation: none;
+  }
+}
+
 
 .aibox.is-typing .aibox__text::after {
   content: '▌';
@@ -513,8 +610,8 @@ body {
 .power {
   display: flex;
   align-items: stretch;
-  gap: 14px;
-  padding: 8px 12px;
+  gap: 10px;
+  padding: 6px 10px;
 }
 
 .power__reactor {
@@ -522,8 +619,9 @@ body {
   flex-direction: column;
   justify-content: space-between;
   gap: 4px;
-  min-width: 168px;
-  padding-right: 14px;
+  min-width: 120px;
+  max-width: 132px;
+  padding-right: 12px;
   border-right: 2px dashed var(--hull-edge);
   font-size: 0.8em;
 }
@@ -546,14 +644,14 @@ body {
   display: flex;
   flex-wrap: wrap;
   justify-content: space-between;
-  gap: 8px;
+  gap: 6px;
 }
 
 .power__tile {
   display: flex;
   flex-direction: column;
   gap: 5px;
-  width: 94px;
+  width: 92px;
 }
 
 .power__label {
@@ -601,7 +699,7 @@ body {
 }
 
 .power__pips--reactor .pip {
-  max-width: 16px;
+  max-width: 12px;
 }
 
 /* Lit, empty and broken differ in shape as well as colour (brief §17). */
@@ -622,7 +720,7 @@ body {
 
 .power__buttons {
   display: flex;
-  gap: 6px;
+  gap: 4px;
 }
 
 .btn.power__btn {
@@ -643,8 +741,9 @@ body {
 .status {
   flex: 1;
   min-width: 0;
-  min-height: 118px;
-  padding: 8px 14px;
+  min-height: 64px;
+  padding: 6px 12px;
+  font-size: 0.88em;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -652,7 +751,7 @@ body {
 
 .status__hint {
   margin: 0;
-  max-width: 60ch;
+  max-width: 80ch;
   line-height: 1.5;
   color: #aab2bf;
 }
