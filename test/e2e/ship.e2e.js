@@ -1198,7 +1198,7 @@ async function margoTests(browser) {
 }
 
 async function chartTests(browser) {
-  console.log('iPad and desktop: Margo\'s route chart, a course, the fix and the jump (S3.1)');
+  console.log('iPad and desktop: Margo\'s route chart: plot a route at port, cast off, fly it, and jump in (H.6)');
   const context = await browser.newContext({ ...devices['iPad (gen 7) landscape'] });
   const page = await context.newPage();
   const errors = [];
@@ -1207,9 +1207,10 @@ async function chartTests(browser) {
   await page.waitForFunction(() => window.coldManifest?.machine.state === 'title');
   const shots = process.env.E2E_SHOTS;
   const run = () => game(page, () => JSON.parse(JSON.stringify(window.coldManifest.sim.state.run)));
-  const nextFrom = (r) => r.map.lanes.filter((l) => l.a === r.at || l.b === r.at).map((l) => (l.a === r.at ? l.b : l.a));
+  const nextFrom = (r, id = r.at) => r.map.lanes.filter((l) => l.a === id || l.b === id).map((l) => (l.a === id ? l.b : l.a));
+  const kindOf = (r, id) => r.map.nodes.find((n) => n.id === id).kind;
 
-  await check('New run puts the chart up on the monitor, with every point a big enough target and the ship still running under it', async () => {
+  await check('New run puts the chart up on the monitor in port, every point a big enough target, every lane with its hours, and the ship still running', async () => {
     await page.tap('#btn-new-run');
     await page.tap('#accept-courier');
     await page.waitForFunction(() => window.coldManifest.machine.state === 'ship' && window.coldManifest.shipView.debug.chartOpen);
@@ -1217,63 +1218,107 @@ async function chartTests(browser) {
     const r = await run();
     assert.ok(r.map.nodes.length >= 15 && r.map.nodes.length <= 25);
     assert.equal(await page.locator('.chartnode').count(), r.map.nodes.length);
+    assert.equal(await page.locator('.chart__hours').count(), r.map.lanes.length, 'every lane says how long it is');
     const sizes = await page.$$eval('.chartnode', (list) => list.map((b) => ({ id: b.id, w: b.getBoundingClientRect().width, h: b.getBoundingClientRect().height })));
     for (const size of sizes) assert.ok(size.w >= 44 && size.h >= 44, `${size.id} is ${size.w}x${size.h}`);
     assert.match(await page.textContent('#chart-fuel'), /Fuel 10\/12/);
-    assert.match(await page.textContent('#btn-chart-jump'), /Plot a course/);
-    assert.equal(await page.isDisabled('#btn-chart-jump'), true);
+    assert.match(await page.textContent('#chart-clock'), /Hour 0 · \d+ h to deadline/);
+    assert.match(await page.textContent('#btn-chart-action'), /Cast off\s*Plot a route/);
+    assert.equal(await page.isDisabled('#btn-chart-action'), true);
+    assert.equal(await page.isVisible('#chart-legend'), true, 'a key to the lanes');
     const t0 = await tick(page);
     await page.waitForFunction((t) => window.coldManifest.sim.state.tick > t + 5, t0);
-    assert.equal(await page.textContent('#chart').then((text) => text.includes('null')), false);
+    assert.equal(await page.textContent('#chart').then((text) => /null|undefined|NaN/.test(text)), false);
   });
 
-  await check('tap a point a lane away, plot the course, watch the fix build, and jump: fuel and the jump count move', async () => {
+  await check('tap a point a lane away and add it to the route: the card shows what the route costs and runs through', async () => {
     const r = await run();
-    const to = nextFrom(r)[0];
+    const to = nextFrom(r).find((id) => kindOf(r, id) !== 'port') ?? nextFrom(r)[0];
     await page.tap(`#node-${to}`);
     assert.equal(await game(page, () => window.coldManifest.shipView.debug.chartSelected), to);
-    await page.tap('#btn-plot');
-    await page.waitForFunction((id) => window.coldManifest.sim.state.run.plot === id, to);
-    await page.waitForFunction(() => /Fix \d+%/.test(document.querySelector('#chart-jump-note').textContent), null, { timeout: 2000 });
-    if (shots) await page.screenshot({ path: `${shots}/s3-1-chart-ipad.png` });
-    await game(page, () => window.coldManifest.sim.enqueue({ type: 'debug.run', fix: true }));
-    await page.waitForFunction(() => !document.querySelector('#btn-chart-jump').disabled, null, { timeout: 3000 });
-    const lane = r.map.lanes.find((l) => (l.a === r.at && l.b === to) || (l.b === r.at && l.a === to));
-    await page.tap('#btn-chart-jump');
-    await page.waitForFunction((id) => window.coldManifest.sim.state.run.at === id, to, { timeout: 2000 });
-    // On a contract the arrival may open a port or an event (S3.2): leave it, and the chart is back up.
-    await sleep(300);
-    if ((await game(page, () => window.coldManifest.machine.state)) !== 'ship') {
-      if ((await game(page, () => window.coldManifest.machine.state)) === 'event') await answerEvents(page);
-      else await page.tap('#btn-depart');
-      await page.waitForFunction(() => window.coldManifest.machine.state === 'ship');
+    await page.tap('#btn-route-add');
+    assert.deepEqual(await game(page, () => window.coldManifest.shipView.debug.chartDraft), [r.at, to]);
+    assert.match(await page.textContent('#chart-route'), /Route: 1 lane to .*\d+ h at the lane's pace, \d fuel of 10/);
+    if (kindOf(r, to) !== 'port') {
+      assert.match(await page.textContent('#btn-chart-action'), /Ends at a port/);
+      assert.equal(await page.isDisabled('#btn-chart-action'), true);
     }
-    const after = await run();
-    assert.equal(after.fuel, r.fuel - lane.fuel);
-    assert.equal(after.jumps, 1);
-    assert.match(await page.textContent('#chart-jumps'), /Jump 1/);
-    assert.equal(await page.isVisible(`#node-${to} .chartnode__tag`), true, 'Here moved');
+    await page.tap('#btn-route-back');
+    assert.equal(await game(page, () => window.coldManifest.shipView.debug.chartDraft), null);
   });
 
-  await check('a point with no lane from here cannot be plotted, and says why', async () => {
+  await check('a point with no lane from the end of the route cannot be added, and says why', async () => {
     const r = await run();
     const near = new Set(nextFrom(r));
-    const far = r.map.nodes.find((n) => n.id !== r.at && !near.has(n.id));
+    const far = r.map.nodes.find((n) => n.id !== r.at && !near.has(n.id) && n.kind !== 'port');
     await page.tap(`#node-${far.id}`);
-    assert.equal(await page.isDisabled('#btn-plot'), true);
-    assert.match(await page.textContent('#btn-plot'), /no lane runs there/);
+    assert.equal(await page.isDisabled('#btn-route-add'), true);
+    assert.match(await page.textContent('#btn-route-add'), /no lane from the end of the route/);
   });
 
-  await check('the pursuer shows on the chart where Margo saw it, and catching up puts it on the scope, closing', async () => {
+  await check('pick a port and let Margo plot the quickest way there; cast off, and the ship moves along her lane in ship time', async () => {
+    const r = await run();
+    // The nearest port by the fewest lanes that does not pass another port.
+    const port = await game(page, () => {
+      const r = window.coldManifest.sim.state.run;
+      const ports = r.map.nodes.filter((n) => n.kind === 'port' && n.id !== r.at);
+      return ports.sort((a, b) => a.x - b.x)[0].id;
+    });
+    await page.tap(`#node-${port}`);
+    await page.tap('#btn-route-quick');
+    const draft = await game(page, () => window.coldManifest.shipView.debug.chartDraft);
+    assert.equal(draft[0], r.at);
+    assert.equal(draft.at(-1), port);
+    assert.match(await page.textContent('#btn-chart-action'), /Cast off\s*\d+ h/);
+    if (shots) await page.screenshot({ path: `${shots}/h6-route-ipad.png` });
+    await page.tap('#btn-chart-action');
+    await page.waitForFunction(() => window.coldManifest.sim.state.run.crossing !== null, null, { timeout: 2000 });
+    assert.match(await page.textContent('#btn-chart-action'), /Under way\s*.+to go/);
+    assert.equal(await page.isVisible('#chart-ship'), true, 'the ship is on the chart');
+    assert.match(await page.textContent('#chart-lane-title'), /Under way to/);
+    const t0 = await game(page, () => window.coldManifest.sim.state.run.crossing.t);
+    await page.waitForFunction((t) => window.coldManifest.sim.state.run.crossing.t > t, t0, { timeout: 3000 });
+    const after = await run();
+    assert.equal(after.fuel, r.fuel - after.map.lanes.find((l) => (l.a === draft[0] && l.b === draft[1]) || (l.b === draft[0] && l.a === draft[1])).fuel, 'the first lane\'s fuel is spent');
+  });
+
+  await check('the follower finds us under way: it comes in on the scope, and the chart says we are followed', async () => {
     await page.tap('#btn-dbg-menu');
     await page.tap('#btn-dbg-caught');
-    await page.waitForFunction(() => window.coldManifest.sim.state.scope.contacts.some((c) => c.pursuer && c.state === 'closing'), null, { timeout: 2000 });
+    await page.waitForFunction(() => window.coldManifest.sim.state.scope.contacts.some((c) => c.pursuer), null, { timeout: 2000 });
     if (await page.isVisible('#sheet')) await page.tap('#btn-dbg-menu');
     await page.waitForSelector('#sheet', { state: 'hidden', timeout: 2000 });
     if (!(await game(page, () => window.coldManifest.shipView.debug.chartOpen))) await page.tap('#btn-chart');
-    await page.waitForSelector('#chart-contact', { timeout: 2000 });
-    assert.match(await page.textContent('#chart-contact'), /Contact|Last seen/);
-    assert.match(await page.textContent('#btn-chart-jump'), /Jump/);
+    await page.waitForFunction(() => /Followed/.test(document.querySelector('#chart-chase').textContent), null, { timeout: 2000 });
+    await game(page, () => window.coldManifest.sim.enqueue({ type: 'debug.contact', clear: true }));
+  });
+
+  await check('off the port at the end of the route the one button takes the fix and jumps in; the port opens', async () => {
+    for (let i = 0; i < 20; i++) {
+      const phase = await game(page, () => window.coldManifest.sim.state.run.crossing?.phase ?? null);
+      if (phase !== 'under way') break;
+      if (await game(page, () => Boolean(window.coldManifest.sim.state.run.events.open))) {
+        await page.waitForFunction(() => window.coldManifest.machine.state === 'event', null, { timeout: 2000 });
+        await answerEvents(page);
+        await page.waitForFunction(() => window.coldManifest.machine.state === 'ship');
+        continue;
+      }
+      await game(page, () => !window.coldManifest.sim.whyNot({ type: 'debug.run', skip: true }) && window.coldManifest.sim.enqueue({ type: 'debug.run', skip: true }));
+      await sleep(150);
+    }
+    await page.waitForFunction(() => window.coldManifest.sim.state.run.crossing?.phase === 'off port', null, { timeout: 3000 });
+    if ((await game(page, () => window.coldManifest.machine.state)) !== 'ship') await answerEvents(page);
+    if (!(await game(page, () => window.coldManifest.shipView.debug.chartOpen))) await page.tap('#btn-chart');
+    await page.waitForFunction(() => /Jump in/.test(document.querySelector('#btn-chart-action').textContent), null, { timeout: 2000 });
+    await game(page, () => window.coldManifest.sim.enqueue({ type: 'debug.run', fix: true }));
+    await page.waitForFunction(() => !document.querySelector('#btn-chart-action').disabled, null, { timeout: 3000 });
+    if (shots) await page.screenshot({ path: `${shots}/h6-offport-ipad.png` });
+    await page.tap('#btn-chart-action');
+    await page.waitForFunction(() => window.coldManifest.machine.state === 'port', null, { timeout: 3000 });
+    assert.equal(await game(page, () => window.coldManifest.sim.state.run.crossing), null);
+    await page.tap('#btn-depart');
+    await page.waitForFunction(() => window.coldManifest.machine.state === 'ship' && window.coldManifest.shipView.debug.chartOpen);
+    assert.match(await page.textContent('#btn-chart-action'), /Cast off/);
   });
 
   await check('the Ship button and Escape fold the chart; the schematic is tappable again', async () => {
@@ -1289,7 +1334,7 @@ async function chartTests(browser) {
   await check('no page errors', async () => assert.deepEqual(errors, []));
   await context.close();
 
-  // Desktop at 1024x768: M for the chart, J to jump.
+  // Desktop at 1024x768: M for the chart, a click to pick a port, J to cast off.
   const desk = await browser.newContext({ viewport: { width: 1024, height: 768 } });
   const pd = await desk.newPage();
   const deskErrors = [];
@@ -1298,14 +1343,16 @@ async function chartTests(browser) {
   await pd.waitForFunction(() => window.coldManifest?.machine.state === 'title');
   await pd.click('#btn-ship');
   await pd.waitForFunction(() => window.coldManifest.machine.state === 'ship');
-  await check('desktop: M opens the chart, a click plots, J jumps once the fix is in, and the chart fits 1024x768', async () => {
+  await check('desktop: M opens the chart, a click picks a port, Margo plots the way, J casts off, and the chart fits 1024x768', async () => {
     await pd.keyboard.press('KeyM');
     assert.equal(await pd.isVisible('#chart'), true);
     const box = await pd.locator('#chart').boundingBox();
     assert.ok(box.x >= 0 && box.y >= 0 && box.x + box.width <= 1024 && box.y + box.height <= 768, JSON.stringify(box));
-    const r = await game(pd, () => JSON.parse(JSON.stringify(window.coldManifest.sim.state.run)));
-    const to = r.map.lanes.filter((l) => l.a === r.at || l.b === r.at).map((l) => (l.a === r.at ? l.b : l.a))[0];
-    const nodeBox = await pd.locator(`#node-${to}`).boundingBox();
+    const port = await pd.evaluate(() => {
+      const r = window.coldManifest.sim.state.run;
+      return r.map.nodes.filter((n) => n.kind === 'port' && n.id !== r.at).sort((a, b) => a.x - b.x)[0].id;
+    });
+    const nodeBox = await pd.locator(`#node-${port}`).boundingBox();
     assert.ok(nodeBox.x >= box.x && nodeBox.x + nodeBox.width <= box.x + box.width, 'point inside the chart');
     // Two points a lane apart can overlap at this size: click a part of ours that nothing covers.
     const spot = await pd.evaluate((id) => {
@@ -1313,15 +1360,13 @@ async function chartTests(browser) {
       const r = node.getBoundingClientRect();
       for (let y = r.top + 4; y < r.bottom; y += 6) for (let x = r.left + 4; x < r.right; x += 6) if (node.contains(document.elementFromPoint(x, y))) return { x, y };
       return null;
-    }, to);
+    }, port);
     assert.ok(spot, 'some part of the point can be clicked');
     await pd.mouse.click(spot.x, spot.y);
-    await pd.click('#btn-plot');
-    await game(pd, () => window.coldManifest.sim.enqueue({ type: 'debug.run', fix: true }));
-    await pd.waitForFunction(() => !document.querySelector('#btn-chart-jump').disabled, null, { timeout: 3000 });
-    if (process.env.E2E_SHOTS) await pd.screenshot({ path: `${process.env.E2E_SHOTS}/s3-1-chart-1024.png` });
+    await pd.click('#btn-route-cheap');
+    if (process.env.E2E_SHOTS) await pd.screenshot({ path: `${process.env.E2E_SHOTS}/h6-route-1024.png` });
     await pd.keyboard.press('KeyJ');
-    await pd.waitForFunction((id) => window.coldManifest.sim.state.run.at === id, to, { timeout: 2000 });
+    await pd.waitForFunction(() => window.coldManifest.sim.state.run.crossing !== null, null, { timeout: 2000 });
   });
   await check('desktop: no page errors', async () => assert.deepEqual(deskErrors, []));
   await desk.close();
@@ -1377,20 +1422,11 @@ async function loopTests(browser) {
     assert.equal(await game(page, () => window.coldManifest.run.seed), at);
   });
 
-  /** Fly one lane: plot, fix, jump. Leaves the screen the arrival opened. */
-  const fly = async (to) => {
-    await game(page, (id) => window.coldManifest.sim.enqueue({ type: 'course.plot', to: id }), to);
-    await game(page, () => window.coldManifest.sim.enqueue({ type: 'debug.run', fix: true }));
-    await page.waitForFunction(() => window.coldManifest.sim.state.fix >= 1, null, { timeout: 4000 });
-    await game(page, () => window.coldManifest.sim.enqueue({ type: 'course.jump' }));
-    await page.waitForFunction((id) => window.coldManifest.sim.state.run.at === id, to, { timeout: 4000 });
-    await sleep(200);
-  };
-  /** The cheapest way across, as a list of points, worked out here from the run's chart. */
+  /** The cheapest way across, cut into routes that each end at a port, worked out here from the run's chart. */
   const route = async () =>
     game(page, () => {
       const r = window.coldManifest.sim.state.run;
-      const best = { [r.at]: { fuel: 0, path: [] } };
+      const best = { [r.at]: { fuel: 0, path: [r.at] } };
       const open = [r.at];
       while (open.length) {
         open.sort((a, b) => best[a].fuel - best[b].fuel);
@@ -1405,68 +1441,87 @@ async function loopTests(browser) {
           }
         }
       }
-      return best[r.map.delivery].path;
+      const way = best[r.map.delivery].path;
+      const legs = [];
+      let from = 0;
+      way.forEach((id, i) => {
+        if (i > 0 && r.map.nodes.find((n) => n.id === id).kind === 'port') {
+          legs.push(way.slice(from, i + 1));
+          from = i;
+        }
+      });
+      return legs;
     });
-
+  /** Cast off on a route, skip along each lane (debug), and stop at whatever the crossing opens. Returns 'event', 'port' or 'ship'. */
+  const flyOn = async () => {
+    for (let i = 0; i < 60; i++) {
+      const now = await state();
+      if (now !== 'ship') return now;
+      const phase = await game(page, () => window.coldManifest.sim.state.run.crossing?.phase ?? null);
+      if (phase === 'under way') await game(page, () => !window.coldManifest.sim.whyNot({ type: 'debug.run', skip: true }) && window.coldManifest.sim.enqueue({ type: 'debug.run', skip: true }));
+      else if (phase === 'off port') {
+        await game(page, () => window.coldManifest.sim.enqueue({ type: 'debug.run', fix: true }));
+        await game(page, () => !window.coldManifest.sim.whyNot({ type: 'route.jump' }) && window.coldManifest.sim.enqueue({ type: 'route.jump' }));
+      }
+      await sleep(150);
+    }
+    return state();
+  };
   let sawPort = false;
   let sawEvent = false;
   const metKinds = new Set();
-  await check('every arrival opens its screen and leaves for the ship again: events, ports with refuel and the bar, open space quiet', async () => {
-    const path = await route();
-    for (let i = 0; i < path.length; i++) {
-      const to = path[i];
-      const last = i === path.length - 1;
-      await fly(to);
-      const kind = await game(page, (id) => window.coldManifest.sim.state.run.map.nodes.find((n) => n.id === id).kind, to);
-      const now = await state();
-      if (last) {
-        assert.equal(now, 'port', 'the drop is a port');
-        break;
-      }
-      if (kind === 'port') {
-        assert.equal(now, 'port');
-        if (!sawPort) {
-          sawPort = true;
-          await game(page, () => window.coldManifest.sim.state.run && window.coldManifest.sim.enqueue({ type: 'debug.run', fuel: 3 }));
-          await game(page, () => window.coldManifest.sim.step());
-          await page.tap('#btn-bar');
-          assert.equal(await state(), 'scene');
-          assert.match(await page.textContent('#scene'), /Scenes between crew arrive in Stage 4/);
-          await page.tap('#btn-back');
-          assert.equal(await state(), 'port');
-          assert.match(await page.textContent('#port-facts'), /Fuel\s*3 of 12/);
-          assert.match(await page.textContent('#btn-refuel'), /9 units, 108 credits/);
-          const money = Number((await page.textContent('#port-facts')).match(/Money\s*(\d+)/)[1]);
-          await page.tap('#btn-refuel');
-          assert.match(await page.textContent('#port-facts'), /Fuel\s*12 of 12/);
-          assert.match(await page.textContent('#port-facts'), new RegExp(`Money\\s*${money - 108}`), 'fuel is paid for');
-          assert.match(await page.textContent('#port-facts'), /Contract\s*Courier: 2 of 2 crates aboard/);
-          assert.equal(await page.isDisabled('#btn-hire'), true, 'hiring is a stub until Stage 4');
-          assert.equal(await page.isDisabled('#btn-refuel'), true, 'full tanks, nothing to buy');
-          await shot('s3-2-port-ipad');
+  await check('every crossing ends in a port that opens its screen; the events on the lanes open theirs and leave for the ship again', async () => {
+    const legs = await route();
+    for (let leg = 0; leg < legs.length; leg++) {
+      const path = legs[leg];
+      await game(page, (p) => {
+        const { sim } = window.coldManifest;
+        sim.enqueue({ type: 'debug.run', fuel: sim.state.run.fuelMax });
+        sim.step();
+        sim.enqueue({ type: 'route.sail', path: p });
+      }, path);
+      for (let i = 0; i < 30; i++) {
+        const now = await flyOn();
+        if (now === 'port') break;
+        assert.equal(now, 'event', 'the screen follows the sim');
+        const view = await game(page, () => window.coldManifest.sim.state.run.events.open);
+        const kind = await game(page, (id) => window.coldManifest.sim.state.run.map.nodes.find((n) => n.id === id).kind, view.node);
+        metKinds.add(kind);
+        assert.ok(await game(page, ([id, k]) => (window.coldManifest.content.get('events', id).at ?? []).includes(k) || id.startsWith('claim'), [view.id, kind]), `${view.id} belongs on the way to a ${kind}`);
+        assert.ok((await page.locator('#event-choices .btn').count()) >= 2);
+        assert.equal(/[{}]/.test(await page.textContent('#event')), false, 'every name in the text is filled in');
+        if (!sawEvent) {
+          sawEvent = true;
+          await shot('s3-3-event-ipad');
           await big('#screen button');
         }
-        await page.tap('#btn-depart');
-      } else {
-        // Hazards, derelicts and checkpoints always bring an event from content (S3.3); open space sometimes does.
-        // (A kind of point whose events have all been met this run is quiet too, until S3.5 writes more.)
-        const open = await game(page, () => Boolean(window.coldManifest.sim.state.run.events.open));
-        assert.equal(now, open ? 'event' : 'ship', `at a ${kind}: the screen follows the sim`);
-        if (['hazard', 'derelict', 'checkpoint'].includes(kind) && !metKinds.has(kind)) assert.equal(now, 'event', `the first ${kind} opens an event`);
-        metKinds.add(kind);
-        if (now === 'event') {
-          const view = await game(page, () => window.coldManifest.sim.state.run.events.open.id);
-          assert.ok(await game(page, ([id, k]) => window.coldManifest.content.get('events', id).at.includes(k), [view, kind]), `${view} belongs at a ${kind}`);
-          assert.ok((await page.locator('#event-choices .btn').count()) >= 2);
-          assert.equal(/[{}]/.test(await page.textContent('#event')), false, 'every name in the text is filled in');
-          if (!sawEvent) {
-            sawEvent = true;
-            await shot('s3-3-event-ipad');
-            await big('#screen button');
-          }
-          await answerEvents(page);
-        }
+        await answerEvents(page);
+        await page.waitForFunction(() => window.coldManifest.machine.state === 'ship');
       }
+      assert.equal(await state(), 'port', 'a crossing ends in port');
+      if (leg === legs.length - 1) break; // the drop
+      if (!sawPort) {
+        sawPort = true;
+        await game(page, () => window.coldManifest.sim.state.run && window.coldManifest.sim.enqueue({ type: 'debug.run', fuel: 3 }));
+        await game(page, () => window.coldManifest.sim.step());
+        await page.tap('#btn-bar');
+        assert.equal(await state(), 'scene');
+        assert.match(await page.textContent('#scene'), /Scenes between crew arrive in Stage 4/);
+        await page.tap('#btn-back');
+        assert.equal(await state(), 'port');
+        assert.match(await page.textContent('#port-facts'), /Fuel\s*3 of 12/);
+        assert.match(await page.textContent('#btn-refuel'), /9 units, 108 credits/);
+        const money = Number((await page.textContent('#port-facts')).match(/Money\s*(\d+)/)[1]);
+        await page.tap('#btn-refuel');
+        assert.match(await page.textContent('#port-facts'), /Fuel\s*12 of 12/);
+        assert.match(await page.textContent('#port-facts'), new RegExp(`Money\\s*${money - 108}`), 'fuel is paid for');
+        assert.match(await page.textContent('#port-facts'), /Contract\s*Courier: 2 of 2 crates aboard/);
+        assert.equal(await page.isDisabled('#btn-hire'), true, 'hiring is a stub until Stage 4');
+        assert.equal(await page.isDisabled('#btn-refuel'), true, 'full tanks, nothing to buy');
+        await shot('s3-2-port-ipad');
+        await big('#screen button');
+      }
+      await page.tap('#btn-depart');
       await page.waitForFunction(() => window.coldManifest.machine.state === 'ship');
       assert.equal(await page.isVisible('#chart'), true, 'back on the ship with the chart up');
     }
@@ -1536,7 +1591,7 @@ async function loopTests(browser) {
     await page.tap('#btn-new-run');
     await page.tap('#accept-smuggling');
     await page.waitForFunction(() => window.coldManifest.machine.state === 'ship');
-    assert.equal(await game(page, () => window.coldManifest.sim.state.run.jumps), 0);
+    assert.equal(await game(page, () => window.coldManifest.sim.state.run.legs), 0);
     assert.equal(await game(page, () => window.coldManifest.sim.state.run.pursuit !== null), await game(page, () => window.coldManifest.run.contract.followed), 'followed as the board said');
     assert.equal(await game(page, () => Object.values(window.coldManifest.sim.state.crates).filter((c) => c.contraband).length), 4, 'the contraband is in the hold');
     // Kill everyone on board: the run ends on the next frame.

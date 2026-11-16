@@ -32,7 +32,7 @@
       "advance": 150,
       "latePay": 0,
       "followed": 0.25,
-      "slack": [1, 2],
+      "slack": [0.55, 0.7],
       "value": 40,
       "cargo": [
         { "count": 2, "label": "Courier cooler · Reach Medical", "contents": "Racks of culture vials in cold gel. One rack is labelled in a hand nobody at the cooperative writes in." }

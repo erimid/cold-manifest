@@ -118,7 +118,7 @@ const SEARCH_ON_THE_WAY = 0.25;
 const SEARCH_ERROR = Object.freeze({ ofRange: 0.3, least: 6 });
 /** A contact that has not noticed us goes on its way after this long, wherever it is. */
 const PASS_SECONDS = 900;
-/** Where a contact turns up when we arrive somewhere: how far out, and how wide of us its course may pass. */
+/** Where a contact turns up when a lane brings one (sector.js): how far out, and how wide of us its course may pass. */
 export const SPAWN = Object.freeze({ near: 105, far: 125, miss: 40 });
 /** A contact that has given up is taken off the scope this long after, or once it is well off the edge. */
 const LEAVE_SECONDS = 90;
@@ -995,7 +995,7 @@ function dropDecoy(sim, kind, extra = {}) {
   return decoy;
 }
 
-/** Wire the scope to the rest of the sim: a jettisoned crate is a decoy, a jump leaves everyone behind, and arriving somewhere may bring company. */
+/** Wire the scope to the rest of the sim: a jettisoned crate is a decoy, and the jump into port leaves everyone behind. (The lanes bring company, sector.js.) */
 export function attachEncounters(sim) {
   sim.events.on('crate.jettisoned', (event) => {
     if (event.kind !== 'ammo') dropDecoy(sim, 'crate', { crate: event.crate, label: event.label });
@@ -1010,17 +1010,6 @@ export function attachEncounters(sim) {
     scope.drones = [];
     scope.pods = [];
     Object.assign(helm, { vx: 0, vy: 0, burn: false, wanted: helm.heading });
-  });
-  sim.events.on('sector.arrived', (event) => {
-    const chance = sim.state.run?.contactChance?.[event.kind] ?? 0;
-    if (!(chance > 0) || !sim.encounters.all.length || sim.state.run.delivered) return;
-    const rng = sim.rng.stream('encounters');
-    if (!rng.chance(chance)) return;
-    const pool = sim.encounters.all.filter((def) => (def.weight ?? 1) > 0 && (!def.at || def.at.includes(event.kind)));
-    if (!pool.length) return;
-    const def = rng.weighted(pool, (item) => item.weight ?? 1);
-    // Far enough out that a ship with her sensors up sees it before it can see her: there is time to do something.
-    spawnContact(sim, def, { range: rng.range(SPAWN.near, SPAWN.far), bearing: rng.range(0, 360), miss: rng.range(0, SPAWN.miss), side: rng.chance(0.5) ? 1 : -1 });
   });
 }
 

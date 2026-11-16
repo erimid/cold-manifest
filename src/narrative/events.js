@@ -1,6 +1,6 @@
 // Transit events (S3.3, D-111; brief §15). DOM-free.
 //
-// An event is content (content/events/): something met on arriving at a point of the chart,
+// An event is content (content/events/): something met on the lane to a point of the chart (H.6),
 // with choices, and outcomes that change the world through effects (effects.js). Everything
 // that decides whether an event, a choice or an outcome applies is written in the condition
 // language (conditions.js).
@@ -8,11 +8,11 @@
 //   {
 //     "id": "derelict.cold-hull",
 //     "title": "...", "text": "...",        text may name {place}, {hazard}, {ship} and the cast
-//     "at": ["derelict"],                   the kinds of point it can be met at. Left out, the event
+//     "at": ["derelict"],                   the kinds of point it can be met on the way to. Left out, the event
 //                                           only ever follows another (the "event" effect) or the debug sheet
 //     "weight": 1,                          how often, against the others that fit (default 1)
 //     "once": true,                         met at most once a run (default true)
-//     "priority": 0,                        on arriving, only the events of the highest priority that
+//     "priority": 0,                        on a lane, only the events of the highest priority that
 //                                           fit are rolled between (default 0): an inspection (S3.4)
 //                                           comes before anything else at a checkpoint
 //     "cast": { "scout": { "pick": "random" } },
@@ -31,17 +31,19 @@
 //             "text": "...", "effects": [ ... ] } ] } ]
 //   }
 //
-// The sim opens an event when we arrive somewhere for the first time (the sector says how
-// likely, by kind of point) and keeps it in `run.events.open` until it is answered
-// (`event.choose`) and put away (`event.dismiss`). Jumping away from an event leaves it behind.
-// A sim given no events never opens one. A salvage claim (contracts.js) is an event too: standing at
-// the claim point opens it, every time, until the claim is worked.
+// On a crossing (sector.js, H.6), the first time a lane runs to a point the dice are thrown for
+// an event (the sector says how likely, by kind of point); if one comes, it opens partway along
+// that lane. It stays in `run.events.open` until it is answered (`event.choose`) and put away
+// (`event.dismiss`), and the ship heaves to while it is on the table. Jumping into a port leaves
+// it behind. A sim given no events never opens one. A salvage claim (contracts.js) is an event
+// too: passing the claim point opens it, every time, until the claim is worked. H.7 turns these
+// into situations aboard.
 
 import { NODE_KINDS, nodeOf } from '../sim/sector.js';
 import { checkCrewSpec, crewMatching, fillText, match, requirement, validateCondition, validateText, vars } from './conditions.js';
 import { applyEffects, validateEffects } from './effects.js';
 
-/** How likely arriving at each kind of point for the first time is to bring an event, unless the sector says otherwise. Ports open the port. */
+/** How likely the first lane to each kind of point is to bring an event, unless the sector says otherwise. Ports open the port. */
 export const EVENT_CHANCE = Object.freeze({ port: 0, empty: 0.35, hazard: 1, derelict: 1, checkpoint: 1 });
 
 /** Names every event's text can use, beside its cast. */
@@ -89,57 +91,51 @@ function castFor(sim, event, node) {
   return cast;
 }
 
-/** Put an event on the table. `force` skips its own conditions (a follow-up, or the debug sheet). Returns true if it opened. */
-export function openEvent(sim, id, { force = false } = {}) {
+/**
+ * Put an event on the table. `force` skips its own conditions (a follow-up, or the debug sheet). `node` is the
+ * point it is about: the one we are passing on a crossing (H.6), else where we are. Returns true if it opened.
+ */
+export function openEvent(sim, id, { force = false, node } = {}) {
   const run = sim.state.run;
   const event = sim.transit.byId.get(id);
   if (!run || !event) return false;
-  const cast = castFor(sim, event, run.at);
+  const at = node ?? run.events.open?.node ?? run.crossing?.path[run.crossing.leg + 1] ?? run.at;
+  const cast = castFor(sim, event, at);
   if (!cast) return false;
-  const open = { id, node: run.at, cast, result: null };
+  const open = { id, node: at, cast, result: null };
   if (!force && !match(event.when, { sim, vars: reachOf(sim, open) })) return false;
   if (run.events.open) sim.events.emit('event.lapsed', { event: run.events.open.id, tick: sim.state.tick });
   run.events.open = open;
   run.events.count += 1;
   if (!run.events.met.includes(id)) run.events.met.push(id);
-  sim.events.emit('event.opened', { event: id, node: run.at, title: fillText(event.title, { sim, vars: reachOf(sim, open) }), tick: sim.state.tick });
+  sim.events.emit('event.opened', { event: id, node: at, title: fillText(event.title, { sim, vars: reachOf(sim, open) }), tick: sim.state.tick });
   return true;
 }
 
-/** Arriving somewhere: maybe an event. The first visit to a point throws the dice once. */
-function onArrival(sim, arrival) {
+/**
+ * An event on the lane to a point we are about to pass (H.6; sector.js threw its dice when the lane began).
+ * The highest priority first: the dice only fall between the events of one priority, and go down a priority
+ * when none of them can open. Returns true if one opened.
+ */
+export function rollLaneEvent(sim, nodeId) {
   const run = sim.state.run;
-  const state = run.events;
-  if (state.open) {
-    // We left it behind.
-    sim.events.emit('event.lapsed', { event: state.open.id, tick: sim.state.tick });
-    state.open = null;
-    state.next = null;
-  }
-  // The contract's claim comes before anything the dice would bring, and comes back until it is worked.
-  const claim = run.contract?.status === 'active' ? run.contract.claim : null;
-  if (claim && !claim.done && claim.node === arrival.node && openEvent(sim, claim.event, { force: true })) return;
-  if (state.rolled.includes(arrival.node)) return;
-  state.rolled.push(arrival.node);
-  const chance = run.eventChance?.[arrival.kind] ?? EVENT_CHANCE[arrival.kind] ?? 0;
-  if (!(chance > 0) || !rng(sim).chance(chance)) return;
-  const fits = sim.transit.all.filter((event) => (event.at ?? []).includes(arrival.kind) && !(event.once !== false && state.met.includes(event.id)));
-  // Highest priority first: the dice only fall between the events of one priority, and go down a priority when none of them can open.
+  const state = run?.events;
+  const node = run && nodeOf(run.map, nodeId);
+  if (!state || !node || state.open || !sim.transit.all.length) return false;
+  const fits = sim.transit.all.filter((event) => (event.at ?? []).includes(node.kind) && !(event.once !== false && state.met.includes(event.id)));
   for (const priority of [...new Set(fits.map((event) => event.priority ?? 0))].sort((a, b) => b - a)) {
     const pool = fits.filter((event) => (event.priority ?? 0) === priority);
     while (pool.length) {
       const event = rng(sim).weighted(pool);
-      if (openEvent(sim, event.id)) return;
+      if (openEvent(sim, event.id, { node: nodeId })) return true;
       pool.splice(pool.indexOf(event), 1);
     }
   }
+  return false;
 }
 
-/** Listen for arrivals. Called once when the sim is created. */
-export function attachEvents(sim) {
-  if (!sim.transit.all.length) return;
-  sim.events.on('sector.arrived', (arrival) => sim.state.run && onArrival(sim, arrival));
-}
+/** Events used to open on arriving at a point; since H.6 they come along the lanes (sector.js calls rollLaneEvent). */
+export function attachEvents() {}
 
 /** One choice of the open event as the screen needs it, or null if it is hidden. */
 function choiceView(sim, open, choice) {

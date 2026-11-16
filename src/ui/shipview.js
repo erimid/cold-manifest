@@ -354,7 +354,7 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
           ),
           button('btn-dbg-dread', 'Nerves on edge', act(() => order({ type: 'debug.memory', crew: mind.id, dread: 0.97 })), 'btn--debug'),
         ),
-      sim.state.run && el('div', { class: 'stencil sheet__sub' }, `Chart: fuel ${sim.state.run.fuel}, ${sim.state.run.pursuit ? (sim.state.run.pursuit.done ? 'pursuer beaten' : 'followed') : 'nobody following'}`),
+      sim.state.run && el('div', { class: 'stencil sheet__sub' }, `Chart: fuel ${sim.state.run.fuel}, hour ${Math.floor(sim.state.run.hours)} of ${sim.state.run.deadline}, ${sim.state.run.crossing ? sim.state.run.crossing.phase : 'in port'}, ${sim.state.run.pursuit ? (sim.state.run.pursuit.done ? 'follower beaten' : 'followed') : 'nobody following'}`),
       sim.state.run &&
         el(
           'div',
@@ -362,7 +362,9 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
           button('btn-dbg-fuel', 'Fill the tanks', act(() => order({ type: 'debug.run', fuel: sim.state.run.fuelMax })), 'btn--debug'),
           button('btn-dbg-fuel-out', 'Empty the tanks', act(() => order({ type: 'debug.run', fuel: 0 })), 'btn--debug'),
           button('btn-dbg-chase', sim.state.run.pursuit ? 'Nobody follows' : 'Someone follows', act(() => order({ type: 'debug.run', pursuit: sim.state.run.pursuit ? 'off' : 'on' })), 'btn--debug'),
-          button('btn-dbg-caught', 'Pursuer closes', act(() => order({ type: 'debug.run', pursuit: 'catch' })), 'btn--debug'),
+          button('btn-dbg-caught', 'Follower finds us', act(() => order({ type: 'debug.run', pursuit: 'catch' })), 'btn--debug'),
+          // Under way (H.6): on along this lane to the next thing on it.
+          button('btn-dbg-skip', 'Skip along the lane', act(() => order({ type: 'debug.run', skip: true })), 'btn--debug'),
         ),
       sim.state.run?.contract?.status === 'active' &&
         el(
@@ -1778,6 +1780,10 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
       },
       get chartSelected() {
         return chart?.selected ?? null;
+      },
+      /** The route being drawn on the chart in port (H.6), or null. */
+      get chartDraft() {
+        return chart?.draft ?? null;
       },
       counts,
       get view() {

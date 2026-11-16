@@ -20,7 +20,7 @@
           "id": "sweep",
           "label": "Slow to a crawl and sweep ahead",
           "requires": { "fact": "system.running", "system": "sensors", "label": "Sensors running" },
-          "outcomes": [{ "text": "The sensors pick a way through, one clear pocket at a time. It costs the better part of a day you had been counting on.", "effects": [{ "do": "deadline", "add": -1 }] }]
+          "outcomes": [{ "text": "The sensors pick a way through, one clear pocket at a time. It costs the better part of a watch you had been counting on.", "effects": [{ "do": "deadline", "add": -4 }] }]
         },
         {
           "id": "thread",
@@ -200,7 +200,7 @@
           "id": "dark",
           "label": "Vent the drive plume and cut a false trail",
           "requires": { "fact": "fuel", "gte": 3, "label": "3 fuel" },
-          "outcomes": [{ "text": "Two units of fuel go out as a bright smear pointing the wrong way. It should cost whoever is back there a couple of jumps working out which line is yours.", "effects": [{ "do": "fuel", "add": -2 }, { "do": "pursuit", "delay": 2 }] }]
+          "outcomes": [{ "text": "Two units of fuel go out as a bright smear pointing the wrong way. It should cost whoever is back there a good few hours working out which line is yours.", "effects": [{ "do": "fuel", "add": -2 }, { "do": "pursuit", "delay": 8 }] }]
         }
       ]
     }

@@ -1,4 +1,4 @@
-// Transit events (S3.3, D-111): meeting them on the chart, choices and their tags, outcomes and effects,
+// Transit events (S3.3, D-111): meeting them on the lanes (H.6), choices and their tags, outcomes and effects,
 // the hooks into combat, scenes and the threat, and what the content checker catches.
 
 import assert from 'node:assert/strict';
@@ -9,11 +9,11 @@ import { hashState } from '../src/engine/hash.js';
 import { validateEffects, EFFECTS } from '../src/narrative/effects.js';
 import { checkEvent, eventView, whyNoChoice } from '../src/narrative/events.js';
 import { recall } from '../src/sim/memory.js';
-import { neighbours, nodeOf, whyNoCourseJump } from '../src/sim/sector.js';
+import { neighbours, nodeOf } from '../src/sim/sector.js';
 import { checkInvariants, createSim } from '../src/sim/sim.js';
 import { readContentFiles } from '../tools/lib/load-content.js';
 import { spotIn } from '../src/sim/crew.js';
-import { CATALOG, CREW, EVENTS, SHIP, content } from './helpers.js';
+import { CATALOG, CREW, EVENTS, SHIP, castOff, content, fly, routeVia } from './helpers.js';
 
 const REACH = content.require('sectors', 'the-reach');
 const FILES = readContentFiles();
@@ -42,11 +42,11 @@ const heard = (sim, type) => {
   sim.events.on(type, (event) => seen.push(event));
   return seen;
 };
-function fly(sim, to) {
-  sim.enqueue({ type: 'course.plot', to });
-  for (let i = 0; i < 4000 && whyNoCourseJump(sim); i++) sim.step();
-  sim.enqueue({ type: 'course.jump' });
-  sim.step();
+/** Cast off on a route that passes `to`, and fly in ship time until an event opens or the first lane is flown. */
+function towards(sim, to) {
+  castOff(sim, routeVia(sim.state.run, to));
+  const run = sim.state.run;
+  for (let i = 0; i < 20 * 600 && run.crossing && run.crossing.leg === 0 && !run.events.open; i++) sim.step();
 }
 
 test('every event in content passes its own check', () => {
@@ -54,51 +54,58 @@ test('every event in content passes its own check', () => {
   for (const { _file, ...event } of EVENTS) assert.deepEqual(checkEvent(event, REFS), [], event.id);
 });
 
-test('arriving somewhere for the first time can bring an event of the right kind; with no events nothing opens', () => {
+test('the lane to a point can bring an event of its kind, partway along, and she heaves to; with no events nothing opens', () => {
   const always = { ...REACH, events: { empty: 1, hazard: 1, derelict: 1, checkpoint: 1 } };
   const sim = runSim(EVENTS, 'arrive', always);
   const opened = heard(sim, 'event.opened');
   const run = sim.state.run;
   assert.equal(eventView(sim), null, 'nothing at the origin');
   const to = neighbours(run.map, run.at).find((id) => nodeOf(run.map, id).kind !== 'port');
-  fly(sim, to);
+  towards(sim, to);
   const kind = nodeOf(run.map, to).kind;
   const view = eventView(sim);
-  assert.ok(view, `an event at a ${kind}`);
+  assert.ok(view, `an event on the way to a ${kind}`);
   assert.equal(opened.length, 1);
+  assert.equal(opened[0].node, to, 'it is about the point ahead');
+  assert.equal(run.crossing.leg, 0, 'met on the lane, not on arriving');
+  const along = run.crossing.t / run.crossing.length;
+  assert.ok(along >= 0.24 && along <= 0.76, `${along} of the way along`);
   assert.ok(content.require('events', view.id).at.includes(kind));
   assert.ok(view.choices.length >= 2 && view.choices.some((choice) => choice.available));
   assert.equal(view.result, null);
   assert.deepEqual(run.events.met, [view.id]);
+  for (let i = 0; i < 100; i++) sim.step();
+  assert.equal(run.crossing.t / run.crossing.length, along, 'she holds while it is on the table');
   assert.deepEqual(checkInvariants(sim), []);
 
   const quiet = runSim([], 'arrive', always);
-  fly(quiet, to);
+  towards(quiet, to);
   assert.equal(eventView(quiet), null);
   const never = runSim(EVENTS, 'arrive', { ...REACH, events: { empty: 0, hazard: 0, derelict: 0, checkpoint: 0 } });
-  fly(never, to);
+  towards(never, to);
   assert.equal(eventView(never), null, 'the sector says how likely an event is');
 });
 
-test('a point is only rolled for once, an event is met once a run, and jumping away leaves an open event behind', () => {
+test('a point is only rolled for once, and an event is met once a run', () => {
   const sector = { ...REACH, events: { empty: 1, hazard: 1, derelict: 1, checkpoint: 1 } };
   const sim = runSim([doing([]), { ...doing([]), id: 'test.two' }], 'once', sector);
   const run = sim.state.run;
-  const lapsed = heard(sim, 'event.lapsed');
-  // Make every point open space so both test events fit everywhere.
-  for (const node of run.map.nodes) if (node.id !== run.map.start) node.kind = 'empty';
-  const home = run.at;
-  const first = neighbours(run.map, home)[0];
-  fly(sim, first);
-  const met = eventView(sim).id;
-  fly(sim, home);
-  assert.equal(lapsed.length, 1, 'we left it unanswered');
-  assert.equal(eventView(sim), null);
-  fly(sim, first);
-  assert.equal(eventView(sim), null, 'the dice for that point have been thrown');
-  const second = neighbours(run.map, first).find((id) => id !== home);
-  fly(sim, second);
-  assert.ok(eventView(sim) && eventView(sim).id !== met, 'the other event, not the same one again');
+  // Make every point but the ports open space so both test events fit everywhere.
+  for (const node of run.map.nodes) if (node.kind !== 'port') node.kind = 'empty';
+  const first = neighbours(run.map, run.at).find((id) => nodeOf(run.map, id).kind !== 'port');
+  const met = [];
+  sim.events.on('event.opened', (event) => met.push(event.event));
+  fly(sim, routeVia(run, first));
+  assert.ok(run.events.rolled.includes(first));
+  assert.equal(new Set(met).size, met.length, 'never the same one twice');
+  assert.ok(met.length >= 1 && met.length <= 2);
+  // Back by the same points: their dice have been thrown.
+  const before = met.length;
+  const back = routeVia(run, first);
+  if (back.slice(1, -1).every((id) => run.events.rolled.includes(id))) {
+    fly(sim, back);
+    assert.equal(met.length, before);
+  }
   assert.deepEqual(checkInvariants(sim), []);
 });
 

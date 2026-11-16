@@ -415,7 +415,7 @@ export function createSim({ seed, ship, crew = [], lines = [], weapons = [], sec
       roster: newRosterState(watches), // the watch bill (watches.js)
       boarding: null, // a party docked with us, at the lock or aboard (boarders.js)
       boardings: { next: 1, record: [] }, // how boardings have ended: { encounter, wants, outcome, reason, seconds, took, seized, tick }
-      run: null, // the chart, fuel, jumps, deadline and pursuit (sector.js); set below when there is a sector
+      run: null, // the chart, fuel, hours, deadline, route, crossing and pursuit (sector.js); set below when there is a sector
     },
     rng: createRngSet(seed),
     events: createEventBus(),
@@ -489,7 +489,7 @@ export function createSim({ seed, ship, crew = [], lines = [], weapons = [], sec
     sim.state.run = newRunState(sector, sim.rng.stream('map'), contract?.slack ? { ...run, slack: contract.slack } : run);
     // What the events leave behind them (narrative/events.js, effects.js): the event on the table, notes for
     // later events, and the hooks for scenes (Stage 4) and the threat (Stage 6).
-    Object.assign(sim.state.run, { events: newEventState(), eventChance: { ...EVENT_CHANCE, ...sector.events }, flags: {}, scenes: [], threat: null, contract: null, contactChance: { ...sector.contacts } });
+    Object.assign(sim.state.run, { events: newEventState(), eventChance: { ...EVENT_CHANCE, ...sector.events }, flags: {}, scenes: [], threat: null, contract: null });
     if (contract) setUpContract(sim, contract);
   } else if (contract) throw new Error('A contract needs a sector to be flown across');
   if (watches) dealWatches(sim);

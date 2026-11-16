@@ -63,8 +63,8 @@ export function boardOffers(templates, { seed, factions = [] }) {
 }
 
 /**
- * Which screen arriving at a point opens: 'port' or null. Events are not decided here: the sim opens
- * one when the dice and the content say so (narrative/events.js, S3.3), and the screen follows.
+ * Which screen arriving at a point opens: 'port' or null. Since H.6 a crossing only ever ends at a port; events
+ * come along the lanes when the dice and the content say so (narrative/events.js, S3.3), and the screen follows.
  */
 export function screenForArrival(kind) {
   return kind === 'port' ? 'port' : null;
@@ -131,7 +131,8 @@ export function summarize(sim, kind, { factions = [] } = {}) {
   }
   rows.push(['Money', String(sim.state.money)]);
   if (run) {
-    rows.push(['Jumps', `${run.jumps} of ${run.deadline} allowed`]);
+    rows.push(['Hours under way', `${Math.round(run.hours)} of ${run.deadline} allowed`]);
+    rows.push(['Lanes flown', String(run.legs)]);
     rows.push(['Fuel left', `${run.fuel} of ${run.fuelMax}`]);
     rows.push(['Points visited', `${run.visited.length} of ${run.map.nodes.length}`]);
     rows.push(['Events met', String(run.events.count)]);
@@ -153,7 +154,7 @@ export function contractLine(sim) {
   if (contract.status === 'delivered') return `${name}: delivered`;
   if (contract.status === 'failed') return `${name}: failed, ${FAILURES[contract.reason] ?? contract.reason}`;
   const aboard = contractCrates(sim).length;
-  if (contract.claim && !contract.claim.done) return `${name}: the claim at ${nodeOf(sim.state.run.map, contract.claim.node)?.name ?? '?'} is still to be worked`;
+  if (contract.claim && !contract.claim.done) return `${name}: the claim at ${nodeOf(sim.state.run.map, contract.claim.node)?.name ?? '?'} is still to be worked on the way`;
   return `${name}: ${aboard} of ${contract.expected} crates aboard`;
 }
 

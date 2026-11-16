@@ -23,16 +23,22 @@ const member = (sim, id) => sim.state.crew[id];
 const others = (sim, roomId, but) => Object.values(sim.state.crew).filter((other) => other.alive && other.room === roomId && other.id !== but);
 const run = (sim) => sim.state.run ?? undefined;
 
+const placeOf = (r) => r.events?.open?.node ?? (r.crossing ? r.crossing.path[r.crossing.leg + 1] : r.at);
+
 export const FACTS = Object.freeze({
   // ---------- the run ----------
   money: { value: 'number', get: (sim) => sim.state.money },
   fuel: { value: 'number', get: (sim) => run(sim)?.fuel },
   'fuel.room': { value: 'number', get: (sim) => run(sim) && run(sim).fuelMax - run(sim).fuel },
-  jumps: { value: 'number', get: (sim) => run(sim)?.jumps },
-  'jumps.left': { value: 'number', get: (sim) => run(sim) && run(sim).deadline - run(sim).jumps },
+  /** Ship hours under way since the origin, and hours left before the deadline (H.6; these were jumps). */
+  hours: { value: 'number', get: (sim) => run(sim) && Math.floor(run(sim).hours) },
+  'hours.left': { value: 'number', get: (sim) => run(sim) && Math.floor(run(sim).deadline - run(sim).hours) },
+  /** Lanes flown so far. */
+  legs: { value: 'number', get: (sim) => run(sim)?.legs },
   late: { value: 'boolean', get: (sim) => run(sim)?.late },
   followed: { value: 'boolean', get: (sim) => run(sim) && Boolean(run(sim).pursuit && !run(sim).pursuit.done) },
-  'place.kind': { value: 'string', get: (sim) => run(sim)?.map.nodes.find((node) => node.id === run(sim).at)?.kind },
+  /** The kind of point an open event is about, the point a crossing is making for, or the port we are at (H.6). */
+  'place.kind': { value: 'string', get: (sim) => run(sim)?.map.nodes.find((node) => node.id === placeOf(run(sim)))?.kind },
   flag: { args: { name: 'string' }, value: 'any', get: (sim, a) => run(sim)?.flags?.[a.name] ?? 0 },
   'event.met': { args: { event: 'event' }, value: 'boolean', get: (sim, a) => Boolean(run(sim)?.events?.met.includes(a.event)) },
   /** A ship is clamped to our lock, its party at the door or aboard (H.2); the duel's `fight` fact went with the duel (H.3). */

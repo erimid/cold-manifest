@@ -97,6 +97,24 @@
         "crew": 0.1
       },
       "blurb": "What a carrier's drone spits at you. One hull point, now and then, until a brace burns the drone out."
+    },
+    {
+      "id": "debris",
+      "name": "Debris",
+      "short": "Debris",
+      "kind": "kinetic",
+      "power": 1,
+      "charge": 1,
+      "flight": 1,
+      "damage": 1,
+      "pierce": 0,
+      "mount": false,
+      "effects": {
+        "fire": 0.05,
+        "breach": 0.25,
+        "crew": 0.1
+      },
+      "blurb": "Not a weapon: a lump of something in a hazard lane that the helm did not see in time (H.6). One hull point and a dent; a brace stops it."
     }
   ]
 }
