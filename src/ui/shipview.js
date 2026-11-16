@@ -34,12 +34,15 @@ import { contactView, roomView, sensorsUp, signature, unseen } from '../sim/sens
 import { SPACE, SYSTEMS } from '../sim/systems.js';
 import { TICK_SECONDS } from '../sim/sim.js';
 import { el } from './dom.js';
+import { createIntercom } from './intercom.js';
 import { AUTO_PAUSE } from './settings.js';
 import { createShipRenderer } from './ship-render.js';
 
 const percent = (value) => `${Math.round(value * 100)}%`;
 const POWER_KEYS = 'QWERTYUI';
 const WEAPON_KEYS = 'ASDF';
+/** How long a crew member's intercom reply stays on the monitor, in real milliseconds. */
+const INTERCOM_MS = 4000;
 /** How long a shot's result stays on screen, in seconds of game time. */
 const IMPACT_SECONDS = 0.9;
 const IMPACT_TEXT = { hit: 'HIT', shield: 'SHIELD', miss: 'MISS' };
@@ -75,8 +78,10 @@ const seconds = (ticks) => `${Math.max(0, Math.ceil(ticks * TICK_SECONDS))}s`;
 const TYPE_SPEED = 45;
 const BLIP_EVERY = 3;
 
-export function createShipView({ canvas, root, input, sim, clock, onBack, audio = null, settings = null, debug = false }) {
+export function createShipView({ canvas, root, input, sim, clock, onBack, audio = null, settings = null, debug = false, crewReplies = {} }) {
   const { layout } = sim;
+  const intercom = createIntercom(crewReplies);
+  let heard = null; // the last intercom reply: { name, text, at } (real time, so it shows while paused)
   const renderer = createShipRenderer(layout);
   const ctx = canvas.getContext('2d');
   let size = { w: 0, h: 0, dpr: 1 };
@@ -169,6 +174,9 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
     size = { w, h, dpr, top, bottom, enemyId };
     // The monitor: the space between the top bar and the dock, with a bezel round the schematic.
     monitor = { x: 12, y: top, w: w - 24, h: Math.max(80, bottom - top) };
+    // The intercom line sits on the bottom edge of the monitor, inside the bezel.
+    nodes.intercom.style.left = `${monitor.x + 22}px`;
+    nodes.intercom.style.top = `${monitor.y + monitor.h - 58}px`;
     if (!enemyId) {
       foe = null;
       foeView = null;
@@ -320,6 +328,12 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
     if (node.className !== name) node.className = name;
   }
 
+  /**
+   * The breaker board (S2.9, D-078, D-095): cheap company hardware with a breaker
+   * per system. It folds down to the reactor gauge and a Breakers handle so the
+   * bottom of the screen is free, and opens on demand (tap, or P) or by itself
+   * when a fight starts. The Q-row keys work whether it is open or not.
+   */
   function buildPower() {
     const reactorPips = pips(sim.state.systems.reactor.level);
     const summary = el('div', { class: 'power__summary', id: 'power-summary' });
@@ -333,18 +347,40 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
         'div',
         { class: 'power__tile', id: `power-${id}`, title: SYSTEMS[id].name },
         el('div', { class: 'power__label' }, el('span', { class: 'power__code' }, SYSTEMS[id].code), el('span', { class: 'power__key' }, POWER_KEYS[i])),
+        el('div', { class: 'power__name' }, SYSTEMS[id].name),
         el('div', { class: 'power__pips' }, bars),
         el('div', { class: 'power__buttons' }, minus, plus),
       );
-      return { id, node, minus, plus, bars };
+      // Folded, each breaker is just a lamp per bar under its code.
+      const lamps = pips(sim.state.systems[id].level);
+      const mini = el('div', { class: 'power__mini', id: `power-mini-${id}` }, el('span', {}, SYSTEMS[id].code), el('span', { class: 'power__minipips' }, lamps));
+      return { id, node, minus, plus, bars, mini, lamps };
     });
-    power = { reactorPips, summary, lights, tiles };
-    return el(
+    const toggle = el('button', { class: 'btn btn--small power__toggle', type: 'button', id: 'btn-breakers', 'aria-expanded': 'false', press: () => openBoard(!power.open, { byHand: true }) }, el('span', { id: 'breakers-label' }, 'Breakers'), el('small', { class: 'power__key' }, 'P'));
+    const board = el('div', { class: 'power__tiles', id: 'breaker-board', hidden: true }, tiles.map((t) => t.node));
+    const folded = el('div', { class: 'power__folded', id: 'breakers-folded' }, tiles.map((t) => t.mini));
+    power = { reactorPips, summary, lights, tiles, toggle, board, folded, open: false, byFight: false, node: null };
+    power.node = el(
       'div',
-      { class: 'panel power', id: 'power' },
-      el('div', { class: 'power__reactor' }, el('div', { class: 'stencil' }, 'Reactor'), el('div', { class: 'power__pips power__pips--reactor' }, reactorPips), summary, lights),
-      el('div', { class: 'power__tiles' }, tiles.map((t) => t.node)),
+      { class: 'panel power breakers is-closed', id: 'power' },
+      el('div', { class: 'power__reactor' }, el('div', { class: 'stencil' }, 'Reactor'), el('div', { class: 'power__pips power__pips--reactor' }, reactorPips), summary, lights, toggle),
+      board,
+      folded,
     );
+    return power.node;
+  }
+
+  /** Open or fold the breaker board. One a fight opened folds again when the fight is over, unless the player has touched it since. */
+  function openBoard(open, { byHand = false, byFight = false } = {}) {
+    if (byHand) power.byFight = false;
+    if (power.open === open) return;
+    power.byFight = byFight && open;
+    power.open = open;
+    power.board.hidden = !open;
+    power.folded.hidden = open;
+    power.node.classList.toggle('is-closed', !open);
+    power.toggle.setAttribute('aria-expanded', String(open));
+    setText(power.toggle.firstChild, open ? 'Fold' : 'Breakers');
   }
 
   function updatePower() {
@@ -358,9 +394,13 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
     for (const tile of power.tiles) {
       const system = sim.state.systems[tile.id];
       const works = usable(sim, tile.id);
-      tile.bars.forEach((node, i) => setPip(node, i >= works ? 'broken' : i < system.power ? 'on' : 'off'));
+      const look = (i) => (i >= works ? 'broken' : i < system.power ? 'on' : 'off');
+      tile.bars.forEach((node, i) => setPip(node, look(i)));
+      tile.lamps.forEach((node, i) => setPip(node, look(i)));
       tile.node.classList.toggle('is-dead', system.power === 0);
       tile.node.classList.toggle('is-damaged', system.damage > 0);
+      tile.mini.classList.toggle('is-dead', system.power === 0);
+      tile.mini.classList.toggle('is-damaged', system.damage > 0);
       tile.minus.disabled = system.power === 0;
       tile.plus.disabled = system.power >= works || spare < 1;
     }
@@ -566,7 +606,8 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
     if (fightBar.node.hidden !== !fight) fightBar.node.hidden = !fight;
     if (!fight && !fightBar.call.node.hidden) fightBar.call.node.hidden = true;
     if (!fight) {
-      // The fight is gone: let go of anything that pointed at it.
+      // The fight is gone: let go of anything that pointed at it, and fold the board it opened.
+      if (power.byFight) openBoard(false);
       if (selectedWeapon !== null) selectWeapon(null);
       if (selected?.kind === 'foe') select(null);
       impacts = [];
@@ -1282,6 +1323,10 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
       if (sim.state.fight) order({ type: 'ship.brace' });
       return;
     }
+    if (action === 'breakers') {
+      openBoard(!power.open, { byHand: true });
+      return;
+    }
     if (action !== 'back') return;
     if (sheet) openSheet(sheet);
     else if (movingCrate) movingCrate = null;
@@ -1302,6 +1347,7 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
       pauseNote: el('small', { id: 'pause-note' }, 'Space bar'),
       aiText: el('span', { class: 'aibox__text', id: 'ai-text' }),
       sheet: el('div', { class: 'panel sheet', id: 'sheet', hidden: true }),
+      intercom: el('div', { class: 'intercom', id: 'intercom', hidden: true, 'aria-live': 'polite' }),
     };
     // Margo: her face on the monitor, and what she is saying (D-073).
     nodes.ai = el(
@@ -1328,7 +1374,7 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
       ),
     );
     nodes.bottom = el('div', { class: 'shipdock' }, nodes.sheet, nodes.ai, buildFightBar(), el('div', { class: 'shipdock__row' }, nodes.status, nodes.pause), buildPower());
-    root.replaceChildren(el('section', { class: 'ship' }, nodes.top, nodes.bottom, nodes.info));
+    root.replaceChildren(el('section', { class: 'ship' }, nodes.top, nodes.bottom, nodes.info, nodes.intercom));
     buildPanel();
   }
 
@@ -1365,6 +1411,19 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
         input.on('info', onInfo),
         input.on('key', onKey),
         input.on('dragstart', () => (nodes.info.hidden = true)),
+        // A fight opens the breaker board: power is what you play with in one (D-095).
+        sim.events.on('fight.started', () => openBoard(true, { byFight: true })),
+        // Our crew answer every order over the intercom (D-094).
+        sim.events.on('crew.ordered', (event) => {
+          const found = findCrew(sim, event.crew);
+          if (!found) return;
+          const said = intercom.reply(event, found.ship.layout.room(event.room)?.name ?? 'there');
+          if (!said) return;
+          heard = { name: found.member.name, text: said.text, at: performance.now() };
+          nodes.intercom.replaceChildren(el('span', { class: 'stencil intercom__who' }, `Intercom · ${heard.name}`), el('span', { class: 'intercom__text', id: 'intercom-text' }, said.text));
+          nodes.intercom.hidden = false;
+          audio?.play('blip');
+        }),
         sim.events.on('shot.resolved', (event) => {
           impacts.push({ side: event.side, room: event.room, result: event.result, damage: event.damage, effects: event.effects, blind: event.blind, tick: event.tick });
           if (event.side === 'enemy' && event.result === 'hit') shake = { tick: event.tick, strength: SHAKE_BASE + SHAKE_PER_DAMAGE * event.damage };
@@ -1378,6 +1437,10 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
     },
     /** Called every rendered frame, paused or not. */
     update() {
+      if (heard && performance.now() - heard.at > INTERCOM_MS) {
+        heard = null;
+        nodes.intercom.hidden = true;
+      }
       updateFight(); // first: the weapons bar coming or going moves the space the ships are fitted to
       measure();
       const enemy = enemyOf(sim);

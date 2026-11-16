@@ -91,7 +91,7 @@ function pickGreeting() {
 
 let stopTyping = () => {};
 
-const shipView = createShipView({ canvas: viewCanvas, root, input, sim, clock, audio, settings, debug: flags.debug, onBack: () => machine.go('title') });
+const shipView = createShipView({ canvas: viewCanvas, root, input, sim, clock, audio, settings, debug: flags.debug, crewReplies: Object.fromEntries(content.all('crew').map(({ id, replies }) => [id, replies])), onBack: () => machine.go('title') });
 
 // Auto-pause (brief §7): stop the clock the moment something goes badly wrong, and say what.
 const AUTO_PAUSE_TEXT = {

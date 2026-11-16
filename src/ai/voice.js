@@ -36,7 +36,7 @@ const crewName = (sim, event) => ({ crew_name: findCrew(sim, event.crew)?.member
 export const TRIGGERS = Object.freeze({
   'run.start': { category: 'greeting', priority: 2, ttl: 30 },
   idle: { category: 'idle', priority: 0, ttl: 6 },
-  'crew.ordered': { category: 'order_confirm', priority: 1, ttl: 4, cooldown: 10, chance: 0.4, slots: crewName },
+  'crew.ordered': { category: 'order_confirm', priority: 1, ttl: 4, cooldown: 20, chance: 0.15, slots: crewName }, // rarer since the crew answer for themselves (D-094)
   'power.brownout': { category: 'hazard', priority: 3, ttl: 10, cooldown: 30 },
   'crew.hurt': { category: 'crew_injury', priority: 3, ttl: 12, cooldown: 15, slots: crewName },
   // A fire or a hole in a room she cannot see into is not news until someone looks (senses.js): then it is "found".

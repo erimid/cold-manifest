@@ -3,18 +3,39 @@
     {
       "id": "ilse",
       "name": "Ilse",
-      "placeholder": true
+      "placeholder": true,
+      "replies": {
+        "move": ["Copy. {room}.", "On my way to {room}.", "Moving.", "{room}. Got it."],
+        "open": ["I'll crack it.", "Breaking the seal.", "Opening it up."],
+        "carry": ["Taking it to {room}.", "Lifting. {room}, you said.", "Heavy. Moving it."],
+        "jettison": ["Spacing it. Your call.", "Out the lock it goes.", "Dumping it."],
+        "load": ["Fetching rounds.", "Going for ammo.", "I'll feed the gun."]
+      }
     },
     {
       "id": "dace",
       "name": "Dace",
       "placeholder": true,
-      "engineer": true
+      "engineer": true,
+      "replies": {
+        "move": ["Yeah, yeah. {room}.", "Going. Don't touch anything.", "{room}? Fine.", "On it."],
+        "open": ["Somebody sealed this for a reason.", "Cutting the seal.", "Fine. Let's see."],
+        "carry": ["My back, your crate. {room}.", "Hauling it to {room}.", "Got it. Slowly."],
+        "jettison": ["Hope that wasn't paid for.", "Cycling the lock.", "Gone in a minute."],
+        "load": ["Rounds. Right.", "I'll fetch a crate.", "Feeding the thrower."]
+      }
     },
     {
       "id": "okoro",
       "name": "Okoro",
-      "placeholder": true
+      "placeholder": true,
+      "replies": {
+        "move": ["Heading to {room}.", "Understood. {room}.", "On my way.", "I'm going."],
+        "open": ["I'll have a look inside.", "Opening it.", "Let's see what we're carrying."],
+        "carry": ["Carrying it to {room}.", "I've got it. {room}.", "Moving the crate."],
+        "jettison": ["Taking it to the lock.", "Understood. It goes.", "Spacing it now."],
+        "load": ["Bringing rounds.", "Ammo run. Going.", "I'll load it."]
+      }
     }
   ]
 }
