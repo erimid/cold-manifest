@@ -299,13 +299,121 @@ body {
 
 .shipdock {
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 
 .shipdock__row {
   display: flex;
   align-items: stretch;
   gap: 12px;
+}
+
+/* ---------- the AI's text box, log and settings ---------- */
+
+.shipdock {
+  position: relative;
+}
+
+.aibox {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 56px;
+  padding: 6px 8px 6px 14px;
+  border-left: 8px solid var(--amber-dim);
+}
+
+.aibox.is-urgent {
+  border-left-color: var(--alarm);
+}
+
+.aibox__name {
+  font-size: 0.72em;
+  white-space: nowrap;
+}
+
+.aibox__text {
+  flex: 1;
+  min-width: 0;
+  line-height: 1.35;
+  color: var(--paper);
+}
+
+.aibox.is-typing .aibox__text::after {
+  content: '▌';
+  color: var(--amber);
+}
+
+.sheet {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 10px);
+  width: min(520px, 100%);
+  max-height: min(340px, 45vh);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  box-shadow: 0 6px 0 #05070b;
+  z-index: 3;
+}
+
+.sheet[hidden] {
+  display: none;
+}
+
+.sheet__sub {
+  margin-top: 6px;
+  font-size: 0.75em;
+}
+
+.ailog {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow-y: auto;
+  touch-action: pan-y;
+  -webkit-overflow-scrolling: touch;
+  font-size: 0.85em;
+  line-height: 1.45;
+}
+
+.ailog li {
+  padding: 5px 0;
+  border-top: 1px dashed var(--hull-edge);
+}
+
+.ailog time {
+  color: var(--amber-dim);
+  margin-right: 6px;
+}
+
+.btn--toggle {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  border-left-color: #4a515d;
+}
+
+.btn--toggle small {
+  margin: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+}
+
+.btn--toggle.is-on {
+  border-left-color: var(--amber);
+}
+
+.btn--toggle.is-on small {
+  color: var(--amber);
+  font-weight: 700;
+}
+
+.btn--pause.is-auto small {
+  color: #3a2a12;
+  font-weight: 700;
 }
 
 /* ---------- crew bar ---------- */

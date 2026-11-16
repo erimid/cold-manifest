@@ -47,6 +47,12 @@ export function createClock({ sim, tickSeconds, maxTicksPerFrame = 5 }) {
     toggle(reason = 'player') {
       setPaused(!paused, reason);
     },
+    /** Debug only: run exactly one tick while paused, to watch something happen a frame at a time. */
+    stepOnce() {
+      if (!paused) return 0;
+      sim.step();
+      return 1;
+    },
     /** Called with { paused, reason } whenever pause changes. Returns a function that stops listening. */
     onChange(fn) {
       listeners.add(fn);

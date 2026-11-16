@@ -18,6 +18,8 @@
 //   info       { x, y, pointerType, source }          long-press, or right-click: the touch
 //                                                     stand-in for right-click and hover info
 //   hover      { x, y }                               mouse only; nothing may depend on it
+//   gesture    {}                                     any touch, click or key: the moment sound may start
+//   press      { control }                            a DOM control was pressed
 //   key        { action, code, shift }                     a mapped key from keymap.js
 // Canvas coordinates are CSS pixels from the canvas's top-left corner.
 
@@ -141,7 +143,10 @@ export function createInput({ canvas, keymap = KEYMAP, root = window } = {}) {
     const moved = Math.hypot(event.clientX - current.startX, event.clientY - current.startY);
     const slop = (TAP_SLOP[current.pointerType] ?? TAP_SLOP.mouse) * 2;
     const releasedOn = controlAt(document.elementFromPoint(event.clientX, event.clientY));
-    if (moved <= slop && releasedOn === current.control) pressHandlers.get(current.control)?.({ pointerType: current.pointerType, control: current.control });
+    if (moved <= slop && releasedOn === current.control) {
+      emit('press', { control: current.control });
+      pressHandlers.get(current.control)?.({ pointerType: current.pointerType, control: current.control });
+    }
   }
 
   function onPointerCancel(event) {
@@ -149,6 +154,7 @@ export function createInput({ canvas, keymap = KEYMAP, root = window } = {}) {
   }
 
   function onKeyDown(event) {
+    emit('gesture', {});
     if (event.repeat || event.ctrlKey || event.metaKey || event.altKey) return;
     const el = document.activeElement;
     if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
@@ -158,6 +164,7 @@ export function createInput({ canvas, keymap = KEYMAP, root = window } = {}) {
       const control = controlAt(el);
       if (control && !control.disabled) {
         event.preventDefault();
+        emit('press', { control });
         pressHandlers.get(control)({ pointerType: 'keyboard', control });
       }
       return;
@@ -175,6 +182,9 @@ export function createInput({ canvas, keymap = KEYMAP, root = window } = {}) {
   }
 
   const options = { passive: false };
+  // Browsers differ on which events count as the player's permission to start sound; offer them all.
+  const onGesture = () => emit('gesture', {});
+  for (const type of ['pointerdown', 'pointerup', 'touchend', 'click']) root.addEventListener(type, onGesture, { capture: true, passive: true });
   root.addEventListener('pointerdown', onPointerDown, options);
   root.addEventListener('pointermove', onPointerMove, options);
   root.addEventListener('pointerup', onPointerUp, options);
@@ -202,6 +212,7 @@ export function createInput({ canvas, keymap = KEYMAP, root = window } = {}) {
     destroy() {
       endPress();
       tracker.cancel();
+      for (const type of ['pointerdown', 'pointerup', 'touchend', 'click']) root.removeEventListener(type, onGesture, { capture: true });
       root.removeEventListener('pointerdown', onPointerDown, options);
       root.removeEventListener('pointermove', onPointerMove, options);
       root.removeEventListener('pointerup', onPointerUp, options);

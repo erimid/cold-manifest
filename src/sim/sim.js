@@ -13,8 +13,10 @@
 // system or a pair of hands. It has air (atmosphere.js): oxygen flows through
 // doors, fire burns it, breaches and airlocks lose it, and a sealed room can
 // be jettisoned. It has crew (crew.js): they walk the room and door graph and
-// fight fires, patch breaches and repair systems where they stand.
+// fight fires, patch breaches and repair systems where they stand. And it has
+// a voice (ai/voice.js): the ship AI remarks on what happens, on the same clock.
 
+import { attachVoice, checkVoiceInvariants, newVoiceState, stepVoice } from '../ai/voice.js';
 import { createEventBus } from '../engine/events.js';
 import { createRngSet } from '../engine/rng.js';
 import { ATMOSPHERE_COMMANDS, checkAtmosphereInvariants, stepAtmosphere } from './atmosphere.js';
@@ -55,6 +57,7 @@ function newRoomState() {
     hull: 1, // 0 to 1 integrity
     fire: 0, // 0 to 1 intensity
     breach: 0, // 0 to 1 size of the hole
+    breached: false, // whether the current breach has been announced
     scorch: 0, // 0 to 1 progress of a fire toward breaking the next bar of the room's system
     burning: false, // whether the current fire has been announced
     jettisoned: false, // cut loose and gone for good
@@ -177,19 +180,22 @@ function stepLights(sim) {
 /** Everything that happens each tick, in order. Later sessions add systems here. */
 // Order matters: crew act on the world as it stood, then fire can break a system, so power is settled
 // after the air and before anything reads it.
-const SYSTEMS = [(sim) => stepCrew(sim, TICK_SECONDS), (sim) => stepAtmosphere(sim, TICK_SECONDS), stepPower, stepDoors, stepLights];
+const SYSTEMS = [(sim) => stepCrew(sim, TICK_SECONDS), (sim) => stepAtmosphere(sim, TICK_SECONDS), stepPower, stepDoors, stepLights, stepVoice];
 
 /**
  * Create a simulation.
  *   seed    the run seed
  *   ship    a ship layout item from content/ships/
  *   crew    the starting roster: [{ id, name }], placed in the ship's crewStart rooms
+ *   lines   the AI line library from content/ai-lines/ (she is silent without it)
  */
-export function createSim({ seed, ship, crew = [] }) {
+export function createSim({ seed, ship, crew = [], lines = [] }) {
   const layout = buildLayout(ship);
   const sim = {
     /** The ship's fixed shape: rooms, doors, vents. Never changes during a run. */
     layout,
+    /** Everything the AI could say. Content, not state. */
+    lines,
     state: {
       seed: String(seed),
       ship: layout.id,
@@ -200,6 +206,7 @@ export function createSim({ seed, ship, crew = [] }) {
       doors: Object.fromEntries(layout.doors.map((door) => [door.id, newDoorState()])),
       systems: newSystemsState(layout.power),
       crew: newCrewState(layout, crew),
+      ai: newVoiceState(),
     },
     rng: createRngSet(seed),
     events: createEventBus(),
@@ -260,6 +267,7 @@ export function createSim({ seed, ship, crew = [] }) {
       sim.rng.setState(snap.rng);
     },
   };
+  attachVoice(sim);
   return sim;
 }
 
@@ -291,7 +299,7 @@ export function checkInvariants(sim) {
     if (!['open', 'closed', 'locked', 'jammed'].includes(d.state)) problems.push(`${door.id}.state is ${d.state}`);
     if (!in01(d.openness)) problems.push(`${door.id}.openness is ${d.openness}`);
   }
-  problems.push(...checkPowerInvariants(sim), ...checkAtmosphereInvariants(sim), ...checkCrewInvariants(sim));
+  problems.push(...checkPowerInvariants(sim), ...checkAtmosphereInvariants(sim), ...checkCrewInvariants(sim), ...checkVoiceInvariants(sim));
   if (Object.keys(state.rooms).length !== layout.rooms.length) problems.push('room states do not match the layout');
   if (Object.keys(state.doors).length !== layout.doors.length) problems.push('door states do not match the layout');
   return problems;

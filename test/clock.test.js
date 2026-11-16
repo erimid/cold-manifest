@@ -145,3 +145,14 @@ test('a listener may unsubscribe itself while being called', () => {
   bus.emit('x');
   assert.equal(calls, 21);
 });
+
+test('stepOnce runs exactly one tick, and only while paused', () => {
+  let ticks = 0;
+  const clock = createClock({ sim: { step: () => (ticks += 1) }, tickSeconds: 0.05 });
+  assert.equal(clock.stepOnce(), 0, 'not while running');
+  clock.pause();
+  assert.equal(clock.stepOnce(), 1);
+  assert.equal(clock.stepOnce(), 1);
+  assert.equal(ticks, 2);
+  assert.equal(clock.advance(1), 0, 'still paused');
+});

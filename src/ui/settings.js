@@ -1,0 +1,65 @@
+// Player settings (brief §7, §17), kept in localStorage. Settings are not
+// part of the simulation: they change what the player sees and hears and when
+// the game pauses for them, never what happens.
+
+const KEY = 'cold-manifest.settings.v1';
+
+/** Auto-pause is on by default on touch screens, where a slip of the finger costs more (brief §7). */
+export function defaultSettings({ touch = false } = {}) {
+  return { sound: true, autoPause: { fire: touch, breach: touch, death: touch } };
+}
+
+/** What each auto-pause setting is called, and which game event trips it. */
+export const AUTO_PAUSE = Object.freeze([
+  { id: 'fire', label: 'A fire starts', event: 'fire.started' },
+  { id: 'breach', label: 'The hull is breached', event: 'breach.opened' },
+  { id: 'death', label: 'A crew member dies', event: 'crew.died' },
+]);
+
+/** Merge saved values over defaults, keeping only keys we know and only true or false. */
+export function mergeSettings(defaults, saved) {
+  const out = structuredClone(defaults);
+  if (!saved || typeof saved !== 'object') return out;
+  if (typeof saved.sound === 'boolean') out.sound = saved.sound;
+  for (const key of Object.keys(out.autoPause)) {
+    if (typeof saved.autoPause?.[key] === 'boolean') out.autoPause[key] = saved.autoPause[key];
+  }
+  return out;
+}
+
+/**
+ * Load settings. `storage` is localStorage (or null where it is blocked);
+ * `overrides` come from the URL (?autopause=0, ?sound=0) and are not saved.
+ */
+export function createSettings({ storage, touch, overrides = {} }) {
+  let saved = null;
+  try {
+    saved = JSON.parse(storage?.getItem(KEY) ?? 'null');
+  } catch {
+    saved = null;
+  }
+  const values = mergeSettings(defaultSettings({ touch }), saved);
+  if (typeof overrides.sound === 'boolean') values.sound = overrides.sound;
+  if (typeof overrides.autoPause === 'boolean') for (const key of Object.keys(values.autoPause)) values.autoPause[key] = overrides.autoPause;
+  const listeners = new Set();
+
+  return {
+    values,
+    /** Change one setting, by path: set('sound', false) or set('autoPause.fire', true). */
+    set(path, value) {
+      const [first, second] = path.split('.');
+      if (second) values[first][second] = Boolean(value);
+      else values[first] = Boolean(value);
+      try {
+        storage?.setItem(KEY, JSON.stringify(values));
+      } catch {
+        // Private browsing or a full disk: the setting still holds for this visit.
+      }
+      for (const fn of [...listeners]) fn(values);
+    },
+    onChange(fn) {
+      listeners.add(fn);
+      return () => listeners.delete(fn);
+    },
+  };
+}
