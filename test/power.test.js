@@ -5,7 +5,7 @@ import { createRng } from '../src/engine/rng.js';
 import { POWERED, SHED_ORDER, aiCoreStatus, free, lightsDraw, litRooms, routed, supply, used, validatePower } from '../src/sim/power.js';
 import { validateLayout } from '../src/sim/ship.js';
 import { DOOR_SECONDS, MANUAL_DOOR_SECONDS, TICK_RATE, checkInvariants } from '../src/sim/sim.js';
-import { newSim, shipCopy } from './helpers.js';
+import { newSim, putCrew, shipCopy } from './helpers.js';
 
 const run = (sim, ticks = 1) => {
   for (let i = 0; i < ticks; i++) sim.step();
@@ -150,7 +150,7 @@ test('unpowered doors need a crew member present', () => {
   assert.match(sim.whyNot({ type: 'door.set', door, state: 'open' }), /by hand/);
   assert.throws(() => sim.enqueue({ type: 'door.set', door, state: 'open' }), /by hand/);
   // Someone in the room next to it can haul it open, slowly.
-  sim.state.crew.test = { room: 'reactor' };
+  putCrew(sim, 'test', 'reactor');
   assert.equal(sim.whyNot({ type: 'door.set', door, state: 'open' }), null);
   assert.match(sim.whyNot({ type: 'door.set', door: 'd_bulkhead', state: 'open' }), /by hand/, 'but only a door they can reach');
   give(sim, { type: 'door.set', door, state: 'open' });
@@ -169,7 +169,7 @@ test('a locked door stays locked when door control loses power', () => {
   const sim = newSim();
   give(sim, { type: 'door.set', door: 'd_brig', state: 'locked' });
   give(sim, { type: 'power.add', system: 'doors', delta: -1 });
-  sim.state.crew.test = { room: 'brig' };
+  putCrew(sim, 'test', 'brig');
   assert.equal(sim.state.doors.d_brig.state, 'locked');
   assert.match(sim.whyNot({ type: 'door.set', door: 'd_brig', state: 'open' }), /lock needs door control power/);
   give(sim, { type: 'power.add', system: 'doors', delta: 1 });

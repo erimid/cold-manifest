@@ -6,6 +6,7 @@
 // arrive in the next sessions and plug into this screen.
 
 import { pickTarget } from '../engine/hit.js';
+import { describeTask } from '../sim/crew.js';
 import { POWERED, aiCoreStatus, free, lightsDraw, litRooms, supply, usable } from '../sim/power.js';
 import { SPACE, SYSTEMS } from '../sim/systems.js';
 import { TICK_SECONDS } from '../sim/sim.js';
@@ -14,6 +15,8 @@ import { createShipRenderer } from './ship-render.js';
 
 const percent = (value) => `${Math.round(value * 100)}%`;
 const POWER_KEYS = 'QWERTYUI';
+/** Short task names for the crew bar, where there is no room for a sentence. */
+const CHIP_TASKS = { walking: 'Walking', waiting: 'At a door', extinguish: 'Fighting fire', patch: 'Patching hull', repair: 'Repairing', unjam: 'Freeing door', idle: 'Standing by' };
 /** Start a sentence with a capital: the sim's reasons are written to follow "because". */
 const sentence = (text) => `${text.charAt(0).toUpperCase()}${text.slice(1)}.`;
 
@@ -24,6 +27,8 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, debug 
   let size = { w: 0, h: 0, dpr: 1 };
   let view = { scale: 1, ox: 0, oy: 0 };
   let selected = null; // { kind: 'room' | 'door', id }
+  let selectedCrew = null; // a crew id; while set, tapping a room sends them there
+  let roster = null; // the crew bar's live parts
   let showVents = false;
   let subscriptions = [];
   let nodes = null;
@@ -46,6 +51,10 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, debug 
       if (room.system) return `${room.name}. ${SYSTEMS[room.system].blurb}`;
       if (room.kind === 'helm') return `${room.name}. Where the ship is flown from.`;
       return `${room.name}. Gets you from one problem to the next.`;
+    }
+    if (target?.kind === 'crew') {
+      const member = sim.state.crew[target.id];
+      return `${member.name}. ${describeTask(sim, member)}.${member.alive ? ` Health ${percent(member.health)}.` : ''}`;
     }
     if (target?.kind === 'door') {
       const door = layout.door(target.id);
@@ -162,6 +171,7 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, debug 
 
   function select(next) {
     selected = next;
+    if (next) selectedCrew = null;
     nodes.info.hidden = true;
     buildPanel();
   }
@@ -175,12 +185,61 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, debug 
     return el('button', { class: `btn btn--small ${extraClass}`, type: 'button', id, press }, label);
   }
 
+  function selectCrew(id) {
+    selectedCrew = id;
+    if (id) selected = null;
+    nodes.info.hidden = true;
+    buildPanel();
+  }
+
+  function buildRoster() {
+    const chips = Object.values(sim.state.crew).map((member) => {
+      const health = el('i', { class: 'crewchip__health' });
+      const task = el('span', { class: 'crewchip__task' });
+      const node = el(
+        'button',
+        { class: 'btn crewchip', type: 'button', id: `crew-${member.id}`, press: () => selectCrew(selectedCrew === member.id ? null : member.id) },
+        el('span', { class: 'crewchip__num', style: `background:${renderer.crewColour(member.index)}` }, String(member.index + 1)),
+        el('span', { class: 'crewchip__body' }, el('span', { class: 'crewchip__name' }, member.name), task, el('span', { class: 'crewchip__bar' }, health)),
+      );
+      return { id: member.id, node, health, task };
+    });
+    roster = chips;
+    return el('div', { class: 'crewbar', id: 'crewbar' }, chips.map((chip) => chip.node));
+  }
+
+  function updateRoster() {
+    for (const chip of roster) {
+      const member = sim.state.crew[chip.id];
+      setText(chip.task, member.alive ? (CHIP_TASKS[member.task] ?? 'Standing by') : 'Dead');
+      const width = `${Math.round(member.health * 100)}%`;
+      if (chip.health.style.width !== width) chip.health.style.width = width;
+      chip.node.classList.toggle('is-selected', selectedCrew === chip.id);
+      chip.node.classList.toggle('is-dead', !member.alive);
+      chip.node.classList.toggle('is-hurt', member.alive && member.health < 0.35);
+    }
+  }
+
   function buildPanel() {
     panel = null;
+    if (selectedCrew) {
+      const member = sim.state.crew[selectedCrew];
+      const stats = { health: stat('Health'), where: stat('In'), doing: stat('Doing'), suit: stat('Suit') };
+      const suit = button('btn-suit', 'Suit up', () => order({ type: 'crew.suit', crew: member.id, on: !sim.state.crew[member.id].suit }));
+      const note = el('span', { class: 'status__note' });
+      nodes.status.replaceChildren(
+        el('div', { class: 'status__head' }, el('div', { class: 'status__title', id: 'status-title' }, member.name), el('div', { class: 'stencil' }, `Crew ${member.index + 1}`), note),
+        el('div', { class: 'status__stats' }, Object.values(stats).map((s) => s.node)),
+        el('div', { class: 'status__controls' }, suit, el('span', { class: 'status__hint status__hint--inline', id: 'crew-hint' }, 'Tap a room to send them there.')),
+      );
+      panel = { kind: 'crew', id: member.id, stats, suit, note };
+      updatePanel();
+      return;
+    }
     if (!selected) {
       nodes.status.replaceChildren(
         el('div', { class: 'stencil' }, layout.name),
-        el('p', { class: 'status__hint' }, 'Tap a room for its status. Tap a door to open or close it. Long-press anything to ask what it is.'),
+        el('p', { class: 'status__hint' }, 'Tap a crew member, then a room, to send them there. Tap a room for its status, or a door to open or close it. Long-press anything to ask what it is.'),
       );
       return;
     }
@@ -263,6 +322,18 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, debug 
   /** Refresh the numbers and button states in place. The panel's elements are never rebuilt mid-press. */
   function updatePanel() {
     if (!panel) return;
+    if (panel.kind === 'crew') {
+      const member = sim.state.crew[panel.id];
+      setText(panel.stats.health.value, member.alive ? percent(member.health) : 'dead');
+      panel.stats.health.node.classList.toggle('is-alarm', !member.alive || member.health < 0.35);
+      setText(panel.stats.where.value, layout.room(member.room).name);
+      setText(panel.stats.doing.value, describeTask(sim, member));
+      setText(panel.stats.suit.value, member.suit ? 'on (slower)' : 'off');
+      setText(panel.suit, member.suit ? 'Suit off' : 'Suit up');
+      panel.suit.disabled = !member.alive;
+      setText(panel.note, queuedFor('crew', panel.id) ? 'Order queued' : refusalText());
+      return;
+    }
     if (panel.kind === 'room') {
       const r = sim.state.rooms[panel.id];
       setText(panel.stats.oxygen.value, percent(r.oxygen));
@@ -326,9 +397,19 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, debug 
 
   function onTap({ x, y, pointerType }) {
     counts.canvasTaps += 1;
-    const target = pickTarget(renderer.targets(view), x, y, pointerType);
+    const target = pickTarget(renderer.targets(view, sim.state.crew), x, y, pointerType);
     if (!target) {
+      selectedCrew = null;
       select(null);
+      return;
+    }
+    if (target.kind === 'crew') {
+      selectCrew(selectedCrew === target.id ? null : target.id);
+      return;
+    }
+    if (target.kind === 'room' && selectedCrew) {
+      // Someone is selected: a room is where they should go. They stay selected for the next order.
+      order({ type: 'crew.move', crew: selectedCrew, room: target.id });
       return;
     }
     select({ kind: target.kind, id: target.id });
@@ -342,7 +423,7 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, debug 
 
   function onInfo({ x, y, pointerType }) {
     counts.infos += 1;
-    const text = describe(pickTarget(renderer.targets(view), x, y, pointerType)) ?? 'Open space. Cold, and a long way from anywhere.';
+    const text = describe(pickTarget(renderer.targets(view, sim.state.crew), x, y, pointerType)) ?? 'Open space. Cold, and a long way from anywhere.';
     nodes.info.textContent = text;
     nodes.info.hidden = false;
     nodes.info.style.left = `${Math.max(8, Math.min(x + 14, size.w - 300))}px`;
@@ -355,8 +436,14 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, debug 
       if (system) order({ type: 'power.add', system, delta: shift ? -1 : 1 });
       return;
     }
+    if (action.startsWith('select-')) {
+      const member = Object.values(sim.state.crew)[Number(action.slice(7)) - 1];
+      if (member) selectCrew(selectedCrew === member.id ? null : member.id);
+      return;
+    }
     if (action !== 'back') return;
-    if (selected) select(null);
+    if (selectedCrew) selectCrew(null);
+    else if (selected) select(null);
     else onBack();
   }
 
@@ -374,6 +461,7 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, debug 
       'div',
       { class: 'shipbar' },
       el('div', { class: 'panel shipbar__name' }, el('div', { class: 'stencil' }, layout.name), nodes.clock),
+      buildRoster(),
       el(
         'div',
         { class: 'shipbar__buttons' },
@@ -428,16 +516,22 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, debug 
         state: sim.state,
         // Game time, so flames and alarms hold still while paused.
         time: (sim.state.tick + clock.alpha) * TICK_SECONDS,
+        alpha: clock.alpha,
         selected,
+        selectedCrew,
         showVents,
       });
       updateClock();
       updatePanel();
       updatePower();
+      updateRoster();
     },
     /** For automated tests and the debug console. */
     debug: {
-      targets: () => renderer.targets(view),
+      targets: () => renderer.targets(view, sim.state.crew),
+      get selectedCrew() {
+        return selectedCrew;
+      },
       counts,
       get view() {
         return view;
