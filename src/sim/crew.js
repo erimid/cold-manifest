@@ -45,6 +45,9 @@ export const UNJAM_RATE = 1 / 6; // doors
 /** A suit makes fiddly work slower; so does the dark (brief §6). Fire makes its own light. */
 export const SUIT_WORK = 0.75;
 export const DARK_WORK = 0.5;
+/** Below this light a room counts as dark to walk through, and crew go at DARK_WALK of their pace (S2.5, D-096). */
+export const DARK_LIGHT = 0.2;
+export const DARK_WALK = 0.7;
 /** Health regained per second in a powered medbay. */
 export const MEDBAY_HEAL = 1 / 40;
 /** How open a door must be to walk through. */
@@ -333,7 +336,9 @@ function legSpeed(sim, member, next) {
 function walk(sim, member, seconds) {
   // Time left this tick, spent leg by leg, as each leg has its own pace.
   let time = seconds;
-  const pace = WALK_SPEED * (member.suit ? SUIT_SPEED : 1) * (member.carry ? CARRY_SPEED : 1);
+  // Feeling the way through an unlit room is slower (S2.5, D-096).
+  const lit = sim.state.rooms[member.room]?.light ?? 1;
+  const pace = WALK_SPEED * (member.suit ? SUIT_SPEED : 1) * (member.carry ? CARRY_SPEED : 1) * (lit < DARK_LIGHT ? DARK_WALK : 1);
   member.task = 'walking';
   while (member.path.length) {
     const next = member.path[0];

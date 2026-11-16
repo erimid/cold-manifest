@@ -69,6 +69,7 @@ function checkWeapon(item) {
   if (!positive(item.flight)) problems.push('flight must be seconds above 0');
   if (!Number.isInteger(item.damage) || item.damage < 0) problems.push('damage must be a whole number, 0 or more');
   if (!Number.isInteger(item.pierce) || item.pierce < 0) problems.push('pierce must be a whole number, 0 or more: each point makes a brace spend one more unit to stop it');
+  if (item.mount !== undefined && typeof item.mount !== 'boolean') problems.push('mount, if given, must be true or false');
   if (item.ammo !== undefined && !(item.ammo && Number.isInteger(item.ammo.magazine) && item.ammo.magazine >= 1)) problems.push('ammo, if given, must be { magazine }: the rounds the gun holds, at least 1');
   const effects = item.effects;
   if (!effects || typeof effects !== 'object' || !chance(effects.fire) || !chance(effects.breach) || !chance(effects.crew)) problems.push('effects needs fire, breach and crew, each between 0 and 1');
@@ -113,6 +114,7 @@ export function validateContent(files) {
   const seenIds = new Map(CONTENT_TYPES.map((type) => [type, new Map()]));
   const seenLines = new Map();
   const fittedWeapons = []; // [label, weapon id] for every weapon a ship mounts
+  const unmountable = new Set(); // weapons marked mount: false, such as a drone's zap
 
   for (const file of [...files].sort((a, b) => a.path.localeCompare(b.path))) {
     const { path, data, error } = file;
@@ -152,6 +154,7 @@ export function validateContent(files) {
       const rule = ITEM_RULES[type];
       if (rule) for (const problem of rule(item)) errors.push(`${label}: ${problem}`);
 
+      if (type === 'weapons' && item.mount === false) unmountable.add(item.id);
       if (type === 'ships' && Array.isArray(item.weapons)) for (const id of item.weapons) fittedWeapons.push([label, id]);
 
       if (type === 'ai-lines' && isNonEmptyString(item.text)) {
@@ -167,6 +170,7 @@ export function validateContent(files) {
 
   for (const [label, id] of fittedWeapons) {
     if (!seenIds.get('weapons').has(id)) errors.push(`${label}: fits a weapon that does not exist: "${id}"`);
+    else if (unmountable.has(id)) errors.push(`${label}: fits "${id}", which no ship can mount`);
   }
 
   return { errors, warnings };

@@ -69,6 +69,8 @@ export const TRIGGERS = Object.freeze({
   'ship.braced': { category: 'combat_progress', priority: 2, ttl: 4, cooldown: 30, chance: 0.5 },
   'enemy.ship.braced': { category: 'combat_progress', priority: 2, ttl: 5, cooldown: 30, chance: 0.5 },
   'weapon.empty': { category: 'combat_progress', priority: 3, ttl: 10, cooldown: 20 },
+  'drone.launched': { category: 'combat_progress', priority: 2, ttl: 5, cooldown: 25 },
+  'drone.lost': { category: 'combat_progress', priority: 2, ttl: 5, cooldown: 15 },
   'weapon.loaded': { category: 'order_confirm', priority: 2, ttl: 6, cooldown: 20, chance: 0.6, slots: crewName },
   'crate.opened': { category: 'cargo', priority: 2, ttl: 10, cooldown: 15, slots: crewName },
   'crate.jettisoned': { category: 'cargo', priority: 2, ttl: 10, cooldown: 15 },

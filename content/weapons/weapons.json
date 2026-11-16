@@ -1,5 +1,5 @@
 {
-  "note": "Ship weapons (brief \u00a76, \u00a77). power: bars it needs. charge: seconds to ready a shot. flight: seconds the shot is in the air. damage: hull points, and system bars from S2.2. pierce: extra brace units it takes to stop (S2.8, D-075). ammo: { magazine } for a heavy gun that fires rounds carried up from the hold, one round a shot (S2.8, D-076); none for a gun that needs no rounds. effects: chances of fire and breach and harm to crew in the room, used from S2.2.",
+  "note": "Ship weapons (brief §6, §7). power: bars it needs. charge: seconds to ready a shot. flight: seconds the shot is in the air. damage: hull points, and system bars from S2.2. pierce: extra brace units it takes to stop (S2.8, D-075). ammo: { magazine } for a heavy gun that fires rounds carried up from the hold, one round a shot (S2.8, D-076); none for a gun that needs no rounds. effects: chances of fire and breach and harm to crew in the room, used from S2.2. mount: false marks a weapon no ship fits, such as a carrier drone's zap (S2.5).",
   "items": [
     {
       "id": "pulse-laser",
@@ -57,6 +57,24 @@
         "crew": 0.4
       },
       "blurb": "Burns through a brace as if it were half there. Hungry, and every shot is a cell someone carried up from the hold."
+    },
+    {
+      "id": "drone-zap",
+      "name": "Drone zap",
+      "short": "Zap",
+      "kind": "energy",
+      "power": 1,
+      "charge": 5,
+      "flight": 1,
+      "damage": 1,
+      "pierce": 0,
+      "mount": false,
+      "effects": {
+        "fire": 0.1,
+        "breach": 0,
+        "crew": 0.1
+      },
+      "blurb": "What a carrier's drone spits at you. One hull point, now and then, until a brace burns the drone out."
     }
   ]
 }
