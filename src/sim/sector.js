@@ -33,7 +33,7 @@ import { THRUST, driveShare } from './senses.js';
 import { hasPilot, strike, stepFix, whyNoJump } from './combat.js';
 import { findContact, heldAlongside, liveContacts, SPAWN, spawnContact } from './encounters.js';
 import { rating } from './stations.js';
-import { rollLaneEvent, openEvent } from '../narrative/events.js';
+import { aboard, canMeet, heldBySituation, leaveEvents, openEvent, rollLaneEvent } from '../narrative/events.js';
 
 /** What a point on the chart can be, as the chart labels it. */
 export const NODE_KINDS = Object.freeze({
@@ -400,6 +400,7 @@ export function heldReason(sim) {
   const run = sim.state.run;
   if (run?.crossing?.stalled) return 'out of fuel';
   if (run?.events?.open) return 'a decision is on the table';
+  if (heldBySituation(sim)) return 'we are standing by something alongside';
   if (sim.state.boarding) return 'a ship is clamped to our airlock';
   if (heldAlongside(sim)) return 'a ship is alongside';
   return null;
@@ -523,7 +524,7 @@ function endLeg(sim) {
   sim.events.emit('route.passed', { node: to, kind: node.kind, name: node.name, hazard: node.hazard ?? null, tick: sim.state.tick });
   // The contract's claim: she heaves to by it, and the claim is put to the captain (H.7 makes it a derelict alongside).
   const claim = run.contract?.status === 'active' ? run.contract.claim : null;
-  if (claim && !claim.done && claim.node === to && !run.events?.open) openEvent(sim, claim.event, { force: true, node: to });
+  if (claim && !claim.done && claim.node === to && !run.events?.open && !aboard(sim).some((one) => one.id === claim.event)) openEvent(sim, claim.event, { force: true, node: to });
   startLeg(sim);
 }
 
@@ -539,12 +540,7 @@ function arrive(sim) {
   if (!run.visited.includes(to)) run.visited.push(to);
   run.crossing = null;
   sim.state.fix = 0; // a fix is good for where it was taken
-  if (run.events?.open) {
-    // Whatever was on the table is left behind with the crossing.
-    sim.events.emit('event.lapsed', { event: run.events.open.id, tick: sim.state.tick });
-    run.events.open = null;
-    run.events.next = null;
-  }
+  leaveEvents(sim); // whatever was on the table or waiting aboard is left behind with the crossing
   sim.events.emit('sector.jumped', { from, to, kind: node.kind, left: run.fuel, hours: run.hours, deadline: run.deadline, how: 'jump', tick: sim.state.tick });
   if (to === run.map.delivery && !run.delivered) {
     run.delivered = true;
@@ -567,7 +563,7 @@ export function stepSector(sim, dt) {
   }
   if (c.phase === 'under way') {
     if (!heldReason(sim)) c.t += hours * paceOf(sim);
-    if (c.eventAt !== null && c.t >= c.eventAt * c.length && !run.events?.open) {
+    if (c.eventAt !== null && c.t >= c.eventAt * c.length && canMeet(sim)) {
       c.eventAt = null;
       rollLaneEvent(sim, c.path[c.leg + 1]);
     }

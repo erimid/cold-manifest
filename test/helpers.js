@@ -3,7 +3,8 @@
 import { createContent } from '../src/engine/content.js';
 import { newCrewMember } from '../src/sim/crew.js';
 import { createSim } from '../src/sim/sim.js';
-import { eventView } from '../src/narrative/events.js';
+import { eventView, situationViews } from '../src/narrative/events.js';
+import { spotIn } from '../src/sim/crew.js';
 import { bestRoute, cheapestRoute, nodeOf } from '../src/sim/sector.js';
 import { readContentFiles } from '../tools/lib/load-content.js';
 
@@ -65,9 +66,52 @@ export function answerFirst(sim, view) {
   sim.enqueue({ type: 'event.dismiss' });
 }
 
+/** Stand one of ours in a room on the spot, awake and idle: no walk (tests only). */
+export function standIn(sim, id, room) {
+  const member = sim.state.crew[id];
+  const at = spotIn(sim.layout.room(room), member.index);
+  Object.assign(member, { room, x: at.x, y: at.y, px: at.x, py: at.y, path: [], goal: null, task: 'idle', asleep: false, hidden: null });
+}
+
+/** A situation aboard as the cards show it, by number (H.7), or undefined. */
+export const situation = (sim, n) => situationViews(sim).find((view) => view.n === n);
+
+/**
+ * Deal with a situation aboard (H.7): if nobody is at it, the last of ours is stood in its room for as long as
+ * it takes and then put back where they were. `pick(view)` gives the choice (default: the first open to us);
+ * `dismiss: false` leaves the answered card up. Returns the outcome's text.
+ */
+export function dealWith(sim, n, pick = (view) => view.choices.find((one) => one.available).id, { dismiss = true } = {}) {
+  let back = null;
+  if (situation(sim, n).state === 'waiting') {
+    const spare = Object.values(sim.state.crew).filter((member) => member.owner === 'player' && member.alive).sort((a, b) => b.index - a.index)[0];
+    const { room, x, y, px, py, path, goal, task, asleep, hidden } = spare;
+    back = () => Object.assign(spare, { room, x, y, px, py, path, goal, task, asleep, hidden });
+    standIn(sim, spare.id, situation(sim, n).room);
+    sim.step();
+  }
+  sim.enqueue({ type: 'event.choose', situation: n, choice: pick(situation(sim, n)) });
+  sim.step();
+  const { text } = situation(sim, n).result;
+  if (dismiss) {
+    sim.enqueue({ type: 'event.dismiss', situation: n });
+    sim.step();
+  }
+  back?.();
+  return text;
+}
+
+/** Deal with every situation waiting aboard, each with the first choice open to us. Returns how many there were. */
+export function dealWithAll(sim) {
+  const open = situationViews(sim).filter((view) => !view.result);
+  for (const view of open) dealWith(sim, view.n);
+  return open.length;
+}
+
 /**
  * Fly the crossing under way to the end (H.6): skip along each lane to the next thing on it (`skip: false`
- * flies it in ship time), answer each event with `answer(sim, view)`, then take the fix and jump into port.
+ * flies it in ship time), answer each radio decision with `answer(sim, view)` and deal with each situation aboard
+ * (H.7) by its first open choice, then take the fix and jump into port.
  * Returns the sim's event types seen on the way. Throws if the crossing is still going after `limit` ticks.
  */
 export function flyCrossing(sim, { answer = answerFirst, skip = true, limit = 40000 } = {}) {
@@ -78,6 +122,7 @@ export function flyCrossing(sim, { answer = answerFirst, skip = true, limit = 40
     const view = eventView(sim);
     if (view && !view.result) answer(sim, view);
     else if (view) sim.enqueue({ type: 'event.dismiss' });
+    else if (dealWithAll(sim)) continue;
     else if (run.crossing.stalled) break;
     else if (run.crossing.phase === 'under way' && skip && !sim.whyNot({ type: 'debug.run', skip: true })) sim.enqueue({ type: 'debug.run', skip: true });
     else if (run.crossing.phase === 'off port' && !sim.whyNot({ type: 'route.jump' })) sim.enqueue({ type: 'route.jump' });
@@ -135,6 +180,7 @@ export function offPort(sim) {
   const run = sim.state.run;
   for (let i = 0; i < 200 && run.crossing.phase === 'under way'; i++) {
     if (run.events.open) answerFirst(sim, eventView(sim));
+    else if (dealWithAll(sim)) continue;
     else sim.enqueue({ type: 'debug.run', skip: true });
     sim.step();
   }

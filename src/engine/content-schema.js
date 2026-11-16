@@ -303,6 +303,7 @@ export function gatherRefs(files) {
   const inShips = (key) => new Set(ours.flatMap((ship) => (Array.isArray(ship[key]) ? ship[key] : []).map((part) => part?.id).filter(Boolean)));
   return {
     rooms: inShips('rooms'),
+    ships: ours.map((ship) => ({ id: ship.id, rooms: Array.isArray(ship.rooms) ? ship.rooms.filter(Boolean) : [], doors: Array.isArray(ship.doors) ? ship.doors.filter(Boolean) : [] })), // where a situation can be placed (H.7)
     doors: inShips('doors'),
     systems: new Set(SYSTEM_IDS),
     crew: of('crew'),

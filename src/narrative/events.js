@@ -15,6 +15,15 @@
 //     "priority": 0,                        on a lane, only the events of the highest priority that
 //                                           fit are rolled between (default 0): an inspection (S3.4)
 //                                           comes before anything else at a checkpoint
+//     "place": { "room": "cargo",            where it happens (H.7, D-156). A situation aboard waits in a room: a room
+//                "scope": "Derelict",       id, the room of a system ("sensors"), a kind of room ("helm", "hold"),
+//                "hold": true },            "airlock" (a room with a lock to space), "any", "$name" (where one of the
+//                                           cast is), or a list of these, the first that is still there. `scope` also
+//                                           marks it on the scope under that word; `hold` heaves the ship to while it
+//                                           waits. "radio" instead is a decision made over the radio: the event view
+//     "sign": "Something is dripping...",   a situation only: what is known before anyone is there (Margo says it)
+//     "lapse": { "hours": 3, "text": "...", "effects": [ ... ] },
+//                                           a situation only: what happens if nobody goes to it in that many hours
 //     "cast": { "scout": { "pick": "random" } },
 //                                           people the event is about: a crew filter each, cast in
 //                                           order ("pick": "random" or "best"). Nobody fits: no event
@@ -32,12 +41,21 @@
 //   }
 //
 // On a crossing (sector.js, H.6), the first time a lane runs to a point the dice are thrown for
-// an event (the sector says how likely, by kind of point); if one comes, it opens partway along
-// that lane. It stays in `run.events.open` until it is answered (`event.choose`) and put away
-// (`event.dismiss`), and the ship heaves to while it is on the table. Jumping into a port leaves
-// it behind. A sim given no events never opens one. A salvage claim (contracts.js) is an event
-// too: passing the claim point opens it, every time, until the claim is worked. H.7 turns these
-// into situations aboard.
+// an event (the sector says how likely, by kind of point); if one comes, it comes partway along
+// that lane. A sim given no events never meets one. A salvage claim (contracts.js) is an event
+// too: passing the claim point brings it, every time, until the claim is worked.
+//
+// Since H.7 (D-156) most events are situations aboard. A situation is put in a room of the ship
+// (`run.events.aboard`) and waits there in ship time; the ship sails on unless it says `hold`.
+// Margo says its `sign`. When one of ours is standing in that room it is attended: its text and
+// its choices are offered on a card at the room, and the text and the conditions can name who is
+// there ({who}, "$who") and the room ({room}, "$room"). `event.choose` and `event.dismiss` take
+// its number as `situation`. Left alone for its `lapse` hours it lapses, and does what the lapse
+// says. An answered card puts itself away after a while.
+//
+// A decision made over the radio ("place": "radio"; an event with no place is one too) is still
+// one at a time on the table, `run.events.open`, in the event view with the ship hove to, until
+// it is answered and put away. Jumping into a port leaves every event behind.
 
 import { NODE_KINDS, nodeOf } from '../sim/sector.js';
 import { checkCrewSpec, crewMatching, fillText, match, requirement, validateCondition, validateText, vars } from './conditions.js';
@@ -48,9 +66,34 @@ export const EVENT_CHANCE = Object.freeze({ port: 0, empty: 0.35, hazard: 1, der
 
 /** Names every event's text can use, beside its cast. */
 const BUILTINS = Object.freeze({ place: 'text', hazard: 'text', ship: 'text' });
+/** What a situation aboard can name as well: the room it is in, and (once someone is there) who has gone to it. */
+const ABOARD = Object.freeze({ room: 'room', who: 'crew' });
+
+/** A decision made over the radio: the event view, as before H.7. An event that says nothing of its place is one. */
+export const RADIO = 'radio';
+/** Words a place's `room` can use beside a room id, a system or a kind of room. */
+export const ROOM_WORDS = Object.freeze(['any', 'airlock']);
+/** Situations that can be waiting aboard at once: the lanes bring no more until one is dealt with. */
+export const MAX_ABOARD = 2;
+/** Seconds of ship time an answered card stays up before it puts itself away. */
+export const RESULT_SECONDS = 40;
 
 const rng = (sim) => sim.rng.stream('events');
 const isObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
+const SPACE = 'space';
+
+/** Is this event a situation aboard (it has a room to wait in)? */
+export const isAboard = (event) => isObject(event?.place);
+
+/**
+ * The rooms one word of a place's `room` can mean on a ship: `rooms` are { id, system, kind } and `doors`
+ * { a, b }, as the ship file has them. A cast name ("$patient") is not for here: it is wherever they are.
+ */
+export function roomsFor(rooms, doors, spec) {
+  if (spec === 'any') return rooms.filter((room) => !['lift', 'corridor'].includes(room.kind));
+  if (spec === 'airlock') return rooms.filter((room) => doors.some((door) => door.b === SPACE && door.a === room.id));
+  return rooms.filter((room) => room.id === spec || room.system === spec || (room.kind !== undefined && room.kind !== 'room' && room.kind === spec));
+}
 
 /** The events a sim can meet, by id. */
 export function buildEvents(items = []) {
@@ -62,22 +105,62 @@ export function newEventState() {
   return {
     met: [], // ids of events opened this run
     rolled: [], // points where the dice for an event have been thrown
-    open: null, // the event on the table: { id, node, cast: { name: crew id }, result: null | { choice, outcome, text } }
+    open: null, // the radio decision on the table: { id, node, cast: { name: crew id }, result: null | { choice, outcome, text } }
     next: null, // an event that follows the open one (the "event" effect)
+    // Situations aboard (H.7): { n, id, node, cast, room, by: crew id | null (who is there), hold, mark, left: hours
+    // until it lapses | null, result: null | { choice, outcome, text, lapsed? }, shown: seconds answered, next }
+    aboard: [],
+    serial: 0, // the number of the last situation placed
     count: 0, // events opened this run
   };
 }
 
-/** The names in reach inside an open event: where we are, and its cast. */
+/** The names in reach inside an open event: where we are, its cast, and for a situation its room and who is there. */
 function reachOf(sim, open) {
   const node = nodeOf(sim.state.run.map, open.node);
   return vars({
     place: ['text', node?.name ?? 'here'],
     hazard: ['text', (node?.hazard ?? 'the hazard').toLowerCase()],
     ship: ['text', sim.layout.name ?? 'the ship'],
+    ...(open.room ? { room: ['room', open.room] } : {}),
+    ...(open.by ? { who: ['crew', open.by] } : {}),
     ...Object.fromEntries(Object.entries(open.cast).map(([name, id]) => [name, ['crew', id]])),
   });
 }
+
+const liveRoom = (sim, id) => Boolean(sim.state.rooms[id]) && !sim.state.rooms[id].jettisoned;
+
+/** The room a situation is put in: the first word of its place that still names a room of the ship, or null. */
+function roomOfPlace(sim, event, cast) {
+  for (const spec of [].concat(event.place.room)) {
+    if (typeof spec !== 'string') continue;
+    if (spec.startsWith('$')) {
+      const room = sim.state.crew[cast[spec.slice(1)]]?.room;
+      if (liveRoom(sim, room)) return room;
+      continue;
+    }
+    const fit = roomsFor(sim.layout.rooms, sim.layout.doors, spec).filter((room) => liveRoom(sim, room.id));
+    if (fit.length) return (fit.length === 1 ? fit[0] : rng(sim).pick(fit)).id;
+  }
+  return null;
+}
+
+/** Our people standing in a room, awake and in plain sight: the ones who can deal with what is there. */
+function attendants(sim, room) {
+  return Object.values(sim.state.crew)
+    .filter((member) => member.owner === 'player' && member.alive && !member.asleep && !member.hidden && member.room === room && member.task !== 'walking')
+    .sort((a, b) => a.index - b.index);
+}
+
+/** The situations aboard, in the order they came. */
+export const aboard = (sim) => sim.state.run?.events?.aboard ?? [];
+const findAboard = (sim, n) => aboard(sim).find((one) => one.n === n) ?? null;
+/** Situations still waiting for an answer. */
+export const waiting = (sim) => aboard(sim).filter((one) => !one.result);
+/** Is the ship hove to by a situation (a hull alongside)? */
+export const heldBySituation = (sim) => aboard(sim).some((one) => one.hold && !one.result);
+/** Can the lanes bring another event right now? Not with a decision on the table, or the decks already busy. */
+export const canMeet = (sim) => Boolean(sim.state.run?.events) && !sim.state.run.events.open && waiting(sim).length < MAX_ABOARD;
 
 /** Cast an event's people, in order. Returns { name: crew id }, or null if somebody cannot be found. */
 function castFor(sim, event, node) {
@@ -92,23 +175,39 @@ function castFor(sim, event, node) {
 }
 
 /**
- * Put an event on the table. `force` skips its own conditions (a follow-up, or the debug sheet). `node` is the
- * point it is about: the one we are passing on a crossing (H.6), else where we are. Returns true if it opened.
+ * Meet an event: a radio decision goes on the table, a situation into its room. `force` skips its own conditions
+ * (a follow-up, or the debug sheet). `node` is the point it is about: the one we are passing on a crossing (H.6),
+ * else where we are. Returns true if it opened.
  */
 export function openEvent(sim, id, { force = false, node } = {}) {
   const run = sim.state.run;
   const event = sim.transit.byId.get(id);
   if (!run || !event) return false;
-  const at = node ?? run.events.open?.node ?? run.crossing?.path[run.crossing.leg + 1] ?? run.at;
+  const state = run.events;
+  const at = node ?? state.open?.node ?? run.crossing?.path[run.crossing.leg + 1] ?? run.at;
   const cast = castFor(sim, event, at);
   if (!cast) return false;
-  const open = { id, node: at, cast, result: null };
+  let open = { id, node: at, cast, result: null };
+  if (isAboard(event)) {
+    // Forced with its room gone (the debug sheet, a follow-up): anywhere that is still there.
+    const room = roomOfPlace(sim, event, cast) ?? (force ? sim.layout.rooms.find((one) => liveRoom(sim, one.id))?.id : null);
+    if (!room) return false;
+    open = { n: state.serial + 1, ...open, room, by: null, hold: Boolean(event.place.hold), mark: event.place.scope ?? null, left: event.lapse?.hours ?? null, shown: 0, next: null };
+  }
   if (!force && !match(event.when, { sim, vars: reachOf(sim, open) })) return false;
-  if (run.events.open) sim.events.emit('event.lapsed', { event: run.events.open.id, tick: sim.state.tick });
-  run.events.open = open;
-  run.events.count += 1;
-  if (!run.events.met.includes(id)) run.events.met.push(id);
-  sim.events.emit('event.opened', { event: id, node: at, title: fillText(event.title, { sim, vars: reachOf(sim, open) }), tick: sim.state.tick });
+  const ctx = { sim, vars: reachOf(sim, open) };
+  const title = fillText(event.title, ctx);
+  if (isAboard(event)) {
+    state.serial = open.n;
+    state.aboard.push(open);
+  } else {
+    if (state.open) sim.events.emit('event.lapsed', { event: state.open.id, tick: sim.state.tick });
+    state.open = open;
+  }
+  state.count += 1;
+  if (!state.met.includes(id)) state.met.push(id);
+  const where = isAboard(event) ? { situation: open.n, room: open.room, sign: fillText(event.sign ?? event.title, ctx), mark: open.mark, hold: open.hold } : {};
+  sim.events.emit('event.opened', { event: id, node: at, title, ...where, tick: sim.state.tick });
   return true;
 }
 
@@ -121,8 +220,9 @@ export function rollLaneEvent(sim, nodeId) {
   const run = sim.state.run;
   const state = run?.events;
   const node = run && nodeOf(run.map, nodeId);
-  if (!state || !node || state.open || !sim.transit.all.length) return false;
-  const fits = sim.transit.all.filter((event) => (event.at ?? []).includes(node.kind) && !(event.once !== false && state.met.includes(event.id)));
+  if (!state || !node || !canMeet(sim) || !sim.transit.all.length) return false;
+  const here = new Set(state.aboard.map((one) => one.id));
+  const fits = sim.transit.all.filter((event) => (event.at ?? []).includes(node.kind) && !here.has(event.id) && !(event.once !== false && state.met.includes(event.id)));
   for (const priority of [...new Set(fits.map((event) => event.priority ?? 0))].sort((a, b) => b - a)) {
     const pool = fits.filter((event) => (event.priority ?? 0) === priority);
     while (pool.length) {
@@ -146,8 +246,8 @@ function choiceView(sim, open, choice) {
 }
 
 /**
- * The event on the table, ready to show: { id, title, text, choices: [{ id, label, tag, available }], result }
- * where result is null until a choice is made, then { choice, text }. Null when no event is open.
+ * The radio decision on the table, ready to show: { id, title, text, choices: [{ id, label, tag, available }], result }
+ * where result is null until a choice is made, then { choice, text }. Null when none is open.
  */
 export function eventView(sim) {
   const open = sim.state.run?.events.open;
@@ -163,12 +263,48 @@ export function eventView(sim) {
   };
 }
 
-/** Why a choice cannot be made right now, or null. */
-export function whyNoChoice(sim, choiceId) {
-  const open = sim.state.run?.events.open;
+/**
+ * The situations aboard, ready to show at their rooms: [{ n, id, room, roomName, title, sign, mark, hold,
+ * state: 'waiting' | 'attended' | 'answered', by (the name of who is there), text and choices (once
+ * attended), result, left (hours until it lapses, or null) }].
+ */
+export function situationViews(sim) {
+  return aboard(sim)
+    .map((one) => {
+      const event = sim.transit.byId.get(one.id);
+      if (!event) return null;
+      const ctx = { sim, vars: reachOf(sim, one) };
+      const attended = Boolean(one.by) && !one.result;
+      return {
+        n: one.n,
+        id: event.id,
+        room: one.room,
+        roomName: sim.layout.room(one.room)?.name ?? 'the ship',
+        title: fillText(event.title, ctx),
+        sign: fillText(event.sign ?? event.title, ctx),
+        mark: one.mark,
+        hold: one.hold,
+        state: one.result ? 'answered' : attended ? 'attended' : 'waiting',
+        by: one.by ? (sim.state.crew[one.by]?.name ?? null) : null,
+        text: attended ? fillText(event.text, ctx) : null,
+        choices: attended ? event.choices.map((choice) => choiceView(sim, one, choice)).filter(Boolean) : [],
+        result: one.result ? { choice: one.result.choice, text: one.result.text, lapsed: Boolean(one.result.lapsed) } : null,
+        left: one.left,
+      };
+    })
+    .filter(Boolean);
+}
+
+/** The record an order is about: the situation it numbers, else the radio decision on the table. */
+const recordFor = (sim, cmd) => (cmd.situation !== undefined ? findAboard(sim, cmd.situation) : (sim.state.run?.events.open ?? null));
+
+/** Why a choice cannot be made right now, or null. `situation` is the number of a situation aboard; left out, the radio decision. */
+export function whyNoChoice(sim, choiceId, situation) {
+  const open = recordFor(sim, { situation });
   const event = open && sim.transit.byId.get(open.id);
-  if (!event) return 'no event is waiting for an answer';
-  if (open.result) return 'that event has been answered';
+  if (!event) return situation !== undefined ? `no situation ${situation} aboard` : 'no event is waiting for an answer';
+  if (open.result) return situation !== undefined ? 'that has been dealt with' : 'that event has been answered';
+  if (situation !== undefined && !open.by) return `nobody is in ${sim.layout.room(open.room)?.name ?? 'that room'} to deal with it`;
   const choice = event.choices.find((one) => one.id === choiceId);
   if (!choice) return `the event has no choice "${choiceId}"`;
   return requirement(choice.requires, { sim, vars: reachOf(sim, open) }).met ? null : 'that choice is not open to us';
@@ -185,45 +321,104 @@ function outcomesFor(sim, choice, reach) {
   return first.length ? first : fit;
 }
 
-function choose(sim, choiceId) {
-  const open = sim.state.run.events.open;
+function choose(sim, open, choiceId) {
   const event = sim.transit.byId.get(open.id);
   const choice = event.choices.find((one) => one.id === choiceId);
   const reach = requirement(choice.requires, { sim, vars: reachOf(sim, open) }).vars;
   const picked = rng(sim).weighted(outcomesFor(sim, choice, reach), ({ outcome }) => outcome.weight ?? 1);
-  const ctx = { sim, vars: picked.vars };
+  const ctx = { sim, vars: picked.vars, open };
   // The words are settled first, so they describe the world the choice was made in.
   const text = fillText(picked.outcome.text, ctx);
   open.result = { choice: choiceId, outcome: picked.index, text };
-  sim.events.emit('event.chosen', { event: event.id, choice: choiceId, outcome: picked.index, text, tick: sim.state.tick });
+  sim.events.emit('event.chosen', { event: event.id, choice: choiceId, outcome: picked.index, text, ...(open.n ? { situation: open.n, room: open.room, crew: open.by } : {}), tick: sim.state.tick });
   applyEffects(picked.outcome.effects, ctx);
+}
+
+/** Put an answered event away. If it leads on to another, that one opens. */
+function putAway(sim, open) {
+  const state = sim.state.run.events;
+  const next = open.n ? open.next : state.next;
+  if (open.n) state.aboard.splice(state.aboard.indexOf(open), 1);
+  else {
+    state.open = null;
+    state.next = null;
+  }
+  sim.events.emit('event.closed', { event: open.id, ...(open.n ? { situation: open.n, room: open.room } : {}), tick: sim.state.tick });
+  if (next) openEvent(sim, next, { force: true, node: open.node });
+}
+
+/** Nobody went: the situation does what its lapse says, and its card tells it; with nothing to tell, it is just gone. */
+function lapse(sim, one) {
+  const event = sim.transit.byId.get(one.id);
+  const ctx = { sim, vars: reachOf(sim, one), open: one };
+  const text = event?.lapse?.text ? fillText(event.lapse.text, ctx) : null;
+  sim.events.emit('event.lapsed', { event: one.id, situation: one.n, room: one.room, text, tick: sim.state.tick });
+  if (!text) {
+    const list = sim.state.run.events.aboard;
+    list.splice(list.indexOf(one), 1);
+  } else one.result = { choice: null, outcome: null, text, lapsed: true };
+  applyEffects(event?.lapse?.effects, ctx);
+}
+
+/** Leave every event behind (the jump into port): nothing of them carries on. */
+export function leaveEvents(sim) {
+  const state = sim.state.run?.events;
+  if (!state) return;
+  if (state.open && !state.open.result) sim.events.emit('event.lapsed', { event: state.open.id, tick: sim.state.tick });
+  for (const one of state.aboard) if (!one.result) sim.events.emit('event.lapsed', { event: one.id, situation: one.n, room: one.room, text: null, tick: sim.state.tick });
+  state.open = null;
+  state.next = null;
+  state.aboard = [];
+}
+
+/** Each tick: who is at each situation, the hours it will wait, and answered cards putting themselves away. */
+export function stepSituations(sim, dt) {
+  const run = sim.state.run;
+  if (!run?.events?.aboard.length) return;
+  const hours = dt / run.hour;
+  for (const one of [...run.events.aboard]) {
+    if (one.result) {
+      one.shown += dt;
+      if (one.shown >= RESULT_SECONDS) putAway(sim, one);
+      continue;
+    }
+    if (!liveRoom(sim, one.room)) {
+      // The room went over the side, and the matter with it.
+      sim.events.emit('event.lapsed', { event: one.id, situation: one.n, room: one.room, text: null, tick: sim.state.tick });
+      run.events.aboard.splice(run.events.aboard.indexOf(one), 1);
+      continue;
+    }
+    const there = attendants(sim, one.room);
+    const by = there.find((member) => member.id === one.by) ?? there[0] ?? null;
+    if ((by?.id ?? null) !== one.by) {
+      one.by = by?.id ?? null;
+      if (by) sim.events.emit('situation.attended', { situation: one.n, event: one.id, crew: by.id, room: one.room, tick: sim.state.tick });
+    }
+    // The wait is in ship hours, which only run under way; and it stops while somebody is at it.
+    if (!one.by && one.left !== null && run.crossing) {
+      one.left = Math.max(0, one.left - hours);
+      if (one.left <= 0) lapse(sim, one);
+    }
+  }
 }
 
 export function eventCommands() {
   return {
-    // Answer the event on the table.
+    // Answer the radio decision on the table, or (`situation`: its number) a situation someone of ours is at.
     'event.choose': {
-      check: (sim, cmd) => whyNoChoice(sim, cmd.choice),
-      apply: (sim, cmd) => choose(sim, cmd.choice),
+      check: (sim, cmd) => whyNoChoice(sim, cmd.choice, cmd.situation),
+      apply: (sim, cmd) => choose(sim, recordFor(sim, cmd), cmd.choice),
     },
     // Put an answered event away. If it leads on to another, that one opens.
     'event.dismiss': {
-      check(sim) {
-        const open = sim.state.run?.events.open;
-        if (!open) return 'no event is open';
+      check(sim, cmd) {
+        const open = recordFor(sim, cmd);
+        if (!open) return cmd.situation !== undefined ? `no situation ${cmd.situation} aboard` : 'no event is open';
         return open.result ? null : 'the event is still waiting for an answer';
       },
-      apply(sim) {
-        const state = sim.state.run.events;
-        const { id } = state.open;
-        const next = state.next;
-        state.open = null;
-        state.next = null;
-        sim.events.emit('event.closed', { event: id, tick: sim.state.tick });
-        if (next) openEvent(sim, next, { force: true });
-      },
+      apply: (sim, cmd) => putAway(sim, recordFor(sim, cmd)),
     },
-    // Debug panel only: put any event on the table, whatever its conditions say.
+    // Debug panel only: meet any event, whatever its conditions say.
     'debug.event': {
       check(sim, cmd) {
         if (!sim.state.run) return 'there is no chart for this run';
@@ -231,7 +426,7 @@ export function eventCommands() {
         return null;
       },
       apply(sim, cmd) {
-        sim.state.run.events.next = null;
+        if (!isAboard(sim.transit.byId.get(cmd.event))) sim.state.run.events.next = null;
         if (!openEvent(sim, cmd.event, { force: true })) sim.events.emit('event.uncast', { event: cmd.event, tick: sim.state.tick });
       },
     },
@@ -246,6 +441,15 @@ export function checkEventInvariants(sim) {
   if (state.open && !sim.transit.byId.has(state.open.id)) problems.push(`the open event "${state.open.id}" does not exist`);
   if (state.next && !state.open) problems.push('an event is queued to follow one that is not open');
   if (state.count < state.met.length) problems.push('more events met than opened');
+  const seen = new Set();
+  for (const one of state.aboard) {
+    if (!sim.transit.byId.has(one.id)) problems.push(`the situation "${one.id}" does not exist`);
+    if (!sim.state.rooms[one.room]) problems.push(`situation ${one.n} is in "${one.room}", which is not a room`);
+    if (seen.has(one.n) || one.n > state.serial) problems.push(`situation number ${one.n} is used twice or was never given out`);
+    seen.add(one.n);
+    if (one.by && !sim.state.crew[one.by]) problems.push(`situation ${one.n} is attended by "${one.by}", who is not aboard`);
+    if (one.next && !one.result) problems.push(`situation ${one.n} leads on before it is answered`);
+  }
   return problems;
 }
 
@@ -253,16 +457,53 @@ export function checkEventInvariants(sim) {
 
 const NAME = /^[a-z][a-z0-9_]*$/;
 const CHOICE_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
-const EVENT_KEYS = ['id', 'note', 'title', 'text', 'at', 'weight', 'once', 'priority', 'cast', 'when', 'choices'];
+const EVENT_KEYS = ['id', 'note', 'title', 'text', 'at', 'place', 'sign', 'lapse', 'weight', 'once', 'priority', 'cast', 'when', 'choices'];
+const PLACE_KEYS = ['room', 'scope', 'hold'];
+const LAPSE_KEYS = ['hours', 'text', 'effects'];
 const CHOICE_KEYS = ['id', 'label', 'requires', 'hidden', 'outcomes'];
 const OUTCOME_KEYS = ['when', 'weight', 'fallback', 'text', 'effects'];
 const unknown = (item, allowed, what) => Object.keys(item).filter((key) => !allowed.includes(key)).map((key) => `${what}: unknown key "${key}"`);
 const weightProblem = (value, what) => (value === undefined || (typeof value === 'number' && value > 0) ? [] : [`${what} must be a number above 0`]);
 
+/**
+ * Where an event says it happens (H.7): "radio", or a room of the ship for a situation. Every word of `room`
+ * must name a room on every ship we can fly (`refs.ships`: the ship files), or one of the cast.
+ */
+function checkPlace(item, refs) {
+  const { place } = item;
+  if (place === undefined) return ['place: say where this happens: "radio" for a decision made over the radio, or { "room": ... } for a situation aboard'];
+  if (place === RADIO) return [];
+  if (!isObject(place)) return [`place must be "${RADIO}" or { "room": ... }`];
+  const problems = unknown(place, PLACE_KEYS, 'place');
+  const words = [].concat(place.room ?? []);
+  if (!words.length) problems.push('place.room must be a room, a system, a kind of room, "airlock", "any", "$name" for where one of the cast is, or a list of these');
+  let sure = false; // does some word always name a room?
+  for (const word of words) {
+    if (typeof word !== 'string' || !word) {
+      problems.push('place.room: every entry must be text');
+      continue;
+    }
+    if (word.startsWith('$')) {
+      if (!isObject(item.cast) || !Object.hasOwn(item.cast, word.slice(1))) problems.push(`place.room: "${word}" is not one of the cast`);
+      continue;
+    }
+    sure = true;
+    for (const ship of refs.ships ?? []) {
+      if (!roomsFor(ship.rooms ?? [], ship.doors ?? [], word).length) problems.push(`place.room: "${word}" is not a room, a system's room or a kind of room on the ship "${ship.id}"`);
+    }
+  }
+  if (words.length && !sure && !problems.length) problems.push('place.room: add a room to fall back on, for when nobody of the cast is anywhere it could happen');
+  if (place.scope !== undefined && (typeof place.scope !== 'string' || !place.scope.trim() || place.scope.length > 16)) problems.push('place.scope must be a word or two for the mark on the scope (16 letters at most)');
+  if (place.hold !== undefined && typeof place.hold !== 'boolean') problems.push('place.hold must be true or false');
+  return problems;
+}
+
 /** Check one content/events item. `refs` holds the ids that exist (see checkValue in conditions.js). Returns problems. */
 export function checkEvent(item, refs = {}) {
-  const problems = unknown(item, EVENT_KEYS, 'event');
-  const reach = { ...BUILTINS };
+  const problems = [...unknown(item, EVENT_KEYS, 'event'), ...checkPlace(item, refs)];
+  const situation = isAboard(item);
+  // A situation knows its room from the start; who has gone to it only once someone has (the text and the choices).
+  const reach = { ...BUILTINS, ...(situation ? { room: ABOARD.room } : {}) };
   const env = () => ({ vars: { ...reach }, refs });
 
   if (item.at !== undefined) {
@@ -276,14 +517,31 @@ export function checkEvent(item, refs = {}) {
   if (item.cast !== undefined && !isObject(item.cast)) problems.push('cast must be an object of name: crew filter');
   for (const [name, spec] of Object.entries(isObject(item.cast) ? item.cast : {})) {
     if (!NAME.test(name)) problems.push(`cast: "${name}" must be a short lowercase name`);
-    else if (BUILTINS[name]) problems.push(`cast: "${name}" is already the name of something every event has`);
+    else if (BUILTINS[name] || ABOARD[name]) problems.push(`cast: "${name}" is already the name of something an event has`);
     problems.push(...checkCrewSpec(spec, env(), `cast.${name}`, { cast: true }));
     reach[name] = 'crew';
   }
 
   const when = validateCondition(item.when, env(), 'when');
   problems.push(...when.problems); // what it binds stays inside it: people the text names are cast
-  problems.push(...validateText(item.title, env(), 'title'), ...validateText(item.text, env(), 'text'));
+  problems.push(...validateText(item.title, env(), 'title'));
+  if (situation) {
+    problems.push(...validateText(item.sign, env(), 'sign'));
+    if (item.lapse !== undefined) {
+      if (!isObject(item.lapse)) problems.push('lapse must be { "hours": ..., "text": ..., "effects": [ ... ] }');
+      else {
+        problems.push(...unknown(item.lapse, LAPSE_KEYS, 'lapse'));
+        if (!(typeof item.lapse.hours === 'number' && item.lapse.hours > 0)) problems.push('lapse.hours must be a number of ship hours above 0');
+        if (item.lapse.text !== undefined) problems.push(...validateText(item.lapse.text, env(), 'lapse.text'));
+        problems.push(...validateEffects(item.lapse.effects, env(), 'lapse.effects'));
+      }
+    }
+    reach.who = ABOARD.who;
+  } else {
+    if (item.sign !== undefined) problems.push('sign is for a situation aboard: a radio decision has only its text');
+    if (item.lapse !== undefined) problems.push('lapse is for a situation aboard: a radio decision waits on the table');
+  }
+  problems.push(...validateText(item.text, env(), 'text'));
 
   if (!Array.isArray(item.choices) || !item.choices.length) return [...problems, 'choices must be a list with at least one choice'];
   const seen = new Set();
