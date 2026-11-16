@@ -1,4 +1,4 @@
-// Title screen, plus the stub screen that stands in for screens not built yet.
+// The title screen.
 
 import { el } from './dom.js';
 
@@ -19,7 +19,7 @@ function typeOut(node, text, msPerChar = 28) {
   return () => clearInterval(timer);
 }
 
-export function renderTitle(root, { greeting, seed, version, contentSummary, onNewRun, onHub, onShip }) {
+export function renderTitle(root, { greeting, seed, version, contentSummary, onNewRun, onResume, resume, onHub, onShip }) {
   const line = el('p', { class: 'margo__line', 'aria-live': 'polite' });
 
   root.replaceChildren(
@@ -45,15 +45,16 @@ export function renderTitle(root, { greeting, seed, version, contentSummary, onN
         el(
           'nav',
           { class: 'title__menu' },
-          el('button', { class: 'btn', type: 'button', id: 'btn-new-run', press: onNewRun }, 'New run', el('small', {}, 'Open the chart and cross the Reach')),
+          resume && el('button', { class: 'btn', type: 'button', id: 'btn-resume', press: onResume }, 'Resume run', el('small', {}, 'Back to the ship and the chart')),
+          el('button', { class: 'btn', type: 'button', id: 'btn-new-run', press: onNewRun }, 'New run', el('small', {}, 'Take a contract and cross the Reach')),
           el('button', { class: 'btn', type: 'button', id: 'btn-ship', press: onShip }, 'Walk the ship', el('small', {}, 'Three crew, power, air, fire and doors')),
-          el('button', { class: 'btn', type: 'button', id: 'btn-hub', press: onHub }, 'Records', el('small', {}, 'The Wall, unlocks, past runs')),
+          el('button', { class: 'btn', type: 'button', id: 'btn-hub', press: onHub }, 'Records', el('small', {}, 'The Wall, unlocks, this visit')),
         ),
       ),
       el(
         'footer',
         { class: 'title__foot' },
-        el('span', {}, `Build ${version} · Stage 3, session 1`),
+        el('span', {}, `Build ${version} · Stage 3, session 2`),
         el('span', {}, contentSummary),
         el('span', {}, `Seed ${seed}`),
       ),
@@ -61,17 +62,4 @@ export function renderTitle(root, { greeting, seed, version, contentSummary, onN
   );
 
   return typeOut(line, greeting);
-}
-
-export function renderStub(root, { heading, body, onBack }) {
-  root.replaceChildren(
-    el(
-      'section',
-      { class: 'stub' },
-      el('div', { class: 'stencil' }, 'Not built yet'),
-      el('h2', {}, heading),
-      el('p', {}, body),
-      el('button', { class: 'btn', type: 'button', id: 'btn-back', press: onBack }, 'Back'),
-    ),
-  );
 }
