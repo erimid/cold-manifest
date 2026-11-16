@@ -26,13 +26,13 @@ Items here are known shortcuts. Each names the stage that must clear it.
 | ~~DF-09~~ | ~~No Playwright touch tests in CI yet.~~ | S1.2 | Done in S1.2 |
 | DF-10 | Pinch-zoom and two-finger pan are not handled: the input module tracks one pointer at a time. | S1.3 if the ship view needs a camera, otherwise S11.5 | Open |
 | ~~DF-11~~ | ~~Auto-pause triggers and their settings (brief §7) were not wired.~~ | S1.7 | Done in S1.7: fire, breach and death pause the game, each with its own switch (D-044) |
-| DF-12 | Hull integrity is stored but nothing changes it; breaches only come from the debug command until weapons exist. Noise only comes from fire. | Stage 2 (hits), Stage 6 (noise sources) | Open |
+| DF-12 | A weapon hit lowers a room's hull integrity (S2.1) but nothing reads that number yet, and breaches still only come from the debug command. Noise only comes from fire. | S2.2 (hits make breaches), Stage 6 (noise sources) | Open |
 | DF-13 | Hull damage, heat and cold have no visual of their own beyond fire glow and breach frost; temperature only shows in the status panel and has no effect on crew or systems. No smoke or sparks yet. | S11.1 (look pass) | Open |
 | ~~DF-14~~ | ~~Doors open by remote from anywhere with no power or crew needed.~~ | S1.4 | Done in S1.4: doors need door control power or hands at the door (D-031) |
-| DF-15 | Autoplay takes about 35 s for 100 runs because invariants and stuck checks run every tick. Fine for now; sample them if it grows. | Stage 3 | Open |
+| DF-15 | Autoplay takes about 150 s for 100 runs (three modes, each twice, with invariants and stuck checks every tick). Sample the checks or cut the replay pass if it grows further. | Stage 3 | Open |
 | ~~DF-16~~ | ~~"Hands at the door" read an empty crew list, so an unpowered door could not be moved in play.~~ | S1.6 | Done in S1.6: crew exist. A crew member in a room on either side counts as hands; walking crew open doors themselves (D-039) |
 | ~~DF-17~~ | ~~Life support is a flat rate on every room with no flow between rooms.~~ | S1.5 | Done in S1.5: air flows through doors, airlocks and breaches (D-034). Crew still do not breathe air down (S1.6) |
-| DF-18 | Shields, engines, weapons, sensors and medbay take power but do nothing with it yet. AI core power and damage only feed `aiCoreStatus()`. Damage comes only from the debug command, and nothing repairs it in play. | Stage 2 (combat systems), S1.6 (repairs), Stage 5 (AI degradation) | Open |
+| DF-18 | Sensors and medbay power do little yet (the medbay heals; sensors do nothing). AI core power and damage only feed `aiCoreStatus()` and whether Margo speaks. Engines give evasion but nothing jumps. | Stage 3 (jumps), Stage 5 (AI degradation), Stage 6 (sensors) | Open |
 | DF-19 | Power panel tiles show system codes (SHD, ENG...) with no on-screen legend on touch; the codes match the stencils on the room floors. | S11.4 (tutorial), S11.5 (touch polish) | Open |
 | ~~DF-20~~ | ~~Crew hazards acted on bare crew entries that only tests created.~~ | S1.6 | Done in S1.6 |
 | DF-21 | Jettison has no cost beyond the room: no cargo loss, no hull or handling penalty, no AI argument first, and the vent graph still lists vents into the missing room. | Stage 3 (cargo), Stage 5 (AI argues before risky orders), Stage 6 (vents) | Open |
@@ -40,10 +40,15 @@ Items here are known shortcuts. Each names the stage that must clear it.
 | DF-24 | Suits are a free, instant toggle with endless air. Crew do not use up a room's oxygen. Crew never refuse an order or flee danger by themselves. | Stage 4 (traits, refusal), Stage 9 (equipment) | Open |
 | DF-25 | Crew walk in straight lines between doors and pass through each other. Routes count doors, not distance. The crew bar is sized for three and will wrap with eight. | S11.5 (touch polish), Stage 4 (bigger rosters) | Open |
 | ~~DF-22~~ | ~~Nothing put a fire out except starving or venting it, and nothing patched a breach.~~ | S1.6 | Done in S1.6: crew extinguish, patch, repair and unjam (D-040) |
-| DF-26 | The 60 fps check at 4x CPU throttle could not be confirmed on the build machine: it has no graphics card, so the browser paints the canvas in software and the throttle slows the painting too (15 fps at iPad resolution, 50 fps at 1x). The game's own work per frame is 1.1 ms at 4x throttle against a 16.7 ms budget. Needs a reading on real hardware (`?debug=1` shows fps). | Eric's Stage 1 playtest, then S11.5 | Open |
+| ~~DF-26~~ | ~~The 60 fps check at 4x CPU throttle could not be confirmed on the build machine, which has no graphics card.~~ | Eric's Stage 1 playtest | Done: Eric played PR #8 on his iPad on 2026-11-15 and reported good fps and no issues |
 | DF-27 | Margo only reacts to Stage 1 events and speaks in one voice. Lines are picked by trigger and category only; she is silent when the AI core has no power but does not otherwise degrade. Crew injury lines fire once per crossing below half health. | Stage 5 | Open |
 | DF-28 | Settings hold sound on/off and the three auto-pause switches only. No reduced-motion, text size, colour or key rebinding yet. Auto-pause on fight start and on creature sighting arrive with those systems. | S2.2 (fight start), Stage 6 (creature), S11.5 (accessibility) | Open |
 | DF-29 | The autoplay scenario bot plays one fixed competent strategy (send the nearest crew, suit up for breaches, shut doors round fires). It does not vent, jettison or re-route power, so it does not prove those are balanced. | Stage 3 onward as the bot grows (PLAN.md §4) | Open |
+| DF-30 | A hit only takes hull points and room integrity. No system damage, fire, breach, crew harm, screen shake or flash, and no auto-pause when a fight starts. | S2.2 | Open |
+| DF-31 | The only enemy is the gunnery drone, which never shoots back. A fight starts only from the debug panel and ends only by destroying the drone. Losing our own hull is recorded but ends nothing. | S2.3 (enemy AI, endings), S2.5 (enemy types), Stage 3 (fights from the map) | Open |
+| DF-32 | Weapons take power in hardpoint order with no way to reorder or switch one off, and there is no way to fit, remove or buy a weapon; the third weapon (breaching lance) and the third hardpoint are unused. Every enemy room and its state is visible whatever the sensors are doing. | Stage 9 (shipyard), Stage 6 (sensors gate what you see) | Open |
+| DF-33 | Our own hull, shields and evasion only show in the weapons bar, which only appears in a fight. The fight view gives the enemy 27% of the width; with four weapon tiles the bar will be tight on a 1024 px screen. | S2.2 (damage readout), S11.5 (touch polish) | Open |
+| DF-34 | Combat numbers (charge times, shield recharge of 6 s a layer, evasion, hull points) are first guesses. With one laser alone the drone's shield never stays down. | S2.5 (balance from the bot's fight report) | Open |
 
 ---
 
@@ -235,6 +240,22 @@ Items here are known shortcuts. Each names the stage that must clear it.
 **What:** Each seed is now played two ways, each twice to prove it replays: ten minutes of random orders (chaos), and a five minute hazard scenario that starts with seeded fires and breaches and a bot that tries to save the ship. The run fails on a crash, a bad number, a broken invariant, a door or crew member stuck, or anything moving while paused. `--report FILE` writes the summary; `reports/stage-1.md` is the Stage 1 report.
 **Why:** Stage 1 exit check. Chaos finds crashes; the scenario shows the hazards can actually be beaten.
 
+### D-047 A fight is two whole ships (S2.1)
+**What:** In a fight the enemy is a complete ship held in `state.fight.enemy`: rooms, doors, systems, air, fire, crew, the same shape as the player's. `enemyOf(sim)` wraps it so every ship function (air, fire, power, doors, lights, crew) runs on it unchanged, on the same tick, after the player's ship. What happens aboard it is announced as `enemy.<event>` so our alarms, auto-pause and Margo are not triggered by their fire. An enemy ship is a normal ship file with `"enemy": true`, which lets it leave systems out, carry no crew and mount no weapons. Ship state is built by one function, `newShipState`, for both sides.
+**Why:** Brief §7 wants their ship as a cutaway you target room by room, and S2.2 needs hits to cause fires and breaches with the exact Stage 1 code. One code path for both ships means boarding (S2.4) and enemy crew need no second simulation.
+
+### D-048 Weapons, shields and evasion (S2.1)
+**What:** Weapons are content (`content/weapons/`): power needed, charge time, flight time, damage, shield layers ignored, and effect chances for S2.2. A ship lists its hardpoints (2 to 4) and the weapons fitted to them. The weapons system's bars are dealt to weapons in hardpoint order; a weapon with its bars charges, one without drains at twice the rate. A charged weapon with a target fires by itself and recharges. The shot is in the air for its flight time, then: it misses (the target's evasion), a shield layer stops it and drops, or it hits and takes hull points. Shields hold one layer per bar routed to them and regain a layer every 6 seconds. Evasion is 0 with engines unpowered, otherwise 5% plus 6% per engine bar plus 8% with someone alive at the helm, capped at 45%. At 0 hull points the fight is decided and the guns stop.
+**Why:** Brief §6 and §7. Every number the player fights with comes from a power bar, which keeps routing power the main decision. Automatic fire means a touch player aims once and then manages the ship.
+
+### D-049 Fight controls and layout (S2.1)
+**What:** In a fight the enemy ship stands bow-up in a column on the right (27% of the width) and a weapons bar appears above the status panel with our hull, shields and evasion, one tile per weapon, and theirs. Tap a weapon tile (or press A, S, D, F), then a room on their ship, to aim it; the weapon stays selected to change its mind, and Hold fire clears the target. Tapping their room with no weapon picked shows that room. It all works paused, as queued orders. Shots, shield hits, hits and misses are drawn with a word as well as a colour. Enemy ships are drawn tall so the column can be narrow.
+**Why:** Brief §7 and §18: target their rooms, works paused, and nothing relies on colour alone. A narrow column keeps our own ship large enough to keep tapping doors and crew mid-fight.
+
+### D-050 Autoplay in fights (S2.1)
+**What:** The chaos bot now picks fights, aims at random, sets fires aboard the enemy and walks away. A third mode, target practice, puts the drone alongside and has a bot feed and aim the guns; it fails if the drone survives five minutes. The report gains fight lines.
+**Why:** PLAN.md §4: the bot grows with each system. S2.1's done-when is "the player can charge and fire at a dummy target ship", and this proves it for 100 seeds.
+
 ---
 
 ## Stage notes
@@ -246,8 +267,8 @@ Items here are known shortcuts. Each names the stage that must clear it.
 **Exit checks:**
 - Green gate: 144 unit tests, 47 browser checks, content check, build. Passed.
 - Autoplay: 100 chaos runs and 100 hazard scenarios, no crash, no bad number, nobody stuck. The bot saved the ship in 99 of 100 scenarios, median 22 seconds to clear. Passed (`reports/stage-1.md`).
-- 60 fps with a fire at 4x CPU throttle: not confirmed here, see DF-26. The game's own work is 1.1 ms a frame under throttle.
-- Eric plays 10 minutes on his iPad: pending.
+- 60 fps with a fire at 4x CPU throttle: could not be measured on the build machine (no graphics card); Eric confirmed good fps on the iPad. The game's own work is 1.1 ms a frame under throttle.
+- Eric plays 10 minutes on his iPad: done 2026-11-15. "Good FPS, no issues." Stage 1 is closed.
 
 **Carried forward:** the open DF items above. Nothing in Stage 1 was left out of the plan's scope.
 
@@ -260,3 +281,4 @@ Items here are known shortcuts. Each names the stage that must clear it.
 - **S1.5 (2026-11-15):** Oxygen flow through doors, airlocks and breaches; fire that grows, starves, spreads, heats, and breaks systems; temperature; hazards to crew (suffocation, burns); emergency jettison with a two-press control; jettisoned rooms and sealed doors in the renderer and panels; `hazard` RNG stream. 106 unit tests, 33 browser checks. DF-17 cleared.
 - **S1.6 (2026-11-15):** Three placeholder crew from content; pathfinding on the room and door graph; move and suit orders; crew open and close doors, by hand when door control is dark; automatic extinguish, patch, repair and unjam work; medbay healing; crew bar, crew panel, selection by tap and number keys, path preview. Autoplay bot runs a crew and checks nobody gets stuck on a path. 123 unit tests, 38 browser checks. DF-16, DF-20, DF-22 cleared.
 - **S1.7 (2026-11-16):** Margo's text box with a priority queue, stale-line dropping and a log; 41 placeholder lines; WebAudio engine with 14 data-defined patches, unlocked by the first tap; settings sheet and auto-pause on fire, breach and death; debug Step and Hurt; autoplay v1 with hazard scenarios and a written report. 144 unit tests, 47 browser checks. DF-11 cleared. Stage 1 is built; its last exit check is Eric's iPad playtest.
+- **S2.1 (2026-11-16):** Weapons as content (pulse laser, slug thrower, breaching lance), hardpoints, charging by power, automatic fire, shots in flight, shield layers, evasion from engines and helm, hull points. The enemy as a second whole ship on the same code; the gunnery drone. Split fight view, weapons bar, tap-weapon-then-room targeting, A/S/D/F keys, debug Fight button. Autoplay picks fights and runs target practice. 158 unit tests, 61 browser checks. DF-26 cleared (Eric's playtest).

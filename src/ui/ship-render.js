@@ -25,6 +25,7 @@ const C = {
   alarm: '#ff4136',
   frost: '#cfe9ff',
   vent: '#9bd15a',
+  shield: '#7fd4ff',
   doorLeaf: '#8d6a34',
   doorLocked: '#b3372f',
   airlockLeaf: '#b9c4d1',
@@ -69,13 +70,28 @@ export function createShipRenderer(layout) {
    */
   function fit(area) {
     const { bounds } = layout;
-    const extra = 1.6; // room for engine nozzles on the left
-    const scale = Math.min(area.w / (bounds.w + extra), area.h / bounds.h);
+    const extra = 1.6; // room for engine nozzles: on the left, or underneath a ship whose bow points up
+    const up = layout.facing === 'up';
+    const w = bounds.w + (up ? 0 : extra);
+    const h = bounds.h + (up ? extra : 0);
+    const scale = Math.min(area.w / w, area.h / h);
     return {
       scale,
-      ox: area.x + (area.w - (bounds.w + extra) * scale) / 2 + (extra - bounds.x) * scale,
-      oy: area.y + (area.h - bounds.h * scale) / 2 - bounds.y * scale,
+      ox: area.x + (area.w - w * scale) / 2 + ((up ? 0 : extra) - bounds.x) * scale,
+      oy: area.y + (area.h - h * scale) / 2 - bounds.y * scale,
     };
+  }
+
+  /** The middle of a room, in CSS pixels. */
+  function roomCentre(view, roomId) {
+    const room = layout.room(roomId);
+    return { x: view.ox + (room.x + room.w / 2) * view.scale, y: view.oy + (room.y + room.h / 2) * view.scale };
+  }
+
+  /** Where a hardpoint sits, in CSS pixels. */
+  function hardpointAt(view, slot) {
+    const point = layout.hardpoints[slot] ?? layout.hardpoints[0] ?? { x: layout.bounds.x + layout.bounds.w / 2, y: layout.bounds.y + layout.bounds.h / 2 };
+    return { x: view.ox + point.x * view.scale, y: view.oy + point.y * view.scale };
   }
 
   /** Where a crew member is drawn, in tile units, `alpha` of the way through the current tick. */
@@ -84,8 +100,15 @@ export function createShipRenderer(layout) {
   }
 
   /** Everything tappable, in CSS pixels. Crew sit above doors, doors above rooms. */
-  function targets(view, crew = {}) {
+  function targets(view, crew = {}, { foe = false } = {}) {
     const out = [];
+    if (foe) {
+      // The other ship: only its rooms can be picked, to aim at or to look at.
+      for (const room of layout.rooms) {
+        out.push({ id: room.id, kind: 'foe', x: view.ox + room.x * view.scale, y: view.oy + room.y * view.scale, w: room.w * view.scale, h: room.h * view.scale, priority: 1 });
+      }
+      return out;
+    }
     for (const member of Object.values(crew)) {
       out.push({ id: member.id, kind: 'crew', cx: view.ox + member.x * view.scale, cy: view.oy + member.y * view.scale, r: CREW_RADIUS * view.scale, priority: 3 });
     }
@@ -119,7 +142,27 @@ export function createShipRenderer(layout) {
 
     // Engine nozzles, behind the hull.
     const engines = layout.roomOfSystem('engines');
-    if (engines) {
+    if (engines && layout.facing === 'up') {
+      const base = bounds.y + bounds.h;
+      for (const cx of [engines.x + 1, engines.x + engines.w - 1]) {
+        const glow = ctx.createLinearGradient(0, base + 1.5, 0, base);
+        glow.addColorStop(0, 'rgba(255, 138, 43, 0)');
+        glow.addColorStop(1, 'rgba(255, 138, 43, 0.5)');
+        ctx.fillStyle = glow;
+        ctx.fillRect(cx - 0.6, base, 1.2, 1.5);
+        ctx.fillStyle = '#10141a';
+        ctx.strokeStyle = C.hullEdge;
+        ctx.lineWidth = 2 * px;
+        ctx.beginPath();
+        ctx.moveTo(cx - 0.75, base - 0.1);
+        ctx.lineTo(cx - 0.95, base + 0.8);
+        ctx.lineTo(cx + 0.95, base + 0.8);
+        ctx.lineTo(cx + 0.75, base - 0.1);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+      }
+    } else if (engines) {
       for (const cy of [engines.y + 1.5, engines.y + engines.h - 1.5]) {
         const glow = ctx.createLinearGradient(bounds.x - 1.5, 0, bounds.x, 0);
         glow.addColorStop(0, 'rgba(255, 138, 43, 0)');
@@ -538,8 +581,151 @@ export function createShipRenderer(layout) {
    *   time       animation time in seconds (game time, so it freezes on pause)
    *   selected   { kind, id } or null
    */
-  function draw(ctx, { view, width, height, dpr, state, time, alpha = 1, selected, selectedCrew = null, showVents = false, reduceFlicker = false }) {
-    ctx.clearRect(0, 0, width, height);
+  /** Shield layers: a glow hugging the hull, one band per layer that is up, and a ghost of the one recharging. */
+  function drawShield(ctx, view, shield, time, reduceFlicker) {
+    const layers = Math.floor(shield.charge + 1e-9);
+    const partial = shield.charge - layers;
+    if (layers === 0 && partial <= 0) return;
+    ctx.save();
+    ctx.translate(view.ox, view.oy);
+    ctx.scale(view.scale, view.scale);
+    const px = 1 / view.scale;
+    ctx.lineJoin = 'round';
+    const shimmer = reduceFlicker ? 0 : 0.06 * Math.sin(time * 3);
+    // Each layer reaches a little further out: fat strokes on the hull outline, stacked, so the inside glows brightest.
+    for (let i = layers; i >= 0; i--) {
+      const up = i < layers;
+      if (!up && partial <= 0.02) continue;
+      hullPath(ctx);
+      ctx.lineWidth = (8 + i * 8) * 2 * px;
+      ctx.strokeStyle = up ? `rgba(127, 212, 255, ${0.14 + shimmer})` : `rgba(127, 212, 255, ${0.07 * partial})`;
+      ctx.stroke();
+    }
+    if (layers > 0) {
+      hullPath(ctx);
+      ctx.lineWidth = 2 * px;
+      ctx.strokeStyle = `rgba(190, 235, 255, ${0.75 + shimmer})`;
+      ctx.stroke();
+    }
+    ctx.setLineDash([]);
+    ctx.restore();
+  }
+
+  /** A weapon on its hardpoint: a turret, a ring that fills as it charges, and its number. */
+  function drawHardpoint(ctx, view, index, slot, fraction, chosen) {
+    const at = hardpointAt(view, index);
+    const r = Math.max(7, view.scale * 0.34);
+    const aim = layout.enemy ? Math.PI : 0; // the two ships face each other across the screen
+    ctx.save();
+    ctx.translate(at.x, at.y);
+    ctx.rotate(aim);
+    ctx.fillStyle = '#10141a';
+    ctx.strokeStyle = slot.powered ? C.amber : C.hullEdge;
+    ctx.lineWidth = 2;
+    ctx.fillRect(0, -r * 0.28, r * 1.7, r * 0.56);
+    ctx.strokeRect(0, -r * 0.28, r * 1.7, r * 0.56);
+    ctx.restore();
+    ctx.beginPath();
+    ctx.arc(at.x, at.y, r, 0, Math.PI * 2);
+    ctx.fillStyle = '#10141a';
+    ctx.fill();
+    ctx.strokeStyle = C.hullEdge;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    if (fraction > 0) {
+      ctx.beginPath();
+      ctx.arc(at.x, at.y, r, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * fraction);
+      ctx.strokeStyle = fraction >= 1 ? C.paper : C.amber;
+      ctx.lineWidth = 3;
+      ctx.stroke();
+    }
+    if (chosen) {
+      ctx.beginPath();
+      ctx.arc(at.x, at.y, r + 5, 0, Math.PI * 2);
+      ctx.strokeStyle = C.paper;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+    ctx.fillStyle = slot.powered ? C.amber : '#8b93a1';
+    ctx.font = `700 ${Math.max(9, r * 1.1)}px ${MONO}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(String(index + 1), at.x, at.y + 1);
+    ctx.textAlign = 'start';
+    ctx.textBaseline = 'alphabetic';
+  }
+
+  /** Aiming marks on rooms of this ship: corner brackets and the numbers of the weapons pointed there. */
+  function drawReticles(ctx, view, aimed, inviting) {
+    const s = view.scale;
+    if (inviting) {
+      // A weapon is waiting for a target: every room says "tap me".
+      ctx.strokeStyle = 'rgba(233, 220, 195, 0.55)';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([5, 5]);
+      for (const room of layout.rooms) ctx.strokeRect(view.ox + room.x * s + 4, view.oy + room.y * s + 4, room.w * s - 8, room.h * s - 8);
+      ctx.setLineDash([]);
+    }
+    for (const [roomId, slots] of aimed) {
+      const room = layout.room(roomId);
+      if (!room) continue;
+      const x = view.ox + room.x * s + 5;
+      const y = view.oy + room.y * s + 5;
+      const w = room.w * s - 10;
+      const h = room.h * s - 10;
+      const arm = Math.min(w, h) * 0.28;
+      ctx.strokeStyle = C.alarm;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      for (const [cx, cy, dx, dy] of [[x, y, 1, 1], [x + w, y, -1, 1], [x, y + h, 1, -1], [x + w, y + h, -1, -1]]) {
+        ctx.moveTo(cx + dx * arm, cy);
+        ctx.lineTo(cx, cy);
+        ctx.lineTo(cx, cy + dy * arm);
+      }
+      ctx.stroke();
+      const label = slots.map((slot) => slot + 1).join(' ');
+      ctx.font = `700 12px ${MONO}`;
+      const tw = ctx.measureText(label).width + 10;
+      ctx.fillStyle = C.alarm;
+      ctx.fillRect(x + w / 2 - tw / 2, y + h - 17, tw, 17);
+      ctx.fillStyle = '#fff';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(label, x + w / 2, y + h - 8);
+      ctx.textAlign = 'start';
+      ctx.textBaseline = 'alphabetic';
+    }
+  }
+
+  /** A ship whose hull has given out: dark, and labelled so. */
+  function drawWreck(ctx, view) {
+    ctx.save();
+    ctx.translate(view.ox, view.oy);
+    ctx.scale(view.scale, view.scale);
+    hullPath(ctx);
+    ctx.fillStyle = 'rgba(5, 8, 13, 0.72)';
+    ctx.fill();
+    ctx.restore();
+    const { bounds } = layout;
+    ctx.fillStyle = C.paper;
+    ctx.font = `700 ${Math.max(11, Math.min(16, view.scale * 0.5))}px ${MONO}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('DESTROYED', view.ox + (bounds.x + bounds.w / 2) * view.scale, view.oy + (bounds.y + bounds.h / 2) * view.scale);
+    ctx.textAlign = 'start';
+    ctx.textBaseline = 'alphabetic';
+  }
+
+  /**
+   * Extra, for fights:
+   *   clear      false to draw over what is already on the canvas (the second ship)
+   *   charges    each weapon's charge, 0 to 1, by slot
+   *   chosenWeapon  the slot picked for aiming, or null
+   *   aimed      Map of room id -> [weapon slots of the other ship pointed at it]
+   *   inviting   true while the other ship is choosing a room of this one to aim at
+   */
+  function draw(ctx, { view, width, height, dpr, state, time, alpha = 1, selected, selectedCrew = null, showVents = false, reduceFlicker = false, clear = true, charges = [], chosenWeapon = null, aimed = null, inviting = false }) {
+    if (clear) ctx.clearRect(0, 0, width, height);
     ctx.drawImage(staticLayer(view, width, height, dpr), 0, 0, width, height);
     const s = view.scale;
 
@@ -566,10 +752,15 @@ export function createShipRenderer(layout) {
     for (const member of crew) if (!member.alive) drawCrew(ctx, view, member, alpha, member.id === selectedCrew);
     for (const member of crew) if (member.alive) drawCrew(ctx, view, member, alpha, member.id === selectedCrew);
 
+    state.weapons.forEach((slot, index) => drawHardpoint(ctx, view, index, slot, charges[index] ?? 0, chosenWeapon === index));
+    drawShield(ctx, view, state.shield, time, reduceFlicker);
+    if (aimed) drawReticles(ctx, view, aimed, inviting);
+    if (state.hull.points === 0) drawWreck(ctx, view);
+
     if (selected) {
       ctx.strokeStyle = C.paper;
       ctx.lineWidth = 2.5;
-      if (selected.kind === 'room') {
+      if (selected.kind === 'room' || selected.kind === 'foe') {
         const room = layout.room(selected.id);
         ctx.strokeRect(view.ox + room.x * s - 1, view.oy + room.y * s - 1, room.w * s + 2, room.h * s + 2);
       } else {
@@ -579,5 +770,5 @@ export function createShipRenderer(layout) {
     }
   }
 
-  return { fit, targets, draw, doorRect, crewColour: (index) => CREW_COLOURS[index % CREW_COLOURS.length] };
+  return { fit, targets, draw, doorRect, roomCentre, hardpointAt, crewColour: (index) => CREW_COLOURS[index % CREW_COLOURS.length] };
 }

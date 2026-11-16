@@ -29,6 +29,8 @@ export const PATCHES = Object.freeze({
   hiss: { gain: 0.1, duration: 0.5, env: { attack: 0.02, release: 0.5 }, voices: [], noise: 1, filter: { type: 'highpass', freq: 2500 } },
   chirp: { gain: 0.1, duration: 0.08, env: { attack: 0.004, release: 0.1 }, voices: [{ wave: 'sine', freq: 660, to: 990 }] },
   flatline: { gain: 0.12, duration: 1.2, env: { attack: 0.01, release: 0.6 }, voices: [{ wave: 'sine', freq: 440 }], filter: { type: 'lowpass', freq: 1200 } },
+  shot: { gain: 0.14, duration: 0.09, env: { attack: 0.002, release: 0.16 }, voices: [{ wave: 'sawtooth', freq: 1400, to: 220 }], noise: 0.25, filter: { type: 'lowpass', freq: 3200, to: 600 } },
+  shield: { gain: 0.12, duration: 0.22, env: { attack: 0.005, release: 0.35 }, voices: [{ wave: 'sine', freq: 520, to: 780 }, { wave: 'sine', freq: 527, to: 790 }], filter: { type: 'bandpass', freq: 900, q: 3 } },
   pause: { gain: 0.08, duration: 0.05, env: { attack: 0.004, release: 0.1 }, voices: [{ wave: 'sine', freq: 330, to: 262 }] },
 });
 
@@ -45,6 +47,10 @@ export const EVENT_SOUNDS = Object.freeze({
   'power.brownout': 'powerdown',
   'room.jettisoned': 'thunk',
   'crew.died': 'flatline',
+  'fight.started': 'klaxon',
+  'weapon.ready': 'chirp',
+  'weapon.fired': 'shot',
+  'shot.resolved': (event) => (event.result === 'hit' ? 'thunk' : event.result === 'shield' ? 'shield' : null),
 });
 
 const WAVES = ['sine', 'square', 'sawtooth', 'triangle'];

@@ -33,8 +33,14 @@ export function validatePower(data) {
   for (const id of Object.keys(systems)) {
     if (!POWERED.includes(id)) problems.push(`power.systems: "${id}" is not a system that takes power`);
   }
+  const fitted = (id) => !Array.isArray(data.rooms) || data.rooms.some((room) => room?.system === id);
   for (const id of POWERED) {
     const entry = systems[id];
+    if (!fitted(id)) {
+      // Only an enemy ship may leave a system out (ship.js), and then it has nothing to power.
+      if (entry) problems.push(`power.systems lists "${id}" but no room holds it`);
+      continue;
+    }
     if (!entry) {
       problems.push(`power.systems is missing "${id}"`);
       continue;
@@ -52,11 +58,13 @@ export function validatePower(data) {
   return problems;
 }
 
-/** The starting `systems` state for a ship. */
-export function newSystemsState(power) {
+/** The starting `systems` state for a ship. A system the ship was built without is marked `absent` and never takes power. */
+export function newSystemsState(layout) {
+  const { power } = layout;
   const systems = {};
   for (const id of SYSTEM_IDS) {
     if (id === 'reactor') systems[id] = { level: power.reactor, damage: 0, power: 0 };
+    else if (!layout.hasSystem(id)) systems[id] = { level: 1, damage: 0, power: 0, absent: true };
     else if (POWERED.includes(id)) systems[id] = { level: power.systems[id].level, damage: 0, power: power.systems[id].power };
     else systems[id] = { level: 1, damage: 0, power: 0 };
   }
@@ -120,6 +128,7 @@ export const POWER_COMMANDS = {
       if (!POWERED.includes(cmd.system)) return `"${cmd.system}" does not take power`;
       if (cmd.delta !== 1 && cmd.delta !== -1) return 'delta must be 1 or -1';
       const system = sim.state.systems[cmd.system];
+      if (system.absent) return 'this ship has no such system';
       if (cmd.delta < 0) return system.power > 0 ? null : 'it has no power to take back';
       if (system.power >= system.level - system.damage) return system.damage > 0 ? 'the rest of it is damaged' : 'it is at full power';
       if (free(sim) < 1) return 'no spare power';

@@ -41,6 +41,8 @@ export const TRIGGERS = Object.freeze({
   'breach.opened': { category: 'hazard', priority: 4, ttl: 12, cooldown: 20 },
   'room.jettisoned': { category: 'hazard', priority: 4, ttl: 15 },
   'crew.died': { category: 'crew_death', priority: 5, ttl: 40, slots: crewName },
+  'fight.started': { category: 'combat_start', priority: 4, ttl: 15 },
+  'fight.over': { category: 'combat_end', priority: 3, ttl: 20 },
 });
 
 export function newVoiceState() {

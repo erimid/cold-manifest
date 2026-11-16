@@ -46,6 +46,12 @@
     { "id": "ph.order_confirm.003", "category": "order_confirm", "placeholder": true, "text": "Passed along. {crew_name} is going." },
     { "id": "ph.order_confirm.004", "category": "order_confirm", "placeholder": true, "text": "{crew_name} has it." },
     { "id": "ph.order_confirm.005", "category": "order_confirm", "placeholder": true, "text": "I've told {crew_name}. No complaints yet." },
-    { "id": "ph.order_confirm.006", "category": "order_confirm", "placeholder": true, "text": "{crew_name}, walking. I'll hold the doors I can." }
+    { "id": "ph.order_confirm.006", "category": "order_confirm", "placeholder": true, "text": "{crew_name}, walking. I'll hold the doors I can." },
+    { "id": "ph.combat_start.001", "category": "combat_start", "placeholder": true, "text": "Contact. It has seen us, and it isn't waving." },
+    { "id": "ph.combat_start.002", "category": "combat_start", "placeholder": true, "text": "Ship alongside. I'd put power in the guns before I put it anywhere sentimental." },
+    { "id": "ph.combat_start.003", "category": "combat_start", "placeholder": true, "text": "Something out there wants our attention. Weapons are yours, Captain." },
+    { "id": "ph.combat_end.001", "category": "combat_end", "placeholder": true, "text": "That's settled. I'm logging it as a navigational hazard, removed." },
+    { "id": "ph.combat_end.002", "category": "combat_end", "placeholder": true, "text": "It's over. Count the crew, then count the holes." },
+    { "id": "ph.combat_end.003", "category": "combat_end", "placeholder": true, "text": "Guns cold. Nobody will ask us what happened here, and I suggest we let them not." }
   ]
 }
