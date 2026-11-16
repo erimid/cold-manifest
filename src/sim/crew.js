@@ -10,7 +10,14 @@
 // room with nowhere else to be, they deal with the worst thing in it without
 // being told: fire first, then a breach, then a damaged system, then a jammed
 // door.
+//
+// In a fight (S2.4) crew can be aboard the other ship: `owner` says whose crew
+// they are ('player' or 'enemy') and the ship's `side` says whose ship it is.
+// Anyone aboard a ship that is not theirs is a boarder: they fight whoever of
+// the other side shares their room, wreck the system they stand in, and fix
+// nothing. Crossing between ships is boarding.js.
 
+import { crewEmit, harmCrew } from './atmosphere.js';
 import { SPACE, SYSTEMS } from './systems.js';
 
 /** Tiles per second on foot. A suit is heavy. */
@@ -28,12 +35,16 @@ export const DARK_WORK = 0.5;
 export const MEDBAY_HEAL = 1 / 40;
 /** How open a door must be to walk through. */
 export const WALKABLE = 0.9;
+/** Hand to hand: one healthy fighter takes a healthy one down alone in this many seconds. Hurt fighters hit softer. */
+export const MELEE_SECONDS = 14;
+/** A boarder left alone with a system breaks a bar of it every this many seconds. */
+export const SABOTAGE_SECONDS = 9;
 
 /** Where crew stand in a room, as offsets from its middle, by their place on the roster. */
 const SPOTS = [[0, 0], [-1, 0.6], [1, 0.6], [-1, -0.6], [1, -0.6], [0, 1.1], [0, -1.1], [1.6, 0]];
 const EDGE = 0.6; // how close to a wall anyone stands
 
-function spotIn(room, index) {
+export function spotIn(room, index) {
   const [dx, dy] = SPOTS[index % SPOTS.length];
   const clamp = (value, low, high) => (high < low ? (low + high) / 2 : Math.max(low, Math.min(high, value)));
   return {
@@ -43,12 +54,14 @@ function spotIn(room, index) {
 }
 
 /** A new crew member standing in `roomId`. `index` is their place on the roster. */
-export function newCrewMember(layout, { id, name }, roomId, index = 0) {
+export function newCrewMember(layout, { id, name }, roomId, index = 0, owner = 'player') {
   const { x, y } = spotIn(layout.room(roomId), index);
   return {
     id,
     name: name ?? id,
     index,
+    owner, // whose crew: 'player' or 'enemy'. Not always the ship they are aboard
+
     room: roomId,
     x,
     y,
@@ -59,19 +72,26 @@ export function newCrewMember(layout, { id, name }, roomId, index = 0) {
     alive: true,
     goal: null, // the room they are walking to
     path: [], // waypoints still ahead of them
-    task: 'idle', // what they are doing: idle | walking | waiting | extinguish | patch | repair | unjam
+    task: 'idle', // what they are doing: idle | walking | waiting | extinguish | patch | repair | unjam | fighting | sabotage | crossing
+    board: null, // set while heading for the other ship: { room } there to go to (boarding.js)
+    crossEnds: null, // the tick they come out the other end, while crossing
+    wreck: 0, // 0 to 1 progress toward breaking the next bar of the system they are sabotaging
   };
 }
 
 /** The starting roster for a ship: people from content, placed in the ship's `crewStart` rooms. */
-export function newCrewState(layout, roster = []) {
+export function newCrewState(layout, roster = [], owner = 'player') {
   const crew = {};
   const starts = layout.crewStart.length ? layout.crewStart : [layout.rooms[0].id];
   roster.forEach((person, index) => {
-    crew[person.id] = newCrewMember(layout, person, starts[index % starts.length], index);
+    crew[person.id] = newCrewMember(layout, person, starts[index % starts.length], index, owner);
   });
   return crew;
 }
+
+/** Is this crew member aboard their own ship? */
+export const isHome = (ship, member) => (member.owner ?? 'player') === (ship.side ?? 'player');
+
 
 // ---------- finding the way ----------
 
@@ -114,7 +134,7 @@ function besideDoor(layout, door, roomId) {
 }
 
 /** Waypoints from where a crew member stands to their spot in `to`, or null if there is no way. */
-function planPath(sim, member, to) {
+export function planPath(sim, member, to) {
   const route = findRoute(sim, member.room, to);
   if (!route) return null;
   const path = [];
@@ -154,7 +174,7 @@ export const CREW_COMMANDS = {
       member.goal = cmd.room;
       member.path = planPath(sim, member, cmd.room);
       member.task = 'walking';
-      sim.events.emit('crew.ordered', { crew: cmd.crew, room: cmd.room, tick: sim.state.tick });
+      crewEmit(sim, member, 'crew.ordered', { crew: cmd.crew, room: cmd.room, tick: sim.state.tick });
     },
   },
   // Suit up or strip off. A suit keeps you breathing and halves burns, and slows everything you do.
@@ -169,7 +189,7 @@ export const CREW_COMMANDS = {
       const member = sim.state.crew[cmd.crew];
       if (member.suit === cmd.on) return;
       member.suit = cmd.on;
-      sim.events.emit('crew.suit', { crew: cmd.crew, on: cmd.on, tick: sim.state.tick });
+      crewEmit(sim, member, 'crew.suit', { crew: cmd.crew, on: cmd.on, tick: sim.state.tick });
     },
   },
   // Debug panel only: set someone's health.
@@ -200,7 +220,8 @@ function stop(sim, member, reason, door) {
   member.goal = null;
   member.path = [];
   member.task = 'idle';
-  sim.events.emit('crew.blocked', { crew: member.id, room: member.room, door, reason, tick: sim.state.tick });
+  member.board = null;
+  crewEmit(sim, member, 'crew.blocked', { crew: member.id, room: member.room, door, reason, tick: sim.state.tick });
 }
 
 function walk(sim, member, seconds) {
@@ -246,7 +267,7 @@ function walk(sim, member, seconds) {
   }
   member.goal = null;
   member.task = 'idle';
-  sim.events.emit('crew.arrived', { crew: member.id, room: member.room, tick: sim.state.tick });
+  crewEmit(sim, member, 'crew.arrived', { crew: member.id, room: member.room, tick: sim.state.tick });
 }
 
 /** What needs doing most in the room this crew member is standing in. */
@@ -254,6 +275,11 @@ function jobIn(sim, member) {
   const room = sim.layout.room(member.room);
   const r = sim.state.rooms[member.room];
   if (r.jettisoned) return null;
+  if (!isHome(sim, member)) {
+    // Aboard their ship, there is nothing to save and a system to break.
+    const system = room.system ? sim.state.systems[room.system] : null;
+    return system && !system.lost && system.damage < system.level ? { type: 'sabotage', system: room.system } : null;
+  }
   if (r.fire > 0) return { type: 'extinguish' };
   if (r.breach > 0) return { type: 'patch' };
   if (room.system) {
@@ -267,14 +293,28 @@ function jobIn(sim, member) {
   return null;
 }
 
+/** The other side's people in this crew member's room, still on their feet and not in the docking tube. */
+export function hostilesBeside(sim, member) {
+  return Object.values(sim.state.crew).filter((other) => other.alive && other.room === member.room && other.owner !== member.owner && other.task !== 'crossing');
+}
+
+function fight(sim, member, foes, seconds) {
+  member.task = 'fighting';
+  // Everyone goes for whoever is closest to dropping. Stage 4 skills and traits change who wins (brief §7).
+  const target = foes.reduce((weakest, other) => (other.health < weakest.health ? other : weakest));
+  harmCrew(sim, target.id, ((0.5 + 0.5 * member.health) * seconds) / MELEE_SECONDS, 'melee');
+}
+
 function work(sim, member, seconds) {
+  const foes = hostilesBeside(sim, member);
+  if (foes.length) return fight(sim, member, foes, seconds);
   const job = jobIn(sim, member);
   member.task = job ? job.type : 'idle';
   const r = sim.state.rooms[member.room];
 
   if (!job) {
-    // Nothing to fix: a powered medbay patches people up instead.
-    if (sim.layout.room(member.room).system === 'medbay' && sim.state.systems.medbay.power > 0 && member.health < 1) {
+    // Nothing to fix: a powered medbay patches up its own crew instead.
+    if (isHome(sim, member) && sim.layout.room(member.room).system === 'medbay' && sim.state.systems.medbay.power > 0 && member.health < 1) {
       member.health = Math.min(1, member.health + MEDBAY_HEAL * sim.state.systems.medbay.power * seconds);
     }
     return;
@@ -302,6 +342,15 @@ function work(sim, member, seconds) {
       system.damage -= 1;
       sim.events.emit('system.repaired', { system: job.system, damage: system.damage, by: member.id, tick: sim.state.tick });
     }
+  } else if (job.type === 'sabotage') {
+    const system = sim.state.systems[job.system];
+    member.wreck += ((0.5 + 0.5 * member.health) * seconds) / SABOTAGE_SECONDS;
+    if (member.wreck >= 1) {
+      member.wreck = 0;
+      const from = system.damage;
+      system.damage += 1;
+      sim.events.emit('system.damage', { system: job.system, from, to: system.damage, cause: 'sabotage', by: member.id, tick: sim.state.tick });
+    }
   } else if (job.type === 'unjam') {
     const d = sim.state.doors[job.door];
     d.repair = (d.repair ?? 0) + UNJAM_RATE * rate;
@@ -319,7 +368,7 @@ export function stepCrew(sim, seconds) {
     member.py = member.y;
     if (!member.alive) continue;
     if (member.path.length) walk(sim, member, seconds);
-    else work(sim, member, seconds);
+    else if (!member.board) work(sim, member, seconds); // at the airlock, or in the tube: boarding.js has them
   }
 }
 
@@ -329,7 +378,14 @@ export function describeTask(sim, member) {
   const room = sim.layout.room(member.room);
   switch (member.task) {
     case 'walking':
+      if (member.board) return 'Heading for the airlock';
       return `Walking to ${sim.layout.room(member.goal)?.name ?? 'somewhere'}`;
+    case 'crossing':
+      return isHome(sim, member) ? 'Crossing over' : 'Crossing back';
+    case 'fighting':
+      return 'Fighting hand to hand';
+    case 'sabotage':
+      return `Wrecking ${SYSTEMS[room.system].name.toLowerCase()}`;
     case 'waiting':
       return 'Waiting on a door';
     case 'extinguish':
@@ -341,7 +397,7 @@ export function describeTask(sim, member) {
     case 'unjam':
       return 'Freeing a jammed door';
     default:
-      return room.system === 'medbay' && member.health < 1 && sim.state.systems.medbay.power > 0 ? 'Being patched up' : 'Standing by';
+      return isHome(sim, member) && room.system === 'medbay' && member.health < 1 && sim.state.systems.medbay.power > 0 ? 'Being patched up' : 'Standing by';
   }
 }
 
@@ -360,6 +416,10 @@ export function checkCrewInvariants(sim) {
     }
     if (!member.alive && (member.path.length || member.goal)) problems.push(`crew ${id} is dead but still has somewhere to be`);
     if (member.alive && !(member.health > 0 && member.health <= 1)) problems.push(`crew ${id} is alive with health ${member.health}`);
+    if (!['player', 'enemy'].includes(member.owner)) problems.push(`crew ${id} belongs to "${member.owner}"`);
+    if (!(member.wreck >= 0 && member.wreck < 1)) problems.push(`crew ${id} wreck progress is ${member.wreck}`);
+    if (member.task === 'crossing' && !(member.board && member.crossEnds !== null)) problems.push(`crew ${id} is crossing with nowhere to go`);
+    if (member.board && !member.alive) problems.push(`crew ${id} is dead but still boarding`);
   }
   for (const id of Object.keys(sim.state.systems)) {
     const repair = sim.state.systems[id].repair ?? 0;

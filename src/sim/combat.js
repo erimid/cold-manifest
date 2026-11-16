@@ -36,8 +36,17 @@
 //   stalemate    nobody has hurt anybody for STALEMATE_SECONDS: they break away
 // The stalemate rule means no fight runs forever: each hull point lost buys
 // at most STALEMATE_SECONDS more, and hull points never come back mid-fight.
+//
+// Crew can board (S2.4, boarding.js): either side's people can cross to the
+// other ship once its shields are down, and fight hand to hand there. Killing
+// everyone of theirs, on either ship, is the crew-dead ending. When a fight is
+// decided, boarders go home, except ours aboard a ship that is destroyed (they
+// go with it) and theirs aboard ours when their ship does not take them back
+// (they are captured).
 
 import { FIRE_CATCH_O2, FIRE_START, harmCrew, killCrew } from './atmosphere.js';
+import { airlockRooms, everyone, moveAboard, sendAcross, stepBoarding, whyNotCross } from './boarding.js';
+import { CREW_COMMANDS, isHome } from './crew.js';
 import { stepPower } from './power.js';
 import { THINK_SECONDS, planOf, think } from './tactics.js';
 
@@ -88,10 +97,10 @@ export const shieldLayers = (ship) => Math.floor(ship.state.shield.charge + EPS)
 /** The most layers the ship can hold: one per bar routed to shields. */
 export const shieldMax = (ship) => ship.state.systems.shields.power;
 
-/** Is someone alive at the helm? */
+/** Is one of the ship's own crew alive at the helm? A boarder standing there flies nothing. */
 export function hasPilot(ship) {
   const helm = ship.layout.rooms.find((room) => room.kind === 'helm');
-  return Boolean(helm) && Object.values(ship.state.crew).some((member) => member.alive && member.room === helm.id);
+  return Boolean(helm) && Object.values(ship.state.crew).some((member) => member.alive && member.room === helm.id && isHome(ship, member) && member.task !== 'crossing');
 }
 
 /** The chance, 0 to 1, that a shot at this ship misses. */
@@ -116,8 +125,21 @@ export function weaponsPowered(ship) {
 export const canCharge = (ship) => ship.state.systems.engines.power > 0 && hasPilot(ship);
 /** The jump drive's charge as a fraction, 0 to 1. */
 export const jumpCharge = (ship) => Math.min(1, ship.state.jump / JUMP_CHARGE);
-/** Living crew aboard a ship. */
-export const livingCrew = (ship) => Object.values(ship.state.crew).filter((member) => member.alive);
+/** A ship's own crew, alive and aboard it. */
+export const livingCrew = (ship) => Object.values(ship.state.crew).filter((member) => member.alive && isHome(ship, member));
+/** Everyone of `owner`'s crew still alive, on either ship: 'player' or 'enemy'. */
+export const crewLeft = (sim, owner) => everyone(sim, enemyOf(sim), owner).filter(({ member }) => member.alive);
+
+/** Find a crew member on either ship: { member, ship }, or null. */
+export function findCrew(sim, id) {
+  if (sim.state.crew[id]) return { member: sim.state.crew[id], ship: sim };
+  const enemy = enemyOf(sim);
+  if (enemy?.state.crew[id]) return { member: enemy.state.crew[id], ship: enemy };
+  return null;
+}
+
+/** Our crew, wherever they are, in roster order: [{ member, ship }]. */
+export const ourCrew = (sim) => everyone(sim, enemyOf(sim), 'player');
 
 /** The chance that talking works on the enemy in this fight, 0 to 1. */
 export function talkChance(sim) {
@@ -162,7 +184,8 @@ export function enemyOf(sim) {
       rng: sim.rng,
       lines: [],
       // What happens aboard the enemy is announced apart from the player's ship, so alarms and the AI are not fooled.
-      events: { emit: (type, payload) => sim.events.emit(`enemy.${type}`, payload) },
+      // News about a crew member goes straight to the bus, named by whose crew they are (crewEmit).
+      events: { emit: (type, payload) => sim.events.emit(`enemy.${type}`, payload), bus: sim.events },
       get state() {
         return sim.state.fight.enemy;
       },
@@ -173,7 +196,7 @@ export function enemyOf(sim) {
 }
 
 /** Debug actions that lead to each ending (brief §7). */
-export const DEBUG_ACTIONS = Object.freeze(['cripple', 'killCrew', 'surrender', 'flee', 'chargeJump', 'stalemate', 'sinkUs', 'money']);
+export const DEBUG_ACTIONS = Object.freeze(['cripple', 'killCrew', 'surrender', 'flee', 'chargeJump', 'stalemate', 'sinkUs', 'money', 'boardUs']);
 
 const inHail = (sim) => (!sim.state.fight || sim.state.fight.over ? 'there is no fight' : sim.state.fight.phase !== 'hail' ? 'the shooting has already started' : null);
 
@@ -187,8 +210,10 @@ export function startFight(sim, enemyId, newShipState) {
   const plan = planOf(layout);
   const { tick } = sim.state;
   sim.state.jump = 0; // the drive is charged for this fight, from nothing
+  // Their people may share an id with ours; two ships' crews can mix, so theirs give way.
+  const roster = layout.crew.map((person) => (sim.state.crew[person.id] ? { ...person, id: `foe-${person.id}` } : person));
   sim.state.fight = {
-    enemy: { ship: layout.id, tick, ...newShipState(layout, layout.crew) },
+    enemy: { ship: layout.id, tick, ...newShipState(layout, roster, 'enemy') },
     shots: [], // in the air: { id, side, slot, weapon, room, born, lands }
     nextShot: 1,
     started: tick,
@@ -199,13 +224,46 @@ export function startFight(sim, enemyId, newShipState) {
     offered: false, // they have offered once already
     fleeing: false, // they are charging their jump to get away
     lastHarm: tick, // the last tick either hull lost a point
+    engaged: tick, // when the shooting started (or will have: set again when a hail ends)
     over: null, // { outcome, tick, ... } once it is decided (OUTCOMES)
   };
   sim.events.emit('fight.started', { enemy: layout.id, name: layout.name, hailing: Boolean(plan.hail), tick });
   if (plan.hail) sim.events.emit('fight.hail', { enemy: layout.id, name: layout.name, text: plan.hail.text, bribe: plan.hail.bribe, tick });
 }
 
+/**
+ * Boarders when a fight ends. Ours come home, unless the ship they are on is
+ * destroyed. Theirs go home if their ship takes them back (it parted from us
+ * on terms), or are captured: left aboard a ship that is not theirs.
+ */
+const TAKEN_BACK = new Set(['surrendered', 'talked', 'bribed', 'stalemate', 'recalled']);
+function settleBoarders(sim, outcome) {
+  const enemy = enemyOf(sim);
+  const { tick } = sim.state;
+  const dock = (ship) => airlockRooms(ship)[0] ?? ship.layout.rooms.find((room) => !ship.state.rooms[room.id].jettisoned)?.id ?? ship.layout.rooms[0].id;
+  for (const member of Object.values(enemy.state.crew)) {
+    if (member.owner === 'player') {
+      if (outcome === 'destroyed' && member.alive) killCrew(enemy, member.id, 'wreck');
+      moveAboard(enemy, sim, member, dock(sim));
+      if (!member.alive) Object.assign(member, { task: 'dead' });
+    } else if (member.board) Object.assign(member, { board: null, crossEnds: null, task: 'idle' });
+  }
+  for (const member of Object.values(sim.state.crew)) {
+    if (member.owner === 'player') {
+      if (member.board) Object.assign(member, { board: null, crossEnds: null, task: 'idle', goal: null, path: [] });
+      continue;
+    }
+    if (TAKEN_BACK.has(outcome) && member.alive) {
+      moveAboard(sim, enemy, member, dock(enemy));
+      continue;
+    }
+    delete sim.state.crew[member.id];
+    if (member.alive) sim.events.emit('crew.captured', { crew: member.id, name: member.name, tick });
+  }
+}
+
 export function endFight(sim) {
+  settleBoarders(sim, 'recalled'); // anyone still across (after our hull went, say) goes home
   clearTargets(sim);
   sim.state.fight = null;
   sim.events.emit('fight.ended', { tick: sim.state.tick });
@@ -218,6 +276,7 @@ export function decide(sim, outcome, extra = {}) {
   fight.over = { outcome, tick: sim.state.tick, ...extra };
   fight.offer = null;
   fight.shots = [];
+  if (outcome !== 'lost') settleBoarders(sim, outcome); // when ours is lost, nobody is going anywhere
   clearTargets(sim);
   clearTargets(enemyOf(sim));
   sim.events.emit('fight.over', { ...fight.over, enemy: fight.enemy.ship });
@@ -234,6 +293,7 @@ function engage(sim, by) {
   if (fight.phase === 'battle') return;
   fight.phase = 'battle';
   fight.lastHarm = sim.state.tick;
+  fight.engaged = sim.state.tick;
   sim.events.emit('fight.engaged', { by, tick: sim.state.tick });
 }
 
@@ -268,8 +328,60 @@ export function offerText(offer) {
 
 // ---------- orders ----------
 
+/** Find one of our own crew for an order: { member, ship }, or a reason string. */
+function ours(sim, id) {
+  const found = findCrew(sim, id);
+  if (!found) return `no crew member "${id}"`;
+  if (found.member.owner !== 'player') return `${found.member.name} is not one of ours`;
+  return found;
+}
+
+/** A crew order, carried out on whichever ship the crew member is aboard. */
+function aboard(type) {
+  return {
+    check(sim, cmd) {
+      const found = ours(sim, cmd.crew);
+      return typeof found === 'string' ? found : CREW_COMMANDS[type].check(found.ship, cmd);
+    },
+    apply(sim, cmd) {
+      CREW_COMMANDS[type].apply(findCrew(sim, cmd.crew).ship, cmd);
+    },
+  };
+}
+
 export function combatCommands(newShipState) {
   return {
+    // Send someone to a room: on the ship they are aboard, or across to the other one (ship: 'us' or 'them').
+    'crew.move': {
+      check(sim, cmd) {
+        const found = ours(sim, cmd.crew);
+        if (typeof found === 'string') return found;
+        const { member, ship } = found;
+        if (cmd.ship !== undefined && !['us', 'them'].includes(cmd.ship)) return 'ship must be "us" or "them"';
+        const to = cmd.ship === 'them' ? enemyOf(sim) : sim;
+        if (!to) return 'there is no other ship';
+        if (member.task === 'crossing') return `${member.name} is in the docking tube`;
+        if (to === ship) return CREW_COMMANDS['crew.move'].check(ship, cmd);
+        if (!member.alive) return `${member.name} is dead`;
+        const fight = sim.state.fight;
+        if (fight.over) return 'the fight is over';
+        if (fight.phase !== 'battle' && to !== sim) return 'nobody boards while they are still talking';
+        const room = to.state.rooms[cmd.room];
+        if (!room) return `no room "${cmd.room}" on that ship`;
+        if (room.jettisoned) return 'that section is gone';
+        return whyNotCross(ship, to, member);
+      },
+      apply(sim, cmd) {
+        const { member, ship } = findCrew(sim, cmd.crew);
+        const to = cmd.ship === 'them' ? enemyOf(sim) : sim;
+        if (to === ship) {
+          member.board = null;
+          CREW_COMMANDS['crew.move'].apply(ship, cmd);
+        } else sendAcross(ship, to, member, cmd.room);
+      },
+    },
+    'crew.suit': aboard('crew.suit'),
+    'debug.crew': aboard('debug.crew'),
     // Aim a weapon at a room on the enemy ship, or at nothing (room: null). Works paused, like every order.
     'weapon.target': {
       check(sim, cmd) {
@@ -352,6 +464,8 @@ export function combatCommands(newShipState) {
         if (fight.over) return 'the fight is over';
         if (jumpCharge(sim) < 1) return `the jump drive is at ${Math.floor(jumpCharge(sim) * 100)}%`;
         if (!hasPilot(sim)) return 'nobody is at the helm';
+        const away = ourCrew(sim).find(({ member, ship }) => member.alive && (ship !== sim || member.task === 'crossing'));
+        if (away) return `${away.member.name} is still aboard them`;
         return null;
       },
       apply: (sim) => decide(sim, 'escaped'),
@@ -399,8 +513,9 @@ export function combatCommands(newShipState) {
         if (fight.over) return 'the fight is over';
         const enemy = enemyOf(sim);
         const plan = planOf(enemy.layout);
-        if (cmd.action === 'killCrew' && !livingCrew(enemy).length) return 'there is nobody aboard them';
-        if (cmd.action === 'surrender' && (!plan.surrender || !livingCrew(enemy).length)) return 'they have nobody to surrender';
+        if (cmd.action === 'killCrew' && !crewLeft(sim, 'enemy').length) return 'there is nobody aboard them, or anywhere';
+        if (cmd.action === 'surrender' && (!plan.surrender || !crewLeft(sim, 'enemy').length)) return 'they have nobody to surrender';
+        if (cmd.action === 'boardUs' && livingCrew(enemy).length < 2) return 'they have nobody to spare for a boarding party';
         if (cmd.action === 'surrender' && fight.offer) return 'they are already offering';
         if (cmd.action === 'flee' && (!plan.flee || !hasPilot(enemy))) return 'they have no way to run';
         return null;
@@ -412,7 +527,18 @@ export function combatCommands(newShipState) {
         if (cmd.action === 'money') sim.state.money += 100;
         if (cmd.action === 'cripple') Object.assign(enemy.state, { hull: { ...enemy.state.hull, points: 1 }, shield: { charge: 0 } });
         if (cmd.action === 'sinkUs') Object.assign(sim.state, { hull: { ...sim.state.hull, points: 1 }, shield: { charge: 0 } });
-        if (cmd.action === 'killCrew') for (const member of livingCrew(enemy)) killCrew(enemy, member.id, 'debug');
+        if (cmd.action === 'killCrew') for (const { member, ship } of crewLeft(sim, 'enemy')) killCrew(ship, member.id, 'debug');
+        if (cmd.action === 'boardUs') {
+          // Everyone but their first crew member comes straight through our nearest airlock to the helm, or wherever they can.
+          engage(sim, 'debug');
+          const helm = sim.layout.rooms.find((room) => room.kind === 'helm') ?? sim.layout.rooms[0];
+          const party = livingCrew(enemy).filter((member) => member.task !== 'crossing').slice(1);
+          for (const member of party) {
+            member.board = { room: helm.id };
+            member.task = 'crossing';
+            member.crossEnds = tick;
+          }
+        }
         if (cmd.action === 'surrender') {
           engage(sim, 'debug');
           makeOffer(sim);
@@ -557,15 +683,15 @@ function stepFight(sim, enemy, dt) {
   const { hull } = enemy.state;
 
   if (fight.phase === 'hail' && tick >= fight.hailEnds) engage(sim, 'them');
-  if ((tick - fight.started) % Math.round(THINK_SECONDS * 20) === 0) think(enemy, sim, { fleeing: fight.fleeing });
+  if ((tick - fight.started) % Math.round(THINK_SECONDS * 20) === 0) think(enemy, sim, { fleeing: fight.fleeing, boarding: fight.phase === 'battle' && !fight.offer, battleSeconds: (tick - fight.engaged) / 20 });
 
   if (fight.offer && tick >= fight.offer.expires) {
     fight.offer = null;
     sim.events.emit('fight.refused', { expired: true, tick });
   }
   const crewed = enemy.layout.crew.length > 0;
-  const alive = livingCrew(enemy).length > 0;
-  if (fight.phase === 'battle' && alive && hull.points > 0) {
+  const alive = crewLeft(sim, 'enemy').length > 0;
+  if (fight.phase === 'battle' && livingCrew(enemy).length > 0 && hull.points > 0) {
     if (plan.surrender && !fight.offered && hull.points <= plan.surrender.at * hull.max) makeOffer(sim);
     if (plan.flee && !fight.fleeing && !fight.offer && hull.points <= plan.flee.at * hull.max) {
       fight.fleeing = true;
@@ -596,6 +722,7 @@ export function stepCombat(sim, dt) {
     else flying.push(shot);
   }
   if (!fight.over) fight.shots = flying;
+  if (!fight.over) stepBoarding(sim, enemy);
   if (!fight.over) stepFight(sim, enemy, dt);
 }
 

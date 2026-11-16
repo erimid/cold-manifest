@@ -11,6 +11,7 @@ import { loadContent } from './engine/content-browser.js';
 import { createInput } from './engine/input.js';
 import { createRng, newRunSeed } from './engine/rng.js';
 import { createStateMachine } from './engine/state-machine.js';
+import { findCrew, ourCrew } from './sim/combat.js';
 import { TICK_SECONDS, createSim } from './sim/sim.js';
 import { createBackdrop } from './ui/backdrop.js';
 import { el, setPressBinder } from './ui/dom.js';
@@ -18,7 +19,7 @@ import { AUTO_PAUSE, createSettings } from './ui/settings.js';
 import { createShipView } from './ui/shipview.js';
 import { renderStub, renderTitle } from './ui/title.js';
 
-const VERSION = '0.10.0';
+const VERSION = '0.11.0';
 
 const params = new URLSearchParams(window.location.search);
 const flags = {
@@ -91,9 +92,10 @@ const shipView = createShipView({ canvas: viewCanvas, root, input, sim, clock, a
 // Auto-pause (brief §7): stop the clock the moment something goes badly wrong, and say what.
 const AUTO_PAUSE_TEXT = {
   fight: (event) => `${event.name} alongside`,
+  boarded: (event) => `Boarders in ${sim.layout.room(event.room).name}`,
   fire: (event) => `Fire in ${sim.layout.room(event.room).name}`,
   breach: (event) => `Breach in ${sim.layout.room(event.room).name}`,
-  death: (event) => `${sim.state.crew[event.crew].name} is dead`,
+  death: (event) => `${findCrew(sim, event.crew)?.member.name ?? 'Someone'} is dead`,
 };
 for (const item of AUTO_PAUSE) {
   sim.events.on(item.event, (event) => {
@@ -187,7 +189,7 @@ function frame(now) {
         `clock  ${clock.paused ? 'paused' : 'running'}`,
         `seed   ${flags.seed}`,
         `auto   ${flags.auto ? 'on' : 'off'}`,
-        `crew   ${Object.values(sim.state.crew).filter((c) => c.alive).length} alive`,
+        `crew   ${ourCrew(sim).filter(({ member }) => member.alive).length} alive`,
         `fires  ${Object.values(sim.state.rooms).filter((r) => r.fire > 0).length}`,
         `fight  ${sim.state.fight ? `${sim.state.fight.enemy.ship} ${sim.state.fight.enemy.hull.points}hp, ${sim.state.fight.shots.length} shots` : 'none'}`,
         `margo  ${sim.state.ai.said} said, ${sim.state.ai.queue.length} waiting`,

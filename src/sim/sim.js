@@ -21,6 +21,7 @@
 import { attachVoice, checkVoiceInvariants, newVoiceState, stepVoice } from '../ai/voice.js';
 import { createEventBus } from '../engine/events.js';
 import { createRngSet } from '../engine/rng.js';
+import { checkBoardingInvariants } from './boarding.js';
 import { ATMOSPHERE_COMMANDS, checkAtmosphereInvariants, stepAtmosphere } from './atmosphere.js';
 import { START_MONEY, checkCombatInvariants, checkFightInvariants, combatCommands, enemyOf, newCombatState, stepCombat } from './combat.js';
 import { CREW_COMMANDS, checkCrewInvariants, newCrewState, stepCrew } from './crew.js';
@@ -76,15 +77,15 @@ function newDoorState() {
 
 /**
  * Everything that makes up one ship's state: the player's, or an enemy's in a fight.
- * `roster` is the crew aboard: [{ id, name }].
+ * `roster` is the crew aboard: [{ id, name }], and `owner` whose crew they are.
  */
-export function newShipState(layout, roster) {
+export function newShipState(layout, roster, owner = 'player') {
   const systems = newSystemsState(layout);
   return {
     rooms: Object.fromEntries(layout.rooms.map((room) => [room.id, newRoomState()])),
     doors: Object.fromEntries(layout.doors.map((door) => [door.id, newDoorState()])),
     systems,
-    crew: newCrewState(layout, roster),
+    crew: newCrewState(layout, roster, owner),
     ...newCombatState(layout, systems),
   };
 }
@@ -365,7 +366,7 @@ export function checkInvariants(sim) {
   const problems = [];
   if (!Number.isInteger(sim.state.tick) || sim.state.tick < 0) problems.push(`tick is ${sim.state.tick}`);
   const enemy = enemyOf(sim);
-  problems.push(...shipProblems(sim, enemy), ...checkVoiceInvariants(sim), ...checkFightInvariants(sim));
+  problems.push(...shipProblems(sim, enemy), ...checkVoiceInvariants(sim), ...checkFightInvariants(sim), ...checkBoardingInvariants(sim, enemy));
   if (enemy) problems.push(...shipProblems(enemy, sim).map((problem) => `enemy: ${problem}`));
   return problems;
 }
