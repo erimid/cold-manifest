@@ -1,6 +1,8 @@
 // Keyboard shortcuts (brief §18), as data: physical key code -> action name.
 // The input module turns key presses into { type: 'key', action } events.
-// Later sessions add weapons and power shortcuts here.
+// Number keys pick crew (S1.6). The Q row routes power: the key adds a bar to
+// that slot of the power panel, Shift with the key takes one back.
+// Later sessions add weapons shortcuts here.
 
 export const KEYMAP = Object.freeze({
   Space: 'pause',
@@ -13,4 +15,12 @@ export const KEYMAP = Object.freeze({
   Digit6: 'select-6',
   Digit7: 'select-7',
   Digit8: 'select-8',
+  KeyQ: 'power-1',
+  KeyW: 'power-2',
+  KeyE: 'power-3',
+  KeyR: 'power-4',
+  KeyT: 'power-5',
+  KeyY: 'power-6',
+  KeyU: 'power-7',
+  KeyI: 'power-8',
 });

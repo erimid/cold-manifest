@@ -298,14 +298,153 @@ body {
 }
 
 .shipdock {
+  flex-direction: column;
+  gap: 10px;
+}
+
+.shipdock__row {
+  display: flex;
   align-items: stretch;
+  gap: 12px;
+}
+
+/* ---------- power panel ---------- */
+
+.power {
+  display: flex;
+  align-items: stretch;
+  gap: 14px;
+  padding: 8px 12px;
+}
+
+.power__reactor {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 4px;
+  min-width: 168px;
+  padding-right: 14px;
+  border-right: 2px dashed var(--hull-edge);
+  font-size: 0.8em;
+}
+
+.power__summary {
+  color: var(--amber);
+}
+
+.power__summary.is-alarm {
+  color: var(--alarm);
+  font-weight: 700;
+}
+
+.power__lights {
+  color: #8b93a1;
+}
+
+.power__tiles {
+  flex: 1;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.power__tile {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  width: 94px;
+}
+
+.power__label {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: var(--amber);
+}
+
+.power__tile.is-dead .power__code {
+  color: #6a7180;
+}
+
+.power__tile.is-damaged .power__code {
+  color: var(--alarm);
+}
+
+.power__key {
+  font-size: 0.7em;
+  font-weight: 400;
+  color: #6a7180;
+}
+
+/* Keyboard hints mean nothing on a touch screen. */
+@media (hover: none) {
+  .power__key {
+    display: none;
+  }
+}
+
+.power__pips {
+  display: flex;
+  gap: 4px;
+  height: 14px;
+}
+
+.pip {
+  flex: 1;
+  max-width: 28px;
+  border: 2px solid var(--amber-dim);
+  border-radius: 2px;
+  box-sizing: border-box;
+}
+
+.power__pips--reactor .pip {
+  max-width: 16px;
+}
+
+/* Lit, empty and broken differ in shape as well as colour (brief §17). */
+.pip--on {
+  background: var(--amber);
+  border-color: var(--amber);
+  box-shadow: 0 0 6px rgba(255, 179, 71, 0.5);
+}
+
+.pip--off {
+  background: transparent;
+}
+
+.pip--broken {
+  border-color: var(--alarm);
+  background: repeating-linear-gradient(135deg, var(--alarm) 0 2px, transparent 2px 5px);
+}
+
+.power__buttons {
+  display: flex;
+  gap: 6px;
+}
+
+.btn.power__btn {
+  flex: 1;
+  min-width: var(--tap);
+  min-height: var(--tap);
+  padding: 0;
+  font-size: 1.3em;
+  letter-spacing: 0;
+  text-align: center;
+  border-left: 2px solid var(--hull-edge);
+}
+
+.btn.power__btn:not([disabled]) {
+  border-color: var(--amber-dim);
 }
 
 .status {
   flex: 1;
   min-width: 0;
-  min-height: 132px;
-  padding: 10px 14px;
+  min-height: 118px;
+  padding: 8px 14px;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -379,7 +518,7 @@ body {
 
 .btn--pause {
   min-width: 210px;
-  min-height: 96px;
+  min-height: 88px;
   font-size: 1.3em;
   border-left-width: 12px;
 }

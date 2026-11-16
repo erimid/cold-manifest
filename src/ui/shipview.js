@@ -1,17 +1,21 @@
 // The ship view: the main gameplay screen (brief §18).
 //
-// S1.3: look around the ship. Tap a room to see its status, tap a door to
-// open or close it, long-press (or right-click) anything for a description.
-// Power, air, fire and crew arrive in the next sessions and plug into this
-// screen.
+// Tap a room to see its status, tap a door to open or close it, long-press
+// (or right-click) anything for a description. The power panel along the
+// bottom routes the reactor's bars between systems (S1.4). Air, fire and crew
+// arrive in the next sessions and plug into this screen.
 
 import { pickTarget } from '../engine/hit.js';
+import { POWERED, aiCoreStatus, free, lightsDraw, litRooms, supply, usable } from '../sim/power.js';
 import { SPACE, SYSTEMS } from '../sim/systems.js';
 import { TICK_SECONDS } from '../sim/sim.js';
 import { el } from './dom.js';
 import { createShipRenderer } from './ship-render.js';
 
 const percent = (value) => `${Math.round(value * 100)}%`;
+const POWER_KEYS = 'QWERTYUI';
+/** Start a sentence with a capital: the sim's reasons are written to follow "because". */
+const sentence = (text) => `${text.charAt(0).toUpperCase()}${text.slice(1)}.`;
 
 export function createShipView({ canvas, root, input, sim, clock, onBack, debug = false }) {
   const { layout } = sim;
@@ -24,6 +28,8 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, debug 
   let subscriptions = [];
   let nodes = null;
   let panel = null; // the status panel's live parts for the current selection
+  let power = null; // the power panel's live parts
+  let refusal = null; // { text, until } the last order the ship refused, shown briefly
   const counts = { canvasTaps: 0, infos: 0 };
 
   // ---------- naming ----------
@@ -70,9 +76,77 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, debug 
 
   /** Give an order if the sim would accept it. Returns true if it was queued. */
   function order(command) {
-    if (sim.whyNot(command)) return false;
+    const problem = sim.whyNot(command);
+    if (problem) {
+      refusal = { text: sentence(problem), until: performance.now() + 2600 };
+      return false;
+    }
+    refusal = null;
     sim.enqueue(command);
     return true;
+  }
+
+  /** The last refusal, while it is still fresh. Wall-clock time, so it also fades while paused. */
+  function refusalText() {
+    if (refusal && performance.now() > refusal.until) refusal = null;
+    return refusal ? refusal.text : '';
+  }
+
+  // ---------- the power panel ----------
+
+  function pips(count) {
+    return Array.from({ length: count }, () => el('i', { class: 'pip' }));
+  }
+
+  function setPip(node, kind) {
+    const name = `pip pip--${kind}`;
+    if (node.className !== name) node.className = name;
+  }
+
+  function buildPower() {
+    const reactorPips = pips(sim.state.systems.reactor.level);
+    const summary = el('div', { class: 'power__summary', id: 'power-summary' });
+    const lights = el('div', { class: 'power__lights', id: 'power-lights' });
+    const tiles = POWERED.map((id, i) => {
+      const add = (delta) => () => order({ type: 'power.add', system: id, delta });
+      const minus = el('button', { class: 'btn power__btn', type: 'button', id: `btn-power-${id}-minus`, 'aria-label': `Less power to ${SYSTEMS[id].name}`, press: add(-1) }, '−');
+      const plus = el('button', { class: 'btn power__btn', type: 'button', id: `btn-power-${id}-plus`, 'aria-label': `More power to ${SYSTEMS[id].name}`, press: add(1) }, '+');
+      const bars = pips(sim.state.systems[id].level);
+      const node = el(
+        'div',
+        { class: 'power__tile', id: `power-${id}`, title: SYSTEMS[id].name },
+        el('div', { class: 'power__label' }, el('span', { class: 'power__code' }, SYSTEMS[id].code), el('span', { class: 'power__key' }, POWER_KEYS[i])),
+        el('div', { class: 'power__pips' }, bars),
+        el('div', { class: 'power__buttons' }, minus, plus),
+      );
+      return { id, node, minus, plus, bars };
+    });
+    power = { reactorPips, summary, lights, tiles };
+    return el(
+      'div',
+      { class: 'panel power', id: 'power' },
+      el('div', { class: 'power__reactor' }, el('div', { class: 'stencil' }, 'Reactor'), el('div', { class: 'power__pips power__pips--reactor' }, reactorPips), summary, lights),
+      el('div', { class: 'power__tiles' }, tiles.map((t) => t.node)),
+    );
+  }
+
+  function updatePower() {
+    const made = supply(sim);
+    const spare = free(sim);
+    const inUse = made - spare;
+    power.reactorPips.forEach((node, i) => setPip(node, i >= made ? 'broken' : i < inUse ? 'on' : 'off'));
+    setText(power.summary, `${spare} of ${made} spare`);
+    power.summary.classList.toggle('is-alarm', made < sim.state.systems.reactor.level);
+    setText(power.lights, `Lights ${lightsDraw(sim)} · ${litRooms(sim)} rooms`);
+    for (const tile of power.tiles) {
+      const system = sim.state.systems[tile.id];
+      const works = usable(sim, tile.id);
+      tile.bars.forEach((node, i) => setPip(node, i >= works ? 'broken' : i < system.power ? 'on' : 'off'));
+      tile.node.classList.toggle('is-dead', system.power === 0);
+      tile.node.classList.toggle('is-damaged', system.damage > 0);
+      tile.minus.disabled = system.power === 0;
+      tile.plus.disabled = system.power >= works || spare < 1;
+    }
   }
 
   const queuedFor = (key, id) => sim.state.commands.some((c) => c[key] === id);
@@ -107,6 +181,8 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, debug 
     if (selected.kind === 'room') {
       const room = layout.room(selected.id);
       const stats = { oxygen: stat('Oxygen'), temperature: stat('Temp'), light: stat('Light'), noise: stat('Noise'), hull: stat('Hull'), fire: stat('Fire'), breach: stat('Breach') };
+      const sys = room.system ?? null;
+      if (sys) stats.system = stat(sys === 'reactor' ? 'Output' : POWERED.includes(sys) ? 'Power' : 'System');
       const lights = button('btn-lights', 'Lights off', () => order({ type: 'room.lights', room: room.id, on: !sim.state.rooms[room.id].lightsOn }));
       const note = el('span', { class: 'status__note' });
       const controls = [lights];
@@ -118,6 +194,13 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, debug 
           button('btn-dbg-air', 'Drain air', set({ oxygen: 0.2 }), 'btn--debug'),
           button('btn-dbg-reset', 'Reset', set({ fire: 0, breach: 0, oxygen: 1 }), 'btn--debug'),
         );
+        if (sys) {
+          const hurt = (by) => () => {
+            const { damage, level } = sim.state.systems[sys];
+            order({ type: 'debug.system', system: sys, damage: Math.max(0, Math.min(level, damage + by)) });
+          };
+          controls.push(button('btn-dbg-damage', 'Damage', hurt(1), 'btn--debug'), button('btn-dbg-repair', 'Repair', hurt(-1), 'btn--debug'));
+        }
       }
       const system = room.system ? SYSTEMS[room.system].name : room.kind === 'helm' ? 'Helm' : 'Corridor';
       nodes.status.replaceChildren(
@@ -125,7 +208,7 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, debug 
         el('div', { class: 'status__stats' }, Object.values(stats).map((s) => s.node)),
         el('div', { class: 'status__controls' }, controls),
       );
-      panel = { kind: 'room', id: room.id, stats, lights, note };
+      panel = { kind: 'room', id: room.id, sys, stats, lights, note };
     } else {
       const door = layout.door(selected.id);
       const stats = { state: stat('State'), opening: stat('Opening') };
@@ -173,17 +256,32 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, debug 
       panel.stats.fire.node.classList.toggle('is-alarm', r.fire > 0);
       panel.stats.breach.node.classList.toggle('is-alarm', r.breach > 0);
       panel.stats.oxygen.node.classList.toggle('is-alarm', r.oxygen < 0.35);
+      if (panel.sys) {
+        const system = sim.state.systems[panel.sys];
+        const works = system.level - system.damage;
+        let text = panel.sys === 'reactor' ? `${works} of ${system.level} bars` : POWERED.includes(panel.sys) ? `${system.power} of ${works}` : system.damage ? 'damaged' : 'working';
+        if (system.damage && POWERED.includes(panel.sys)) text += ` (${system.damage} damaged)`;
+        if (panel.sys === 'ai_core') text += ` · ${aiCoreStatus(sim).state}`;
+        setText(panel.stats.system.value, text);
+        panel.stats.system.node.classList.toggle('is-alarm', system.damage > 0);
+      }
       setText(panel.lights, r.lightsOn ? 'Lights off' : 'Lights on');
-      setText(panel.note, queuedFor('room', panel.id) ? 'Order queued' : '');
+      setText(panel.note, queuedFor('room', panel.id) ? 'Order queued' : refusalText());
     } else {
       const d = sim.state.doors[panel.id];
       setText(panel.stats.state.value, d.state);
       setText(panel.stats.opening.value, percent(d.openness));
       panel.stats.state.node.classList.toggle('is-alarm', d.state === 'jammed');
       const jammed = d.state === 'jammed';
+      // Buttons stay pressable when door control is dark, so a press can say why nothing moved.
       for (const [state, node] of Object.entries(panel.buttons)) node.disabled = jammed || d.state === state;
+      const dark = sim.state.systems.doors.power === 0;
+      panel.stats.state.node.classList.toggle('is-alarm', jammed);
       if (panel.jam) setText(panel.jam, jammed ? 'Free' : 'Jam');
-      setText(panel.note, queuedFor('door', panel.id) ? 'Order queued' : jammed ? 'Jammed. It will not move until it is repaired.' : '');
+      setText(
+        panel.note,
+        queuedFor('door', panel.id) ? 'Order queued' : jammed ? 'Jammed. It will not move until it is repaired.' : refusalText() || (dark ? 'Door control has no power. Doors are worked by hand.' : ''),
+      );
     }
   }
 
@@ -214,7 +312,12 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, debug 
     nodes.info.style.top = `${Math.max(8, y - 56)}px`;
   }
 
-  function onKey({ action }) {
+  function onKey({ action, shift }) {
+    if (action.startsWith('power-')) {
+      const system = POWERED[Number(action.slice(6)) - 1];
+      if (system) order({ type: 'power.add', system, delta: shift ? -1 : 1 });
+      return;
+    }
     if (action !== 'back') return;
     if (selected) select(null);
     else onBack();
@@ -244,7 +347,7 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, debug 
         button('btn-back', 'Back', onBack),
       ),
     );
-    nodes.bottom = el('div', { class: 'shipdock' }, nodes.status, nodes.pause);
+    nodes.bottom = el('div', { class: 'shipdock' }, el('div', { class: 'shipdock__row' }, nodes.status, nodes.pause), buildPower());
     root.replaceChildren(el('section', { class: 'ship' }, nodes.top, nodes.bottom, nodes.info));
     buildPanel();
   }
@@ -293,6 +396,7 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, debug 
       });
       updateClock();
       updatePanel();
+      updatePower();
     },
     /** For automated tests and the debug console. */
     debug: {

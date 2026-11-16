@@ -8,13 +8,14 @@
 // Together these make pause exact (the clock simply stops calling step) and
 // let the autoplay bot use the same interface as a player.
 //
-// S1.3: the ship exists. Rooms carry their state (oxygen, temperature, light,
-// noise, hull, fire, breach) and doors open, close and lock. Nothing changes
-// those room values yet except lights and the debug command: power is S1.4,
-// air and hazards are S1.5, crew are S1.6.
+// S1.4: the ship has power. The reactor's bars are routed between systems
+// (power.js), lights draw from the same pool, doors need the door control
+// system or a pair of hands, and life support keeps the air up. Air flow,
+// fire and breaches are S1.5; crew are S1.6.
 
 import { createEventBus } from '../engine/events.js';
 import { createRngSet } from '../engine/rng.js';
+import { POWER_COMMANDS, checkPowerInvariants, isPowered, lightsNeedPower, newSystemsState, stepLifeSupport, stepPower } from './power.js';
 import { buildLayout } from './ship.js';
 
 /** Sim ticks per second (DECISIONS D-002). */
@@ -24,6 +25,8 @@ export const TICK_SECONDS = 1 / TICK_RATE;
 
 /** How long a door takes to slide fully open or shut, and a light to come up, in seconds. */
 export const DOOR_SECONDS = 0.35;
+/** A door worked by hand, with door control unpowered, is slower. */
+export const MANUAL_DOOR_SECONDS = 1.2;
 export const LIGHT_SECONDS = 0.25;
 
 const clamp01 = (value) => Math.max(0, Math.min(1, value));
@@ -58,6 +61,12 @@ function newDoorState() {
   };
 }
 
+/** Is anyone standing on either side of this door, able to work it by hand? Crew arrive in S1.6. */
+export function handsAt(sim, doorId) {
+  const door = sim.layout.door(doorId);
+  return Object.values(sim.state.crew).some((member) => member.alive !== false && (member.room === door.a || member.room === door.b));
+}
+
 /**
  * Every order the sim accepts. `check` returns a reason string when the order
  * makes no sense (it is rejected when given, and dropped if the world changed
@@ -70,6 +79,10 @@ const COMMANDS = {
       if (!door) return `no door "${cmd.door}"`;
       if (!['open', 'closed', 'locked'].includes(cmd.state)) return `a door cannot be set to "${cmd.state}"`;
       if (door.state === 'jammed') return 'the door is jammed';
+      if (door.state === cmd.state || isPowered(sim, 'doors')) return null;
+      // Door control is dark (brief §6): locks stay as they are, and a door moves only if someone is there to move it.
+      if (cmd.state === 'locked' || door.state === 'locked') return 'the lock needs door control power';
+      if (!handsAt(sim, cmd.door)) return 'door control has no power, so someone has to work it by hand';
       return null;
     },
     apply(sim, cmd) {
@@ -84,6 +97,7 @@ const COMMANDS = {
     check(sim, cmd) {
       if (!sim.state.rooms[cmd.room]) return `no room "${cmd.room}"`;
       if (typeof cmd.on !== 'boolean') return 'needs on: true or false';
+      if (cmd.on && !sim.state.rooms[cmd.room].lightsOn && lightsNeedPower(sim)) return 'no spare power for more lights';
       return null;
     },
     apply(sim, cmd) {
@@ -124,10 +138,11 @@ const COMMANDS = {
       sim.events.emit('door.changed', { door: cmd.door, from, to, tick: sim.state.tick });
     },
   },
+  ...POWER_COMMANDS,
 };
 
 function stepDoors(sim) {
-  const stride = TICK_SECONDS / DOOR_SECONDS;
+  const stride = TICK_SECONDS / (isPowered(sim, 'doors') ? DOOR_SECONDS : MANUAL_DOOR_SECONDS);
   for (const [id, door] of Object.entries(sim.state.doors)) {
     if (door.state === 'jammed') continue; // stuck exactly where it is
     const goal = door.state === 'open' ? 1 : 0;
@@ -147,7 +162,7 @@ function stepLights(sim) {
 }
 
 /** Everything that happens each tick, in order. Later sessions add systems here. */
-const SYSTEMS = [stepDoors, stepLights];
+const SYSTEMS = [stepPower, stepDoors, stepLights, (sim) => stepLifeSupport(sim, TICK_SECONDS)];
 
 /**
  * Create a simulation.
@@ -167,6 +182,8 @@ export function createSim({ seed, ship }) {
       commands: [], // orders waiting for the next tick
       rooms: Object.fromEntries(layout.rooms.map((room) => [room.id, newRoomState()])),
       doors: Object.fromEntries(layout.doors.map((door) => [door.id, newDoorState()])),
+      systems: newSystemsState(layout.power),
+      crew: {}, // S1.6
     },
     rng: createRngSet(seed),
     events: createEventBus(),
@@ -258,6 +275,7 @@ export function checkInvariants(sim) {
     if (!['open', 'closed', 'locked', 'jammed'].includes(d.state)) problems.push(`${door.id}.state is ${d.state}`);
     if (!in01(d.openness)) problems.push(`${door.id}.openness is ${d.openness}`);
   }
+  problems.push(...checkPowerInvariants(sim));
   if (Object.keys(state.rooms).length !== layout.rooms.length) problems.push('room states do not match the layout');
   if (Object.keys(state.doors).length !== layout.doors.length) problems.push('door states do not match the layout');
   return problems;

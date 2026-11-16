@@ -18,7 +18,7 @@
 //   info       { x, y, pointerType, source }          long-press, or right-click: the touch
 //                                                     stand-in for right-click and hover info
 //   hover      { x, y }                               mouse only; nothing may depend on it
-//   key        { action, code }                       a mapped key from keymap.js
+//   key        { action, code, shift }                     a mapped key from keymap.js
 // Canvas coordinates are CSS pixels from the canvas's top-left corner.
 
 import { createGestureTracker, TAP_SLOP } from './gesture.js';
@@ -166,7 +166,7 @@ export function createInput({ canvas, keymap = KEYMAP, root = window } = {}) {
     const action = keymap[event.code];
     if (!action) return;
     event.preventDefault(); // Space must pause, never scroll the page or re-press a focused button
-    emit('key', { action, code: event.code });
+    emit('key', { action, code: event.code, shift: event.shiftKey });
   }
 
   function onContextMenu(event) {

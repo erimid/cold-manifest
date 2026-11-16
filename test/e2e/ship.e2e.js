@@ -52,6 +52,8 @@ const room = (page, id) => game(page, (rid) => ({ ...window.coldManifest.sim.sta
 const counts = (page) => game(page, () => ({ ...window.coldManifest.shipView.debug.counts }));
 const selected = (page) => game(page, () => window.coldManifest.shipView.debug.selected);
 const queued = (page) => game(page, () => window.coldManifest.sim.state.commands.length);
+const power = (page, id) => game(page, (sid) => window.coldManifest.sim.state.systems[sid].power, id);
+const powerIs = (page, id, bars) => page.waitForFunction(([sid, n]) => window.coldManifest.sim.state.systems[sid].power === n, [id, bars], { timeout: 2000 });
 const paused = (page) => game(page, () => window.coldManifest.clock.paused);
 const infoText = (page) => game(page, () => window.coldManifest.shipView.debug.infoText);
 const doorIs = (page, id, state, openness) =>
@@ -233,6 +235,52 @@ async function touchTests(browser) {
     assert.equal(await game(page, () => JSON.stringify(window.coldManifest.sim.state.doors)), hash);
   });
 
+  await check('power: minus frees a bar, plus spends it, and the panel keeps count', async () => {
+    assert.match(await page.textContent('#power-summary'), /0 of 8 spare/);
+    assert.equal(await page.isDisabled('#btn-power-shields-plus'), true, 'nothing spare, so plus is off');
+    await page.tap('#btn-power-sensors-minus');
+    await powerIs(page, 'sensors', 0);
+    await page.waitForFunction(() => document.querySelector('#power-summary').textContent.startsWith('1 of 8'));
+    assert.equal(await page.isDisabled('#btn-power-sensors-minus'), true);
+    await page.tap('#btn-power-shields-plus');
+    await powerIs(page, 'shields', 1);
+    assert.equal(await page.locator('#power-shields .pip--on').count(), 1);
+    assert.equal(await page.locator('#power-shields .pip--off').count(), 1);
+    await page.tap('#btn-power-shields-minus');
+    await powerIs(page, 'shields', 0);
+    await page.tap('#btn-power-sensors-plus');
+    await powerIs(page, 'sensors', 1);
+  });
+
+  await check('power: routing while paused waits for resume', async () => {
+    await page.tap('#btn-pause');
+    await page.tap('#btn-power-engines-minus');
+    await sleep(200);
+    assert.equal(await power(page, 'engines'), 1);
+    assert.equal(await queued(page), 1);
+    await page.tap('#btn-pause');
+    await powerIs(page, 'engines', 0);
+    await page.tap('#btn-power-engines-plus');
+    await powerIs(page, 'engines', 1);
+  });
+
+  await check('doors: with door control unpowered a tap does nothing and the panel says why', async () => {
+    await page.tap('#btn-power-doors-minus');
+    await powerIs(page, 'doors', 0);
+    const before = await door(page, 'd_ai_core');
+    const t = await target(page, 'd_ai_core');
+    await page.touchscreen.tap(t.mx, t.my);
+    await sleep(300);
+    assert.deepEqual(await door(page, 'd_ai_core'), before);
+    assert.match(await page.textContent('#status'), /by hand/);
+    await page.tap('#btn-power-doors-plus');
+    await powerIs(page, 'doors', 1);
+    await page.touchscreen.tap(t.mx, t.my);
+    await page.waitForFunction(([id, was]) => window.coldManifest.sim.state.doors[id].state !== was, ['d_ai_core', before.state], { timeout: 2000 });
+    await page.touchscreen.tap(t.mx, t.my);
+    await doorIs(page, 'd_ai_core', before.state, before.openness);
+  });
+
   await check('tapping open space clears the selection', async () => {
     await page.touchscreen.tap(40, 200);
     assert.equal(await selected(page), null);
@@ -305,15 +353,45 @@ async function desktopTests(browser) {
     assert.equal(await infoText(page), 'Dorsal hatch: closed. Opens to space.');
   });
 
+  await check('power keys: a Q-row key adds a bar, Shift with it takes one back', async () => {
+    await page.keyboard.press('Shift+KeyY');
+    await powerIs(page, 'sensors', 0);
+    await page.keyboard.press('KeyQ');
+    await powerIs(page, 'shields', 1);
+    await page.keyboard.press('KeyQ');
+    await sleep(200);
+    assert.equal(await power(page, 'shields'), 1, 'no spare power, so the second press is refused');
+    await page.keyboard.press('Shift+KeyQ');
+    await powerIs(page, 'shields', 0);
+    await page.keyboard.press('KeyY');
+    await powerIs(page, 'sensors', 1);
+  });
+
+  await check('debug: reactor damage browns the ship out and the panel shows it', async () => {
+    const t = await target(page, 'reactor');
+    await page.mouse.click(t.mx, t.my);
+    await page.click('#btn-dbg-damage');
+    await powerIs(page, 'sensors', 0);
+    await page.waitForFunction(() => /of 7 spare/.test(document.querySelector('#power-summary').textContent));
+    assert.equal(await page.locator('.power__pips--reactor .pip--broken').count(), 1);
+    assert.match(await page.textContent('#status'), /Output\s*7 of 8 bars/);
+    await page.click('#btn-dbg-repair');
+    await page.waitForFunction(() => /of 8 spare/.test(document.querySelector('#power-summary').textContent));
+    assert.equal(await power(page, 'sensors'), 0, 'power does not come back by itself');
+    await page.click('#btn-power-sensors-plus');
+    await powerIs(page, 'sensors', 1);
+  });
+
   await check('debug: fire, breach and thin air show in the status panel', async () => {
     const t = await target(page, 'reactor');
     await page.mouse.click(t.mx, t.my);
     await page.click('#btn-dbg-fire');
     await page.click('#btn-dbg-breach');
     await page.click('#btn-dbg-air');
-    await page.waitForFunction(() => window.coldManifest.sim.state.rooms.reactor.oxygen === 0.2, null, { timeout: 2000 });
+    await page.waitForFunction(() => window.coldManifest.sim.state.rooms.reactor.oxygen < 0.3, null, { timeout: 2000 });
     const r = await room(page, 'reactor');
-    assert.deepEqual([r.fire, r.breach, r.oxygen], [0.7, 0.6, 0.2]);
+    assert.deepEqual([r.fire, r.breach], [0.7, 0.6]);
+    assert.ok(r.oxygen >= 0.2 && r.oxygen < 0.3, `life support is slowly refilling from 20%, got ${r.oxygen}`);
     const text = await page.textContent('#status');
     assert.match(text, /Fire\s*70%/);
     assert.match(text, /Breach\s*60%/);
