@@ -43,7 +43,8 @@ test('invariants hold over a long run and catch broken state', () => {
   const sim = run('long', 20000);
   assert.deepEqual(checkInvariants(sim), []);
   sim.state.reactorDrift = NaN;
-  assert.equal(checkInvariants(sim).length, 1);
+  sim.state.probes[0].x = -50;
+  assert.equal(checkInvariants(sim).length, 2);
 });
 
 test('hashing ignores key order and flags bad numbers', () => {

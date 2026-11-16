@@ -1,17 +1,21 @@
 // Boot, frame loop and the top-level screen state machine (brief §4).
 //
-// S1.1: title screen plus stub screens. The sim clock, pause and the input
-// layer arrive in S1.2; until then the only input is DOM buttons.
+// S1.2: the sim clock, pause and the input layer are real, and the test bay
+// screen exercises them. The ship view arrives in S1.3.
 
 import { AI_SLOTS } from './ai/categories.js';
+import { createClock } from './engine/clock.js';
 import { loadContent } from './engine/content-browser.js';
+import { createInput } from './engine/input.js';
 import { createRng, newRunSeed } from './engine/rng.js';
 import { createStateMachine } from './engine/state-machine.js';
+import { TICK_SECONDS, createSim } from './sim/sim.js';
 import { createBackdrop } from './ui/backdrop.js';
-import { el } from './ui/dom.js';
+import { el, setPressBinder } from './ui/dom.js';
+import { createTestBay } from './ui/testbay.js';
 import { renderStub, renderTitle } from './ui/title.js';
 
-const VERSION = '0.1.0';
+const VERSION = '0.2.0';
 
 const params = new URLSearchParams(window.location.search);
 const flags = {
@@ -22,7 +26,19 @@ const flags = {
 
 const content = loadContent();
 const root = document.getElementById('screen');
+const viewCanvas = document.getElementById('view');
 createBackdrop(document.getElementById('backdrop'), flags.seed);
+
+// The one input module. Everything else asks it what happened.
+const input = createInput({ canvas: viewCanvas });
+setPressBinder(input.press);
+
+// The simulation and the one clock that drives it.
+const sim = createSim({ seed: flags.seed });
+const clock = createClock({ sim, tickSeconds: TICK_SECONDS });
+
+/** Screens where the sim is live. Everywhere else the clock does not run. */
+const LIVE_STATES = new Set(['testbay']);
 
 /** A greeting for the title screen: a seeded pick from lines that need no slots. */
 function pickGreeting() {
@@ -35,6 +51,8 @@ function pickGreeting() {
 
 let stopTyping = () => {};
 
+const testBay = createTestBay({ canvas: viewCanvas, root, input, sim, clock, onBack: () => machine.go('title') });
+
 const machine = createStateMachine({
   title: {
     enter() {
@@ -44,6 +62,7 @@ const machine = createStateMachine({
         version: VERSION,
         contentSummary: `${content.count('ai-lines')} lines loaded`,
         onNewRun: () => machine.go('contracts'),
+        onTestBay: () => machine.go('testbay'),
         onHub: () => machine.go('hub'),
       });
     },
@@ -51,6 +70,7 @@ const machine = createStateMachine({
       stopTyping();
     },
   },
+  testbay: testBay,
   contracts: {
     enter() {
       renderStub(root, {
@@ -71,6 +91,11 @@ const machine = createStateMachine({
   },
 });
 
+// Pause is global: the space bar works on any live screen (brief §7).
+input.on('key', ({ action }) => {
+  if (action === 'pause' && LIVE_STATES.has(machine.state)) clock.toggle();
+});
+
 // Debug overlay (?debug=1). Grows a control for each system as it is built (PLAN.md §4).
 const debug = flags.debug ? document.body.appendChild(el('div', { class: 'debug' })) : null;
 
@@ -80,8 +105,11 @@ let fpsWindow = 0;
 let fps = 0;
 
 function frame(now) {
-  const dt = Math.min(0.25, (now - last) / 1000);
+  // Real time since the last frame. A stall (background tab) is treated as a short frame.
+  const dt = Math.min(0.25, Math.max(0, (now - last) / 1000));
   last = now;
+
+  if (LIVE_STATES.has(machine.state)) clock.advance(dt);
   machine.update(dt);
 
   if (debug) {
@@ -91,7 +119,15 @@ function frame(now) {
       fps = Math.round(frames / fpsWindow);
       frames = 0;
       fpsWindow = 0;
-      debug.textContent = `DEBUG\nfps    ${fps}\nstate  ${machine.state}\nseed   ${flags.seed}\nauto   ${flags.auto ? 'on' : 'off'}`;
+      debug.textContent = [
+        'DEBUG',
+        `fps    ${fps}`,
+        `state  ${machine.state}`,
+        `tick   ${sim.state.tick}`,
+        `clock  ${clock.paused ? 'paused' : 'running'}`,
+        `seed   ${flags.seed}`,
+        `auto   ${flags.auto ? 'on' : 'off'}`,
+      ].join('\n');
     }
   }
   requestAnimationFrame(frame);
@@ -101,4 +137,4 @@ machine.go('title');
 requestAnimationFrame(frame);
 
 // Handle for the browser console and for automated tests.
-window.coldManifest = { version: VERSION, flags, machine, content };
+window.coldManifest = { version: VERSION, flags, machine, content, sim, clock, input, testBay };
