@@ -20,8 +20,11 @@
 //   facing      "right" (the default) or "up": which way the bow points
 //   enemy       true for a ship the player fights rather than flies. An enemy
 //               may leave systems out, mount no weapons and carry no crew.
+//   crew        enemies only: who is aboard, [{ id, name }], placed in crewStart
+//   tactics     enemies only: how it fights, hails, surrenders and runs (tactics.js)
 
 import { validatePower } from './power.js';
+import { validateTactics } from './tactics.js';
 import { SPACE, SYSTEM_IDS } from './systems.js';
 
 const EPS = 1e-9;
@@ -188,6 +191,17 @@ export function validateLayout(data) {
 
   problems.push(...validatePower(data));
 
+  // An enemy's own crew and how it fights. The player's crew come from content/crew/ instead.
+  const roster = data.crew ?? [];
+  if (!Array.isArray(roster) || !roster.every((p) => p && typeof p.id === 'string' && p.id && typeof p.name === 'string' && p.name)) problems.push('"crew" must be a list of { id, name }');
+  else {
+    if (roster.length && !enemy) problems.push('only an enemy ship lists its own "crew"');
+    if (new Set(roster.map((p) => p.id)).size !== roster.length) problems.push('crew: duplicate id');
+    if (roster.length && Array.isArray(data.crewStart) && !data.crewStart.length) problems.push('a ship with crew needs a "crewStart" list');
+  }
+  if (data.tactics !== undefined && !enemy) problems.push('only an enemy ship has "tactics"');
+  problems.push(...validateTactics(data.tactics, { crewed: Array.isArray(roster) && roster.length > 0 }));
+
   // Fighting: hull strength, hardpoints and what is mounted on them
   if (!Number.isInteger(data.hullPoints) || data.hullPoints < 1) problems.push('"hullPoints" must be a whole number, at least 1');
   const hardpoints = data.hardpoints ?? [];
@@ -247,6 +261,8 @@ export function buildLayout(data) {
     power: Object.freeze(structuredClone(data.power)),
     crewStart: Object.freeze([...data.crewStart]),
     enemy: data.enemy === true,
+    crew: Object.freeze((data.crew ?? []).map((p) => Object.freeze({ ...p }))),
+    tactics: data.tactics ? Object.freeze(structuredClone(data.tactics)) : null,
     facing: data.facing ?? 'right',
     hullPoints: data.hullPoints,
     hardpoints: Object.freeze((data.hardpoints ?? []).map((h) => Object.freeze({ ...h }))),

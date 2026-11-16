@@ -22,7 +22,7 @@ import { attachVoice, checkVoiceInvariants, newVoiceState, stepVoice } from '../
 import { createEventBus } from '../engine/events.js';
 import { createRngSet } from '../engine/rng.js';
 import { ATMOSPHERE_COMMANDS, checkAtmosphereInvariants, stepAtmosphere } from './atmosphere.js';
-import { checkCombatInvariants, checkFightInvariants, combatCommands, enemyOf, newCombatState, stepCombat } from './combat.js';
+import { START_MONEY, checkCombatInvariants, checkFightInvariants, combatCommands, enemyOf, newCombatState, stepCombat } from './combat.js';
 import { CREW_COMMANDS, checkCrewInvariants, newCrewState, stepCrew } from './crew.js';
 import { POWER_COMMANDS, checkPowerInvariants, isPowered, lightsNeedPower, newSystemsState, stepPower } from './power.js';
 import { buildLayout } from './ship.js';
@@ -259,6 +259,9 @@ export function createSim({ seed, ship, crew = [], lines = [], weapons = [], shi
       commands: [], // orders waiting for the next tick
       ...newShipState(layout, crew),
       fight: null, // the fight in progress, enemy ship and all (combat.js)
+      money: START_MONEY, // spent on bribes for now; Stage 3 and 7 give it more uses
+      cargo: [], // what we carry: { name, qty, from }. Goods become content in Stage 7
+      intel: [], // things we have been told: { text, from, tick }
       ai: newVoiceState(),
     },
     rng: createRngSet(seed),

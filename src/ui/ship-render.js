@@ -519,13 +519,14 @@ export function createShipRenderer(layout) {
     }
   }
 
-  function drawCrew(ctx, view, member, alpha, selected) {
+  function drawCrew(ctx, view, member, alpha, selected, hostile = false) {
     const s = view.scale;
     const at = crewAt(member, alpha);
     const cx = view.ox + at.x * s;
     const cy = view.oy + at.y * s;
     const r = CREW_RADIUS * s;
-    const colour = CREW_COLOURS[member.index % CREW_COLOURS.length];
+    // Theirs are alarm red and carry an initial instead of a number, so they never pass for ours.
+    const colour = hostile ? C.alarm : CREW_COLOURS[member.index % CREW_COLOURS.length];
 
     if (selected) {
       // Where they are headed.
@@ -559,7 +560,7 @@ export function createShipRenderer(layout) {
     ctx.font = `700 ${Math.max(10, r * 1.15)}px ui-monospace, Menlo, Consolas, monospace`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(member.alive ? String(member.index + 1) : '×', cx, cy + 1);
+    ctx.fillText(member.alive ? (hostile ? member.name.charAt(0).toUpperCase() : String(member.index + 1)) : '×', cx, cy + 1);
     ctx.textAlign = 'start';
     ctx.textBaseline = 'alphabetic';
 
@@ -723,8 +724,9 @@ export function createShipRenderer(layout) {
    *   chosenWeapon  the slot picked for aiming, or null
    *   aimed      Map of room id -> [weapon slots of the other ship pointed at it]
    *   inviting   true while the other ship is choosing a room of this one to aim at
+   *   hostile    true to draw the crew aboard as enemies
    */
-  function draw(ctx, { view, width, height, dpr, state, time, alpha = 1, selected, selectedCrew = null, showVents = false, reduceFlicker = false, clear = true, charges = [], chosenWeapon = null, aimed = null, inviting = false }) {
+  function draw(ctx, { view, width, height, dpr, state, time, alpha = 1, selected, selectedCrew = null, showVents = false, reduceFlicker = false, clear = true, charges = [], chosenWeapon = null, aimed = null, inviting = false, hostile = false }) {
     if (clear) ctx.clearRect(0, 0, width, height);
     ctx.drawImage(staticLayer(view, width, height, dpr), 0, 0, width, height);
     const s = view.scale;
@@ -749,8 +751,8 @@ export function createShipRenderer(layout) {
 
     // The dead first, so the living are drawn over them.
     const crew = Object.values(state.crew);
-    for (const member of crew) if (!member.alive) drawCrew(ctx, view, member, alpha, member.id === selectedCrew);
-    for (const member of crew) if (member.alive) drawCrew(ctx, view, member, alpha, member.id === selectedCrew);
+    for (const member of crew) if (!member.alive) drawCrew(ctx, view, member, alpha, member.id === selectedCrew, hostile);
+    for (const member of crew) if (member.alive) drawCrew(ctx, view, member, alpha, member.id === selectedCrew, hostile);
 
     state.weapons.forEach((slot, index) => drawHardpoint(ctx, view, index, slot, charges[index] ?? 0, chosenWeapon === index));
     drawShield(ctx, view, state.shield, time, reduceFlicker);

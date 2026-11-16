@@ -18,7 +18,7 @@ import { AUTO_PAUSE, createSettings } from './ui/settings.js';
 import { createShipView } from './ui/shipview.js';
 import { renderStub, renderTitle } from './ui/title.js';
 
-const VERSION = '0.9.0';
+const VERSION = '0.10.0';
 
 const params = new URLSearchParams(window.location.search);
 const flags = {

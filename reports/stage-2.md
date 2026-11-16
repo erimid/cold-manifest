@@ -4,21 +4,22 @@ Command: `node tools/autoplay.js --runs 100 --minutes 10 --seed auto`
 
 ```
 Cold Manifest autoplay
-  runs:              100 (seeds auto-1 to auto-100), each played as chaos, as a hazard scenario, under fire and as target practice, each twice
-  ship:              Margin of Error, crew of 3, 53 AI lines
+  runs:              100 (seeds auto-1 to auto-100), each played as chaos, as a hazard scenario, under fire and as a duel with every enemy, each twice
+  ship:              Margin of Error, crew of 3, 67 AI lines
   crashed or bad:    0
 
 Chaos (10 game minutes each, 12000 ticks): a bot doing everything at random
-  orders per run:    408.6 given, 211.3 refused up front, 0.3 dropped
-  door moves:        95.8 completed per run
-  power per run:     38.9 bars routed, 0.9 brownouts, door control dark 32% of the time
-  hazards per run:   4.6 fires lit, 3.3 spread, 7.5 went out, 3.1 system bars burned, 1.8 rooms jettisoned
-  crew per run:      64.7 sent, 42.1 arrived, 0.6 blocked, 2.7 of 3 died
-  crew work per run: 2.7 fires put out, 1.5 breaches patched, 4.9 system bars repaired
-  air:               rooms were unbreathable 33% of room-time
-  fights per run:    5.0 started, 25.9 shots fired (10.0 hit, 20.5 stopped by shields, 2.6 missed), 0.7 enemies destroyed
-  AI lines per run:  15.5 (about one every 39 seconds)
-  pauses per run:    47.6 (state checked every paused frame)
+  orders per run:    398.4 given, 206.4 refused up front, 0.6 dropped
+  door moves:        87.1 completed per run
+  power per run:     35.0 bars routed, 1.0 brownouts, door control dark 30% of the time
+  hazards per run:   5.6 fires lit, 2.4 spread, 7.8 went out, 2.2 system bars burned, 1.8 rooms jettisoned
+  crew per run:      58.4 sent, 37.2 arrived, 0.7 blocked, 2.9 of 3 died
+  crew work per run: 2.2 fires put out, 2.3 breaches patched, 5.2 system bars repaired
+  air:               rooms were unbreathable 42% of room-time
+  fights per run:    9.6 started, 33.3 shots fired (17.3 hit, 14.9 stopped by shields, 2.8 missed), 0.2 enemies destroyed
+  fight endings:     destroyed 20, our hull gave out 350, their crew is dead 6, surrendered 0, we jumped away 0, they jumped away 1, talked down 3, paid off 8, broke off 169
+  AI lines per run:  18.2 (about one every 33 seconds)
+  pauses per run:    47.7 (state checked every paused frame)
 
 Hazard scenarios (5 game minutes each): fires and breaches at once, and a bot trying to save the ship
   completed:         100 of 100
@@ -37,10 +38,18 @@ Under fire (5 game minutes each): shots land on the ship for 2 minutes, then the
   deaths by cause:   suffocation 15
   hull left:         1.7 of 20 on average; 0.9 system bars still broken at the end
 
-Target practice (up to 5 game minutes each): a gunnery drone alongside, and a bot feeding and aiming the guns
-  completed:         100 of 100; drone destroyed in 100
-  time to destroy:   median 72s, fastest 46s, slowest 124s
-  shots:             12.2 per fight; 45% hit, 48% stopped by shields, 6% missed
+Duels (up to 8 game minutes each): every enemy in turn, and a bot fighting it
+  Gunnery drone: 100 fights
+    endings:        destroyed 100
+    length:         median 46s, longest 74s
+    our shots:      7.1 per fight; 73% hit, 16% stopped by shields, 9% missed
+    their shots:    0.0 per fight, 0.0 hit; our hull at the end 20.0 of 20, crew alive 3.00 of 3
+  Salvager skiff: 100 fights
+    endings:        surrendered 59, destroyed 24, talked down 8, paid off 8, we jumped away 1
+    length:         median 75s, longest 173s
+    our shots:      10.1 per fight; 46% hit, 32% stopped by shields, 18% missed
+    their shots:    8.2 per fight, 1.1 hit; our hull at the end 18.1 of 20, crew alive 3.00 of 3
+    hails answered: talk 22, fight 70, pay 8; 83 surrender offers made
 
 ```
 
