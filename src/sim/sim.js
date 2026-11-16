@@ -231,6 +231,7 @@ export function createSim({ seed, ship, crew = [], lines = [], weapons = [], shi
       if (!item) throw new Error(`Unknown weapon "${id}"`);
       return item;
     },
+    hasWeapon: (id) => weaponById.has(id),
     layout(id) {
       if (!layouts.has(id)) {
         if (!shipById.has(id)) throw new Error(`Unknown ship "${id}"`);

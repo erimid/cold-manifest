@@ -16,8 +16,17 @@
 //
 // A charged weapon with a target fires by itself and starts charging again.
 // The shot is in the air for the weapon's flight time, then lands: it misses
-// (the target's evasion), is stopped by a shield layer, or hits. S2.1 hits
-// take hull points; S2.2 adds system damage, fire, breaches and crew harm.
+// (the target's evasion), is stopped by a shield layer, or hits.
+//
+// A hit (S2.2) takes hull points and wears the room it lands in. Then, rolled
+// on the `combat` stream: it breaks a bar of the room's system for every point
+// of damage, may start a fire, may hole the hull (more likely the more worn the
+// room already is), and may hurt each person standing there. Fires and breaches
+// are only set on the room; from then on the Stage 1 hazard code (atmosphere.js)
+// runs them exactly as it runs any other fire or breach.
+
+import { FIRE_CATCH_O2, FIRE_START, harmCrew } from './atmosphere.js';
+import { stepPower } from './power.js';
 
 export const SHIELD_RECHARGE_SECONDS = 6;
 /** Chance a shot misses: nothing with the engines off, then a base, more per engine bar, more with someone at the helm. */
@@ -26,6 +35,12 @@ export const EVASION = Object.freeze({ base: 0.05, perBar: 0.06, pilot: 0.08, ma
 export const DISCHARGE_RATE = 2;
 /** How much of a room's hull integrity one point of damage takes. */
 export const ROOM_HULL_PER_DAMAGE = 0.15;
+/** What a hit does besides hull points. Starting values, to tune from the bot's fight report (DF-34). */
+export const HIT = Object.freeze({
+  wearBreach: 0.6, // extra breach chance per unit of the room's hull integrity already lost
+  breachPerDamage: 0.3, // size of the hole per point of damage
+  crewHarmPerDamage: 0.2, // health taken from someone caught in the room, per point of damage
+});
 const MAX_SHOTS = 64;
 const EPS = 1e-9;
 
@@ -149,6 +164,34 @@ export function combatCommands(newShipState) {
       check: (sim) => (!sim.state.fight ? 'there is no fight' : sim.state.fight.over ? null : 'the fight is not over'),
       apply: (sim) => endFight(sim),
     },
+    // Debug panel only: a shot lands at once. at: 'us' or 'them'; room: a room on that ship, or null for any;
+    // weapon: what it is; force: true to make it a hit whatever the shields and evasion say.
+    'debug.hit': {
+      check(sim, cmd) {
+        if (!['us', 'them'].includes(cmd.at)) return 'at must be "us" or "them"';
+        const ship = cmd.at === 'us' ? sim : enemyOf(sim);
+        if (!ship) return 'there is no enemy ship';
+        if (sim.state.fight?.over) return 'the fight is over';
+        if (!sim.catalog.hasWeapon(cmd.weapon)) return `no weapon "${cmd.weapon}"`;
+        if (cmd.room === null || cmd.room === undefined) return null;
+        const room = ship.state.rooms[cmd.room];
+        if (!room) return `no room "${cmd.room}" on that ship`;
+        if (room.jettisoned) return 'that section is gone';
+        return null;
+      },
+      apply(sim, cmd) {
+        const ship = cmd.at === 'us' ? sim : enemyOf(sim);
+        let room = cmd.room ?? null;
+        if (room === null) {
+          const standing = ship.layout.rooms.filter((r) => !ship.state.rooms[r.id].jettisoned);
+          if (!standing.length) return;
+          room = sim.rng.stream('combat').pick(standing).id;
+        }
+        const fight = sim.state.fight;
+        const id = fight ? fight.nextShot++ : 0;
+        land(sim, { id, side: cmd.at === 'us' ? 'enemy' : 'player', slot: 0, weapon: cmd.weapon, room, born: sim.state.tick, lands: sim.state.tick }, { force: Boolean(cmd.force) });
+      },
+    },
     // Debug panel only: put an enemy ship alongside, or send it away (enemy: null).
     'debug.fight': {
       check(sim, cmd) {
@@ -191,23 +234,74 @@ function stepWeapons(sim, ship, side, dt) {
   });
 }
 
-function land(sim, shot) {
+/**
+ * What a hit does to the room it lands in. `ship` is the ship that was hit.
+ * Every roll is made whatever the room holds, so a seed rolls the same dice
+ * however the fight has gone. Returns what happened, for the shot's event.
+ */
+export function applyHit(sim, ship, roomId, weapon) {
+  const dice = sim.rng.stream('combat');
+  const room = ship.state.rooms[roomId];
+  const { tick } = sim.state;
+  const effects = { system: 0, fire: false, breach: false, crew: [] };
+  const { hull } = ship.state;
+  hull.points = Math.max(0, hull.points - weapon.damage);
+  room.hull = Math.max(0, room.hull - ROOM_HULL_PER_DAMAGE * weapon.damage);
+
+  // The room's system loses a bar for each point of damage.
+  const systemId = ship.layout.room(roomId).system;
+  const system = systemId ? ship.state.systems[systemId] : null;
+  if (system && !system.lost && system.damage < system.level) {
+    const from = system.damage;
+    system.damage = Math.min(system.level, from + weapon.damage);
+    effects.system = system.damage - from;
+    ship.events.emit('system.damage', { system: systemId, from, to: system.damage, cause: 'hit', tick });
+  }
+
+  // Fire, where there is air for it to catch. The hazard code announces it and runs it from here.
+  const fire = dice.chance(weapon.effects.fire);
+  if (fire && room.oxygen >= FIRE_CATCH_O2) {
+    room.fire = Math.min(1, room.fire + FIRE_START);
+    effects.fire = true;
+  }
+
+  // A hole in the hull: some weapons are made for it, and a worn room gives way more easily.
+  const breach = dice.chance(Math.min(1, weapon.effects.breach + HIT.wearBreach * (1 - room.hull)));
+  if (breach) {
+    room.breach = Math.min(1, room.breach + HIT.breachPerDamage * weapon.damage);
+    effects.breach = true;
+  }
+
+  // Anyone standing there may be caught by it.
+  for (const member of Object.values(ship.state.crew)) {
+    if (member.room !== roomId || member.alive === false) continue;
+    if (!dice.chance(weapon.effects.crew)) continue;
+    effects.crew.push(member.id);
+    harmCrew(ship, member.id, HIT.crewHarmPerDamage * weapon.damage, 'hit');
+  }
+
+  // A broken system lets go of its power now, not next tick (D-037).
+  if (effects.system) stepPower(ship);
+  ship.events.emit('hull.hit', { room: roomId, weapon: weapon.id, damage: weapon.damage, ...effects, tick });
+  return effects;
+}
+
+/** Land a shot: a miss, a shield layer lost, or a hit. `force` (debug only) makes it a hit whatever the odds. */
+function land(sim, shot, { force = false } = {}) {
   const fight = sim.state.fight;
   const target = shot.side === 'player' ? enemyOf(sim) : sim;
   const weapon = sim.catalog.weapon(shot.weapon);
   const room = target.state.rooms[shot.room];
   let result = 'hit';
-  if (!room || room.jettisoned || sim.rng.stream('combat').chance(evasion(target))) result = 'miss';
-  else if (shieldLayers(target) > weapon.pierce) {
+  let effects = null;
+  const dodged = sim.rng.stream('combat').chance(evasion(target));
+  if (!room || room.jettisoned || (dodged && !force)) result = 'miss';
+  else if (shieldLayers(target) > weapon.pierce && !force) {
     result = 'shield';
     target.state.shield.charge = Math.max(0, target.state.shield.charge - 1);
-  } else {
-    const { hull } = target.state;
-    hull.points = Math.max(0, hull.points - weapon.damage);
-    room.hull = Math.max(0, room.hull - ROOM_HULL_PER_DAMAGE * weapon.damage);
-  }
-  sim.events.emit('shot.resolved', { id: shot.id, side: shot.side, slot: shot.slot, weapon: shot.weapon, room: shot.room, result, damage: result === 'hit' ? weapon.damage : 0, tick: sim.state.tick });
-  if (target.state.hull.points === 0 && !fight.over) {
+  } else effects = applyHit(sim, target, shot.room, weapon);
+  sim.events.emit('shot.resolved', { id: shot.id, side: shot.side, slot: shot.slot, weapon: shot.weapon, room: shot.room, result, damage: result === 'hit' ? weapon.damage : 0, effects, tick: sim.state.tick });
+  if (fight && target.state.hull.points === 0 && !fight.over) {
     fight.over = { outcome: shot.side === 'player' ? 'destroyed' : 'lost', tick: sim.state.tick };
     sim.events.emit('fight.over', { ...fight.over, enemy: fight.enemy.ship });
   }

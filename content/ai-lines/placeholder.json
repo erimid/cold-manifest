@@ -50,6 +50,12 @@
     { "id": "ph.combat_start.001", "category": "combat_start", "placeholder": true, "text": "Contact. It has seen us, and it isn't waving." },
     { "id": "ph.combat_start.002", "category": "combat_start", "placeholder": true, "text": "Ship alongside. I'd put power in the guns before I put it anywhere sentimental." },
     { "id": "ph.combat_start.003", "category": "combat_start", "placeholder": true, "text": "Something out there wants our attention. Weapons are yours, Captain." },
+    { "id": "ph.hit.001", "category": "hazard", "placeholder": true, "conditions": { "trigger": "hull.hit" }, "text": "We're hit. I felt that one in my core." },
+    { "id": "ph.hit.002", "category": "hazard", "placeholder": true, "conditions": { "trigger": "hull.hit" }, "text": "Impact. Adding it to the list of things the warranty doesn't cover." },
+    { "id": "ph.hit.003", "category": "hazard", "placeholder": true, "conditions": { "trigger": "hull.hit" }, "text": "That went through something we were using." },
+    { "id": "ph.combat_progress.001", "category": "combat_progress", "placeholder": true, "text": "Hit confirmed. They'll be feeling that." },
+    { "id": "ph.combat_progress.002", "category": "combat_progress", "placeholder": true, "text": "Good shot. I've updated their damage report for them." },
+    { "id": "ph.combat_progress.003", "category": "combat_progress", "placeholder": true, "text": "Something on their side just stopped working. Keep at it." },
     { "id": "ph.combat_end.001", "category": "combat_end", "placeholder": true, "text": "That's settled. I'm logging it as a navigational hazard, removed." },
     { "id": "ph.combat_end.002", "category": "combat_end", "placeholder": true, "text": "It's over. Count the crew, then count the holes." },
     { "id": "ph.combat_end.003", "category": "combat_end", "placeholder": true, "text": "Guns cold. Nobody will ask us what happened here, and I suggest we let them not." }

@@ -15,7 +15,7 @@ Items here are known shortcuts. Each names the stage that must clear it.
 
 | # | What | Revisit in | Status |
 |---|---|---|---|
-| DF-01 | 41 placeholder AI lines (`content/ai-lines/placeholder.json`, flagged `placeholder: true`) stand in for the real library. They carry no personality stage, relationship or degradation conditions yet. | Stage 5 (all removed by end of S5.7) | Open |
+| DF-01 | 53 placeholder AI lines (`content/ai-lines/placeholder.json`, flagged `placeholder: true`) stand in for the real library. They carry no personality stage, relationship or degradation conditions yet. | Stage 5 (all removed by end of S5.7) | Open |
 | DF-02 | Placeholder audio: 14 synthesised patches in `src/audio/patches.js` (hum, clicks, alarms, door, hiss). No music, no volume slider, no positional sound. | Stage 11 (S11.2) | Open |
 | DF-03 | Placeholder crew portraits in the crew panel. | Stage 8 (S8.2) | Open |
 | DF-04 | Faction and port names are provisional (see D-012). | Stage 7 (S7.4) | Open |
@@ -26,7 +26,7 @@ Items here are known shortcuts. Each names the stage that must clear it.
 | ~~DF-09~~ | ~~No Playwright touch tests in CI yet.~~ | S1.2 | Done in S1.2 |
 | DF-10 | Pinch-zoom and two-finger pan are not handled: the input module tracks one pointer at a time. | S1.3 if the ship view needs a camera, otherwise S11.5 | Open |
 | ~~DF-11~~ | ~~Auto-pause triggers and their settings (brief §7) were not wired.~~ | S1.7 | Done in S1.7: fire, breach and death pause the game, each with its own switch (D-044) |
-| DF-12 | A weapon hit lowers a room's hull integrity (S2.1) but nothing reads that number yet, and breaches still only come from the debug command. Noise only comes from fire. | S2.2 (hits make breaches), Stage 6 (noise sources) | Open |
+| DF-12 | Noise only comes from fire. | Stage 6 (noise sources) | Open. The hit half was done in S2.2: hits make breaches, and a room's worn hull makes the next breach likelier (D-051) |
 | DF-13 | Hull damage, heat and cold have no visual of their own beyond fire glow and breach frost; temperature only shows in the status panel and has no effect on crew or systems. No smoke or sparks yet. | S11.1 (look pass) | Open |
 | ~~DF-14~~ | ~~Doors open by remote from anywhere with no power or crew needed.~~ | S1.4 | Done in S1.4: doors need door control power or hands at the door (D-031) |
 | DF-15 | Autoplay takes about 150 s for 100 runs (three modes, each twice, with invariants and stuck checks every tick). Sample the checks or cut the replay pass if it grows further. | Stage 3 | Open |
@@ -42,13 +42,14 @@ Items here are known shortcuts. Each names the stage that must clear it.
 | ~~DF-22~~ | ~~Nothing put a fire out except starving or venting it, and nothing patched a breach.~~ | S1.6 | Done in S1.6: crew extinguish, patch, repair and unjam (D-040) |
 | ~~DF-26~~ | ~~The 60 fps check at 4x CPU throttle could not be confirmed on the build machine, which has no graphics card.~~ | Eric's Stage 1 playtest | Done: Eric played PR #8 on his iPad on 2026-11-15 and reported good fps and no issues |
 | DF-27 | Margo only reacts to Stage 1 events and speaks in one voice. Lines are picked by trigger and category only; she is silent when the AI core has no power but does not otherwise degrade. Crew injury lines fire once per crossing below half health. | Stage 5 | Open |
-| DF-28 | Settings hold sound on/off and the three auto-pause switches only. No reduced-motion, text size, colour or key rebinding yet. Auto-pause on fight start and on creature sighting arrive with those systems. | S2.2 (fight start), Stage 6 (creature), S11.5 (accessibility) | Open |
+| DF-28 | Settings hold sound on/off and the three auto-pause switches only. No reduced-motion, text size, colour or key rebinding yet. Auto-pause on creature sighting arrives with the creature. | Stage 6 (creature), S11.5 (accessibility) | Open. S2.2 added auto-pause on fight start and a screen shake switch (D-053) |
 | DF-29 | The autoplay scenario bot plays one fixed competent strategy (send the nearest crew, suit up for breaches, shut doors round fires). It does not vent, jettison or re-route power, so it does not prove those are balanced. | Stage 3 onward as the bot grows (PLAN.md §4) | Open |
-| DF-30 | A hit only takes hull points and room integrity. No system damage, fire, breach, crew harm, screen shake or flash, and no auto-pause when a fight starts. | S2.2 | Open |
+| ~~DF-30~~ | ~~A hit only took hull points and room integrity.~~ | S2.2 | Done in S2.2: hits break systems, start fires, hole the hull and hurt crew (D-051), with shake, flash and auto-pause on fight start (D-052, D-053) |
 | DF-31 | The only enemy is the gunnery drone, which never shoots back. A fight starts only from the debug panel and ends only by destroying the drone. Losing our own hull is recorded but ends nothing. | S2.3 (enemy AI, endings), S2.5 (enemy types), Stage 3 (fights from the map) | Open |
 | DF-32 | Weapons take power in hardpoint order with no way to reorder or switch one off, and there is no way to fit, remove or buy a weapon; the third weapon (breaching lance) and the third hardpoint are unused. Every enemy room and its state is visible whatever the sensors are doing. | Stage 9 (shipyard), Stage 6 (sensors gate what you see) | Open |
-| DF-33 | Our own hull, shields and evasion only show in the weapons bar, which only appears in a fight. The fight view gives the enemy 27% of the width; with four weapon tiles the bar will be tight on a 1024 px screen. | S2.2 (damage readout), S11.5 (touch polish) | Open |
-| DF-34 | Combat numbers (charge times, shield recharge of 6 s a layer, evasion, hull points) are first guesses. With one laser alone the drone's shield never stays down. | S2.5 (balance from the bot's fight report) | Open |
+| DF-33 | Our own hull, shields and evasion only show in the weapons bar, which only appears in a fight (S2.2 added what each hit did, in words, where it lands). The fight view gives the enemy 27% of the width; with four weapon tiles the bar will be tight on a 1024 px screen. | S2.2 (damage readout), S11.5 (touch polish) | Open |
+| DF-34 | Combat numbers (charge times, shield recharge of 6 s a layer, evasion, hull points, and S2.2's hit effects in `HIT` and the weapon files) are first guesses. With one laser alone the drone's shield never stays down. In the under-fire bot mode, 12 hits in two minutes leave our hull at about 2 of 20. | S2.5 (balance from the bot's fight report) | Open |
+| DF-35 | A room's hull integrity, worn by hits, never comes back: patching closes the breach but not the wear. The flash and shake are placeholders (a filled rectangle, a red screen edge, a fixed wobble); no sparks or debris. | Stage 3 (repairs at port), S11.1 (look pass), S11.3 (juice) | Open |
 
 ---
 
@@ -256,6 +257,22 @@ Items here are known shortcuts. Each names the stage that must clear it.
 **What:** The chaos bot now picks fights, aims at random, sets fires aboard the enemy and walks away. A third mode, target practice, puts the drone alongside and has a bot feed and aim the guns; it fails if the drone survives five minutes. The report gains fight lines.
 **Why:** PLAN.md §4: the bot grows with each system. S2.1's done-when is "the player can charge and fire at a dummy target ship", and this proves it for 100 seeds.
 
+### D-051 What a hit does (S2.2)
+**What:** A shot that gets past evasion and shields takes hull points and wears the room (`room.hull`), then: breaks one bar of the room's system per point of damage (power on it lets go in the same tick, D-037); may start a fire (`effects.fire`, only where there is air for one to catch; a hit on a burning room feeds it); may hole the hull (`effects.breach`, plus 0.6 times the room's lost integrity, so lasers never hole a sound room but often hole a battered one); and may hurt each person in the room (`effects.crew` each, 0.2 health per point of damage). All rolls are on the `combat` stream and are made whatever the room holds, so one change does not reshuffle a seed's fight. A hit only sets `fire` or `breach` on the room: the Stage 1 code in `atmosphere.js` announces and runs it from there, and crew harm goes through `harmCrew`, the same function bad air and fire use. A test proves a fire or breach from a hit plays out tick for tick the same as one set by hand. The numbers are in `HIT` at the top of `combat.js`.
+**Why:** Brief §6 and §7, and S2.2's done-when: hazards from hits use the exact Stage 1 code. One system bar per point of damage keeps the result easy to read on the power panel.
+
+### D-052 Hits are shown, not just counted (S2.2)
+**What:** A hit flashes the room it lands in, and the label under the result says what it did (`HIT 2`, then `SYS -2  FIRE  BREACH  CREW`). A hit on our ship shakes the screen (more for heavier hits) and flashes the screen edge red. The shake runs on game time and stops while paused; it is a fixed wobble, not dice. A hit on our ship raises `hull.hit` (Margo has three placeholder lines for it); one on theirs raises `enemy.hull.hit`, and she sometimes remarks on it (`combat_progress`, three placeholder lines).
+**Why:** Brief §17 (screen shake, impact flashes) and §7. Words beside colour keep the colour-blind rule.
+
+### D-053 Auto-pause on fight start; screen shake switch (S2.2)
+**What:** A fight starting pauses the game and the pause button names the ship ("Gunnery drone alongside"). Like the other auto-pauses it has its own switch, on by default on touch and off with a mouse. Settings also gain a Screen shake switch (on by default), ahead of the accessibility pass, because brief §17 asks for a way to turn shake down and shake now exists.
+**Why:** Brief §7 lists fight start first among the auto-pause options.
+
+### D-054 Debug hits and the under-fire bot (S2.2)
+**What:** `debug.hit` lands a shot at once on either ship (`at: 'us' | 'them'`), on a named room or a random one, through the normal miss / shield / hit rules, or as a sure hit with `force`. The debug bar's Hit us button strikes our selected room (or any room) with the heaviest gun we carry. The chaos bot now uses it instead of poking the enemy's rooms directly. Autoplay gains a fourth mode, under fire: unforced shots land on our ship every 6 to 13 seconds for two minutes, then the hazard bot has three minutes to clean up. The hazard bot now also gives power back to systems after repairs (air first), since nothing else does (D-030).
+**Why:** Enemies do not shoot back until S2.3, and S2.2's hits on our ship still need proving: the bot shows the hazards they cause can be beaten.
+
 ---
 
 ## Stage notes
@@ -282,3 +299,4 @@ Items here are known shortcuts. Each names the stage that must clear it.
 - **S1.6 (2026-11-15):** Three placeholder crew from content; pathfinding on the room and door graph; move and suit orders; crew open and close doors, by hand when door control is dark; automatic extinguish, patch, repair and unjam work; medbay healing; crew bar, crew panel, selection by tap and number keys, path preview. Autoplay bot runs a crew and checks nobody gets stuck on a path. 123 unit tests, 38 browser checks. DF-16, DF-20, DF-22 cleared.
 - **S1.7 (2026-11-16):** Margo's text box with a priority queue, stale-line dropping and a log; 41 placeholder lines; WebAudio engine with 14 data-defined patches, unlocked by the first tap; settings sheet and auto-pause on fire, breach and death; debug Step and Hurt; autoplay v1 with hazard scenarios and a written report. 144 unit tests, 47 browser checks. DF-11 cleared. Stage 1 is built; its last exit check is Eric's iPad playtest.
 - **S2.1 (2026-11-16):** Weapons as content (pulse laser, slug thrower, breaching lance), hardpoints, charging by power, automatic fire, shots in flight, shield layers, evasion from engines and helm, hull points. The enemy as a second whole ship on the same code; the gunnery drone. Split fight view, weapons bar, tap-weapon-then-room targeting, A/S/D/F keys, debug Fight button. Autoplay picks fights and runs target practice. 158 unit tests, 61 browser checks. DF-26 cleared (Eric's playtest).
+- **S2.2 (2026-11-16):** Hits break systems (a bar per point of damage), start fires, hole the hull (likelier in a worn room) and hurt crew, all through the Stage 1 hazard code; a test proves a fire or breach from a hit plays out exactly like one set by hand. Room flash, damage words, screen shake and a red edge flash; Screen shake switch; auto-pause on fight start; Margo remarks on hits (6 placeholder lines). Debug `debug.hit` and a Hit us button. Autoplay gains an under-fire mode, and the hazard bot re-routes power after repairs. 173 unit tests, 67 browser checks. DF-30 cleared; DF-12 and DF-28 narrowed; DF-35 added.
