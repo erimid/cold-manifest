@@ -4,6 +4,8 @@ You are building **Cold Manifest** (working title), a crew-management spaceship 
 
 Quality is the goal. This should feel like a finished indie game, not a prototype.
 
+> **Changes since this brief was written (2026-11-16):** to keep the game from reading as FTL (§3), the ship is drawn side-on as stacked decks, engineers and the creature share service crawlways in place of the vents, the screen is framed as Margo's monitor with the enemy as a sensor return, power runs through a breaker board, evasion becomes running dark, shields become a capacitor you brace with, the heavy guns are hand-loaded from the hold, and boarding is by docking clamp only. Where this brief and `DECISIONS.md` D-070 to D-078 disagree, the decisions win.
+
 ---
 
 ## 1. The pitch
