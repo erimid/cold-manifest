@@ -6,6 +6,8 @@ Quality is the goal. This should feel like a finished indie game, not a prototyp
 
 > **Changes since this brief was written (2026-11-16):** to keep the game from reading as FTL (§3), the ship is drawn side-on as stacked decks, engineers and the creature share service crawlways in place of the vents, the screen is framed as Margo's monitor with the enemy as a sensor return, power runs through a breaker board, evasion becomes running dark, shields become a capacitor you brace with, the heavy guns are hand-loaded from the hold, and boarding is by docking clamp only. Where this brief and `DECISIONS.md` D-070 to D-078 disagree, the decisions win. The AI line library is capped at 500 lines to start, not 3,000, with every category target in §9 scaled to match (D-100).
 
+> **Second change (2026-11-16, Stage H):** ship-to-ship duels are replaced by encounters on a passive scope where the goal is not to be caught, and by boarding parties who walk our decks (§7). Crew posted at stations, with Margo running what nobody mans, replace power bars (§6). Each leg is one continuous voyage along lanes with situations aboard, not jumps between nodes with text events (§5, §15). The screen is built around the crew and Margo (§18). Where this brief and `DECISIONS.md` D-150 to D-157 disagree, the decisions win.
+
 ---
 
 ## 1. The pitch
