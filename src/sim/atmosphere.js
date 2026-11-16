@@ -91,6 +91,10 @@ function stepAir(sim, seconds) {
   // Through the hull.
   for (const room of sim.layout.rooms) {
     const r = rooms[room.id];
+    if (r.breach > 0 !== r.breached) {
+      r.breached = r.breach > 0;
+      if (r.breached) sim.events.emit('breach.opened', { room: room.id, tick: sim.state.tick });
+    }
     if (r.breach > 0 && r.oxygen > 0) r.oxygen = clamp01(r.oxygen * (1 - Math.min(1, (BREACH_FLOW * r.breach * seconds) / volume(room))));
   }
 }
@@ -196,7 +200,9 @@ function stepCrewHazards(sim, seconds) {
       cause = 'fire';
     }
     if (cause === null) continue;
+    const before = member.health ?? 1;
     member.health = Math.max(0, health);
+    if (before >= 0.5 && member.health < 0.5 && member.health > 0) sim.events.emit('crew.hurt', { crew: id, room: member.room, cause, tick: sim.state.tick });
     if (member.health === 0) killCrew(sim, id, cause);
   }
 }
@@ -233,7 +239,7 @@ export const ATMOSPHERE_COMMANDS = {
       const room = sim.layout.room(cmd.room);
       const r = sim.state.rooms[cmd.room];
       const hadFire = r.fire > 0;
-      Object.assign(r, { jettisoned: true, oxygen: 0, temperature: -270, light: 0, lightsOn: false, noise: 0, hull: 0, fire: 0, breach: 0, scorch: 0, burning: false });
+      Object.assign(r, { jettisoned: true, oxygen: 0, temperature: -270, light: 0, lightsOn: false, noise: 0, hull: 0, fire: 0, breach: 0, scorch: 0, burning: false, breached: false });
       if (hadFire) sim.events.emit('fire.out', { room: cmd.room, tick: sim.state.tick });
       // Every door that led there is welded shut for good.
       for (const exit of sim.layout.exits(cmd.room)) {

@@ -15,8 +15,8 @@ Items here are known shortcuts. Each names the stage that must clear it.
 
 | # | What | Revisit in | Status |
 |---|---|---|---|
-| DF-01 | Placeholder AI lines (~40, flagged `placeholder: true`) stand in for the real library. | Stage 5 (all removed by end of S5.7) | Open |
-| DF-02 | Placeholder audio patches. | Stage 11 (S11.2) | Open |
+| DF-01 | 41 placeholder AI lines (`content/ai-lines/placeholder.json`, flagged `placeholder: true`) stand in for the real library. They carry no personality stage, relationship or degradation conditions yet. | Stage 5 (all removed by end of S5.7) | Open |
+| DF-02 | Placeholder audio: 14 synthesised patches in `src/audio/patches.js` (hum, clicks, alarms, door, hiss). No music, no volume slider, no positional sound. | Stage 11 (S11.2) | Open |
 | DF-03 | Placeholder crew portraits in the crew panel. | Stage 8 (S8.2) | Open |
 | DF-04 | Faction and port names are provisional (see D-012). | Stage 7 (S7.4) | Open |
 | DF-05 | Vent graph is data only, not used by anything, until the creature exists. | Stage 6 (S6.1) | Open |
@@ -25,7 +25,7 @@ Items here are known shortcuts. Each names the stage that must clear it.
 | ~~DF-08~~ | ~~GitHub Pages must be switched on once in the repo settings.~~ | Stage 1 | Done: Eric confirmed 2026-11-15 |
 | ~~DF-09~~ | ~~No Playwright touch tests in CI yet.~~ | S1.2 | Done in S1.2 |
 | DF-10 | Pinch-zoom and two-finger pan are not handled: the input module tracks one pointer at a time. | S1.3 if the ship view needs a camera, otherwise S11.5 | Open |
-| DF-11 | Auto-pause triggers and their settings (brief §7) are not wired; the clock supports a pause requested mid-tick. | S1.7 | Open |
+| ~~DF-11~~ | ~~Auto-pause triggers and their settings (brief §7) were not wired.~~ | S1.7 | Done in S1.7: fire, breach and death pause the game, each with its own switch (D-044) |
 | DF-12 | Hull integrity is stored but nothing changes it; breaches only come from the debug command until weapons exist. Noise only comes from fire. | Stage 2 (hits), Stage 6 (noise sources) | Open |
 | DF-13 | Hull damage, heat and cold have no visual of their own beyond fire glow and breach frost; temperature only shows in the status panel and has no effect on crew or systems. No smoke or sparks yet. | S11.1 (look pass) | Open |
 | ~~DF-14~~ | ~~Doors open by remote from anywhere with no power or crew needed.~~ | S1.4 | Done in S1.4: doors need door control power or hands at the door (D-031) |
@@ -40,6 +40,10 @@ Items here are known shortcuts. Each names the stage that must clear it.
 | DF-24 | Suits are a free, instant toggle with endless air. Crew do not use up a room's oxygen. Crew never refuse an order or flee danger by themselves. | Stage 4 (traits, refusal), Stage 9 (equipment) | Open |
 | DF-25 | Crew walk in straight lines between doors and pass through each other. Routes count doors, not distance. The crew bar is sized for three and will wrap with eight. | S11.5 (touch polish), Stage 4 (bigger rosters) | Open |
 | ~~DF-22~~ | ~~Nothing put a fire out except starving or venting it, and nothing patched a breach.~~ | S1.6 | Done in S1.6: crew extinguish, patch, repair and unjam (D-040) |
+| DF-26 | The 60 fps check at 4x CPU throttle could not be confirmed on the build machine: it has no graphics card, so the browser paints the canvas in software and the throttle slows the painting too (15 fps at iPad resolution, 50 fps at 1x). The game's own work per frame is 1.1 ms at 4x throttle against a 16.7 ms budget. Needs a reading on real hardware (`?debug=1` shows fps). | Eric's Stage 1 playtest, then S11.5 | Open |
+| DF-27 | Margo only reacts to Stage 1 events and speaks in one voice. Lines are picked by trigger and category only; she is silent when the AI core has no power but does not otherwise degrade. Crew injury lines fire once per crossing below half health. | Stage 5 | Open |
+| DF-28 | Settings hold sound on/off and the three auto-pause switches only. No reduced-motion, text size, colour or key rebinding yet. Auto-pause on fight start and on creature sighting arrive with those systems. | S2.2 (fight start), Stage 6 (creature), S11.5 (accessibility) | Open |
+| DF-29 | The autoplay scenario bot plays one fixed competent strategy (send the nearest crew, suit up for breaches, shut doors round fires). It does not vent, jettison or re-route power, so it does not prove those are balanced. | Stage 3 onward as the bot grows (PLAN.md §4) | Open |
 
 ---
 
@@ -211,11 +215,41 @@ Items here are known shortcuts. Each names the stage that must clear it.
 **What:** Tap a crew member on the ship or in the crew bar, or press their number key, to select them; do the same again or press Escape to let go. While someone is selected, tapping a room sends them there and they stay selected. Doors still toggle on a tap. With nobody selected, tapping a room shows its status as before. Crew sit above doors and rooms in hit-test priority.
 **Why:** Brief §18. Keeping the selection after an order lets the player redirect quickly; room status is one Escape away.
 
+### D-042 The AI voice box (S1.7)
+**What:** Game events ask for a line by trigger (`run.start`, `idle`, `crew.ordered`, `power.brownout`, `crew.hurt`, `fire.started`, `breach.opened`, `room.jettisoned`, `crew.died`). Each trigger has a category, a priority, a time-to-live, a cooldown and a chance, in one table at the top of `src/ai/voice.js`. Requests wait in a queue of at most six, highest priority first. One line is on screen at a time and is never cut off; a request that has waited past its time-to-live is dropped unsaid. Lines are picked with the `ai` random stream, avoiding recent repeats, and the queue, cooldowns and log are part of the saved state. With the AI core unpowered Margo says nothing. The box types the line out; the Log button shows the last 60 lines. Placeholder hazard lines name their trigger in `conditions.trigger`.
+**Why:** Brief §9: lines must never overlap and a stale line is worse than silence. Keeping the choice inside the sim makes what she said part of the replay and lets the bot count lines.
+
+### D-043 Sound (S1.7)
+**What:** `src/audio/engine.js` plays patches that are plain data (`src/audio/patches.js`): oscillators and filtered noise with an envelope, no audio files. Sound starts on the player's first tap, click or key, because browsers require that. A table maps game events to patches. The reactor hum loops while the ship screen is up and drops when the game is paused. The engine takes its audio context as a parameter, so tests run it against a fake with no browser. Noise is generated from the seeded generator.
+**Why:** Brief §4 and §15: data-defined placeholder sound now, real sound in Stage 11 by swapping the patch table.
+
+### D-044 Auto-pause and settings (S1.7)
+**What:** The game pauses itself when a fire starts, a breach opens or a crew member dies, and the pause button says why. Each has its own switch in Settings. On a touch screen all three default to on; with a mouse and keyboard they default to off, since the space bar is right there. Settings are kept in the browser's local storage under `cold-manifest.settings.v1`, not in the save. `?autopause=0` and `?sound=0` in the address override them for tests.
+**Why:** Brief §7 and §18: touch players cannot hit a space bar in a hurry. Settings belong to the device, not the run.
+
+### D-045 Debug additions (S1.7)
+**What:** With `?debug=1`: a Step button advances one tick while paused, a Hurt button on the crew panel halves the selected crew member's health (`debug.crew`), and the overlay lists crew alive, fires, Margo's line counts and the sound state. These join the earlier room, door and system controls.
+**Why:** PLAN.md §4: every system gets a debug control in the session that builds it.
+
+### D-046 Autoplay v1 (S1.7)
+**What:** Each seed is now played two ways, each twice to prove it replays: ten minutes of random orders (chaos), and a five minute hazard scenario that starts with seeded fires and breaches and a bot that tries to save the ship. The run fails on a crash, a bad number, a broken invariant, a door or crew member stuck, or anything moving while paused. `--report FILE` writes the summary; `reports/stage-1.md` is the Stage 1 report.
+**Why:** Stage 1 exit check. Chaos finds crashes; the scenario shows the hazards can actually be beaten.
+
 ---
 
 ## Stage notes
 
-_None yet. Stage 1 note goes here when Stage 1 is done._
+### Stage 1: the ship is alive (built 2026-11-15 to 2026-11-16)
+
+**What exists:** one ship, the *Margin of Error*, as a lit cutaway with 15 rooms and 21 doors; a fixed 20 Hz simulation that runs with no browser; pause at any time with every order still accepted; a reactor power pool with brownouts; air, fire, breaches, temperature and jettison; three crew who walk, open doors, fight fires, patch, repair and heal; Margo's text box; placeholder sound; auto-pause; a debug panel; and a bot.
+
+**Exit checks:**
+- Green gate: 144 unit tests, 47 browser checks, content check, build. Passed.
+- Autoplay: 100 chaos runs and 100 hazard scenarios, no crash, no bad number, nobody stuck. The bot saved the ship in 99 of 100 scenarios, median 22 seconds to clear. Passed (`reports/stage-1.md`).
+- 60 fps with a fire at 4x CPU throttle: not confirmed here, see DF-26. The game's own work is 1.1 ms a frame under throttle.
+- Eric plays 10 minutes on his iPad: pending.
+
+**Carried forward:** the open DF items above. Nothing in Stage 1 was left out of the plan's scope.
 
 ### Session log
 
@@ -225,3 +259,4 @@ _None yet. Stage 1 note goes here when Stage 1 is done._
 - **S1.4 (2026-11-15):** Reactor power pool, system levels and damage, one-bar routing orders, lights as a power draw, brownout shedding, door control (remote with power, by hand without, electric locks), flat-rate life support, AI core status stub, power panel with touch buttons and Q-row keys, refusal messages. 91 unit tests, 30 browser checks. DF-14 cleared.
 - **S1.5 (2026-11-15):** Oxygen flow through doors, airlocks and breaches; fire that grows, starves, spreads, heats, and breaks systems; temperature; hazards to crew (suffocation, burns); emergency jettison with a two-press control; jettisoned rooms and sealed doors in the renderer and panels; `hazard` RNG stream. 106 unit tests, 33 browser checks. DF-17 cleared.
 - **S1.6 (2026-11-15):** Three placeholder crew from content; pathfinding on the room and door graph; move and suit orders; crew open and close doors, by hand when door control is dark; automatic extinguish, patch, repair and unjam work; medbay healing; crew bar, crew panel, selection by tap and number keys, path preview. Autoplay bot runs a crew and checks nobody gets stuck on a path. 123 unit tests, 38 browser checks. DF-16, DF-20, DF-22 cleared.
+- **S1.7 (2026-11-16):** Margo's text box with a priority queue, stale-line dropping and a log; 41 placeholder lines; WebAudio engine with 14 data-defined patches, unlocked by the first tap; settings sheet and auto-pause on fire, breach and death; debug Step and Hurt; autoplay v1 with hazard scenarios and a written report. 144 unit tests, 47 browser checks. DF-11 cleared. Stage 1 is built; its last exit check is Eric's iPad playtest.

@@ -53,7 +53,7 @@ export function renderTitle(root, { greeting, seed, version, contentSummary, onN
       el(
         'footer',
         { class: 'title__foot' },
-        el('span', {}, `Build ${version} · Stage 1, session 3`),
+        el('span', {}, `Build ${version} · Stage 1, session 7`),
         el('span', {}, contentSummary),
         el('span', {}, `Seed ${seed}`),
       ),

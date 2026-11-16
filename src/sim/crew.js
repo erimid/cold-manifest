@@ -172,6 +172,18 @@ export const CREW_COMMANDS = {
       sim.events.emit('crew.suit', { crew: cmd.crew, on: cmd.on, tick: sim.state.tick });
     },
   },
+  // Debug panel only: set someone's health.
+  'debug.crew': {
+    check(sim, cmd) {
+      const problem = living(sim, cmd.crew);
+      if (problem) return problem;
+      if (!(cmd.health > 0 && cmd.health <= 1)) return 'health must be above 0 and at most 1';
+      return null;
+    },
+    apply(sim, cmd) {
+      sim.state.crew[cmd.crew].health = cmd.health;
+    },
+  },
 };
 
 // ---------- each tick ----------

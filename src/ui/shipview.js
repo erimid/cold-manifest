@@ -11,6 +11,7 @@ import { POWERED, aiCoreStatus, free, lightsDraw, litRooms, supply, usable } fro
 import { SPACE, SYSTEMS } from '../sim/systems.js';
 import { TICK_SECONDS } from '../sim/sim.js';
 import { el } from './dom.js';
+import { AUTO_PAUSE } from './settings.js';
 import { createShipRenderer } from './ship-render.js';
 
 const percent = (value) => `${Math.round(value * 100)}%`;
@@ -20,7 +21,11 @@ const CHIP_TASKS = { walking: 'Walking', waiting: 'At a door', extinguish: 'Figh
 /** Start a sentence with a capital: the sim's reasons are written to follow "because". */
 const sentence = (text) => `${text.charAt(0).toUpperCase()}${text.slice(1)}.`;
 
-export function createShipView({ canvas, root, input, sim, clock, onBack, debug = false }) {
+/** How fast the AI's lines type out, in characters per second of real time, and how often a character blips. */
+const TYPE_SPEED = 45;
+const BLIP_EVERY = 3;
+
+export function createShipView({ canvas, root, input, sim, clock, onBack, audio = null, settings = null, debug = false }) {
   const { layout } = sim;
   const renderer = createShipRenderer(layout);
   const ctx = canvas.getContext('2d');
@@ -35,6 +40,10 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, debug 
   let panel = null; // the status panel's live parts for the current selection
   let power = null; // the power panel's live parts
   let refusal = null; // { text, until } the last order the ship refused, shown briefly
+  let notice = null; // why the game paused itself, shown on the pause button until it resumes
+  let typed = { n: 0, start: 0, shown: -1 }; // the AI line being typed out
+  let sheet = null; // which pop-up sheet is open: 'log' | 'settings' | null
+  let logShown = -1; // the last line number the open log has drawn
   const counts = { canvasTaps: 0, infos: 0 };
 
   // ---------- naming ----------
@@ -70,14 +79,16 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, debug 
     const w = canvas.clientWidth;
     const h = canvas.clientHeight;
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    if (w === size.w && h === size.h && dpr === size.dpr) return;
-    size = { w, h, dpr };
-    canvas.width = Math.round(w * dpr);
-    canvas.height = Math.round(h * dpr);
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    // The ship gets the space between the top bar and the bottom panel.
-    const top = nodes.top.getBoundingClientRect().bottom + 10;
-    const bottom = nodes.bottom.getBoundingClientRect().top - 10;
+    // The ship gets the space between the top bar and the bottom panels, and is refitted if either moves.
+    const top = Math.round(nodes.top.getBoundingClientRect().bottom) + 10;
+    const bottom = Math.round(nodes.bottom.getBoundingClientRect().top) - 10;
+    if (w === size.w && h === size.h && dpr === size.dpr && top === size.top && bottom === size.bottom) return;
+    if (w !== size.w || h !== size.h || dpr !== size.dpr) {
+      canvas.width = Math.round(w * dpr);
+      canvas.height = Math.round(h * dpr);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+    size = { w, h, dpr, top, bottom };
     view = renderer.fit({ x: 16, y: top, w: w - 32, h: Math.max(80, bottom - top) });
   }
 
@@ -88,6 +99,7 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, debug 
     const problem = sim.whyNot(command);
     if (problem) {
       refusal = { text: sentence(problem), until: performance.now() + 2600 };
+      audio?.play('deny');
       return false;
     }
     refusal = null;
@@ -98,7 +110,10 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, debug 
   /** Check an order without giving it; shows the reason if the ship would refuse. */
   function wouldRefuse(command) {
     const problem = sim.whyNot(command);
-    if (problem) refusal = { text: sentence(problem), until: performance.now() + 2600 };
+    if (problem) {
+      refusal = { text: sentence(problem), until: performance.now() + 2600 };
+      audio?.play('deny');
+    }
     return Boolean(problem);
   }
 
@@ -106,6 +121,64 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, debug 
   function refusalText() {
     if (refusal && performance.now() > refusal.until) refusal = null;
     return refusal ? refusal.text : '';
+  }
+
+  // ---------- the AI's text box, her log, and settings ----------
+
+  const stamp = (tick) => {
+    const s = Math.floor(tick * TICK_SECONDS);
+    return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+  };
+
+  /** Type the newest line out a few characters a frame. Real time, so a line finishes even if the game pauses on it. */
+  function updateVoice() {
+    const last = sim.state.ai.log.at(-1);
+    if (!last) return;
+    const now = performance.now();
+    if (last.n !== typed.n) typed = { n: last.n, start: now, shown: -1 };
+    const count = Math.min(last.text.length, Math.floor(((now - typed.start) / 1000) * TYPE_SPEED));
+    if (count !== typed.shown) {
+      if (count > typed.shown && count < last.text.length && count % BLIP_EVERY === 0) audio?.play('blip');
+      typed.shown = count;
+      nodes.aiText.textContent = last.text.slice(0, count);
+      nodes.ai.classList.toggle('is-typing', count < last.text.length);
+    }
+    nodes.ai.classList.toggle('is-urgent', last.priority >= 4 && Boolean(sim.state.ai.speaking));
+    if (sheet === 'log' && logShown !== last.n) drawLog();
+  }
+
+  function drawLog() {
+    const { log } = sim.state.ai;
+    logShown = log.at(-1)?.n ?? 0;
+    nodes.sheet.replaceChildren(
+      el('div', { class: 'stencil' }, 'M.A.R.G.O. log'),
+      log.length
+        ? el('ol', { class: 'ailog', id: 'ailog' }, log.map((line) => el('li', {}, el('time', {}, stamp(line.tick)), ' ', line.text)))
+        : el('p', { class: 'status__hint' }, 'She has not said anything yet.'),
+    );
+    const list = nodes.sheet.querySelector('.ailog');
+    if (list) list.scrollTop = list.scrollHeight;
+  }
+
+  function drawSettings() {
+    const toggle = (id, label, path, on) => el('button', { class: `btn btn--small btn--toggle${on ? ' is-on' : ''}`, type: 'button', id, 'aria-pressed': String(on), press: () => {
+      settings.set(path, !on);
+      drawSettings();
+    } }, label, el('small', {}, on ? 'On' : 'Off'));
+    nodes.sheet.replaceChildren(
+      el('div', { class: 'stencil' }, 'Settings'),
+      toggle('set-sound', 'Sound', 'sound', settings.values.sound),
+      el('div', { class: 'stencil sheet__sub' }, 'Pause the game when'),
+      ...AUTO_PAUSE.map((item) => toggle(`set-pause-${item.id}`, item.label, `autoPause.${item.id}`, settings.values.autoPause[item.id])),
+    );
+  }
+
+  function openSheet(which) {
+    sheet = sheet === which ? null : which;
+    nodes.sheet.hidden = sheet === null;
+    nodes.sheet.className = `panel sheet sheet--${sheet}`;
+    if (sheet === 'log') drawLog();
+    if (sheet === 'settings') drawSettings();
   }
 
   // ---------- the power panel ----------
@@ -230,7 +303,13 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, debug 
       nodes.status.replaceChildren(
         el('div', { class: 'status__head' }, el('div', { class: 'status__title', id: 'status-title' }, member.name), el('div', { class: 'stencil' }, `Crew ${member.index + 1}`), note),
         el('div', { class: 'status__stats' }, Object.values(stats).map((s) => s.node)),
-        el('div', { class: 'status__controls' }, suit, el('span', { class: 'status__hint status__hint--inline', id: 'crew-hint' }, 'Tap a room to send them there.')),
+        el(
+          'div',
+          { class: 'status__controls' },
+          suit,
+          debug && button('btn-dbg-hurt', 'Hurt', () => order({ type: 'debug.crew', crew: member.id, health: Math.max(0.05, sim.state.crew[member.id].health - 0.3) }), 'btn--debug'),
+          el('span', { class: 'status__hint status__hint--inline', id: 'crew-hint' }, 'Tap a room to send them there.'),
+        ),
       );
       panel = { kind: 'crew', id: member.id, stats, suit, note };
       updatePanel();
@@ -442,7 +521,8 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, debug 
       return;
     }
     if (action !== 'back') return;
-    if (selectedCrew) selectCrew(null);
+    if (sheet) openSheet(sheet);
+    else if (selectedCrew) selectCrew(null);
     else if (selected) select(null);
     else onBack();
   }
@@ -455,8 +535,19 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, debug 
       status: el('div', { class: 'panel status', id: 'status' }),
       info: el('div', { class: 'ship-info', id: 'ship-info', hidden: true }),
       pauseLabel: el('span', {}, 'Pause'),
+      pauseNote: el('small', { id: 'pause-note' }, 'Space bar'),
+      aiText: el('span', { class: 'aibox__text', id: 'ai-text' }),
+      sheet: el('div', { class: 'panel sheet', id: 'sheet', hidden: true }),
     };
-    nodes.pause = el('button', { class: 'btn btn--pause', type: 'button', id: 'btn-pause', press: () => clock.toggle() }, nodes.pauseLabel, el('small', {}, 'Space bar'));
+    nodes.ai = el(
+      'div',
+      { class: 'panel aibox', id: 'aibox' },
+      el('span', { class: 'stencil aibox__name' }, 'M.A.R.G.O.'),
+      nodes.aiText,
+      button('btn-log', 'Log', () => openSheet('log')),
+      settings && button('btn-settings', 'Settings', () => openSheet('settings')),
+    );
+    nodes.pause = el('button', { class: 'btn btn--pause', type: 'button', id: 'btn-pause', press: () => clock.toggle() }, nodes.pauseLabel, nodes.pauseNote);
     nodes.top = el(
       'div',
       { class: 'shipbar' },
@@ -465,6 +556,7 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, debug 
       el(
         'div',
         { class: 'shipbar__buttons' },
+        debug && button('btn-dbg-step', 'Step', () => clock.stepOnce(), 'btn--debug'),
         debug &&
           button('btn-vents', 'Vents', () => {
             showVents = !showVents;
@@ -472,15 +564,15 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, debug 
         button('btn-back', 'Back', onBack),
       ),
     );
-    nodes.bottom = el('div', { class: 'shipdock' }, el('div', { class: 'shipdock__row' }, nodes.status, nodes.pause), buildPower());
+    nodes.bottom = el('div', { class: 'shipdock' }, nodes.sheet, nodes.ai, el('div', { class: 'shipdock__row' }, nodes.status, nodes.pause), buildPower());
     root.replaceChildren(el('section', { class: 'ship' }, nodes.top, nodes.bottom, nodes.info));
     buildPanel();
   }
 
   let lastClock = '';
   function updateClock() {
-    const waiting = sim.state.commands.length;
-    const text = `${clock.paused ? 'PAUSED' : 'running'} · ${sim.time.toFixed(1)}s${waiting ? ` · ${waiting} queued` : ''}`;
+    // Fixed width, so the bar beside it never reflows as the time ticks.
+    const text = `${clock.paused ? 'PAUSED ' : 'running'} ${stamp(sim.state.tick)}`;
     if (text !== lastClock) {
       lastClock = text;
       nodes.clock.textContent = text;
@@ -490,11 +582,18 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, debug 
       nodes.pauseLabel.textContent = label;
       nodes.pause.classList.toggle('is-paused', clock.paused);
     }
+    if (!clock.paused) notice = null;
+    setText(nodes.pauseNote, notice ?? 'Space bar');
+    nodes.pause.classList.toggle('is-auto', Boolean(notice));
   }
 
   return {
     enter() {
+      sheet = null;
       build();
+      // Whatever she said before this screen opened is shown whole, not typed again.
+      const last = sim.state.ai.log.at(-1);
+      typed = { n: last?.n ?? 0, start: -1e9, shown: -1 };
       canvas.hidden = false;
       size = { w: 0, h: 0, dpr: 1 }; // force a measure
       measure();
@@ -525,12 +624,20 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, debug 
       updatePanel();
       updatePower();
       updateRoster();
+      updateVoice();
+    },
+    /** Say why the game just paused itself. Shown on the pause button until play resumes. */
+    announce(text) {
+      notice = text;
     },
     /** For automated tests and the debug console. */
     debug: {
       targets: () => renderer.targets(view, sim.state.crew),
       get selectedCrew() {
         return selectedCrew;
+      },
+      get sheet() {
+        return sheet;
       },
       counts,
       get view() {

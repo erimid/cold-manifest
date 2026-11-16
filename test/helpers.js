@@ -14,6 +14,12 @@ export const CREW = content.all('crew').map(({ id, name }) => ({ id, name }));
 /** A fresh sim on the starting ship with its three crew aboard. */
 export const newCrewedSim = (seed = 'test') => createSim({ seed, ship: SHIP, crew: CREW });
 
+/** The AI line library. */
+export const LINES = content.all('ai-lines');
+
+/** A crewed sim with the ship AI able to speak. */
+export const newTalkingSim = (seed = 'test') => createSim({ seed, ship: SHIP, crew: CREW, lines: LINES });
+
 /** Stand a new crew member in a room of a sim. */
 export function putCrew(sim, id, room, extra = {}) {
   const member = Object.assign(newCrewMember(sim.layout, { id }, room, Object.keys(sim.state.crew).length), extra);

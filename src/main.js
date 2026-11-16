@@ -1,9 +1,11 @@
 // Boot, frame loop and the top-level screen state machine (brief §4).
 //
-// S1.3: the ship view shows the Margin of Error's rooms and doors. Power, air,
-// hazards and crew plug into it over the rest of Stage 1.
+// The ship view is the one live screen so far. This file also wires the
+// things that sit beside the simulation: sound, settings and auto-pause.
 
 import { AI_SLOTS } from './ai/categories.js';
+import { createAudio } from './audio/engine.js';
+import { EVENT_SOUNDS } from './audio/patches.js';
 import { createClock } from './engine/clock.js';
 import { loadContent } from './engine/content-browser.js';
 import { createInput } from './engine/input.js';
@@ -12,10 +14,11 @@ import { createStateMachine } from './engine/state-machine.js';
 import { TICK_SECONDS, createSim } from './sim/sim.js';
 import { createBackdrop } from './ui/backdrop.js';
 import { el, setPressBinder } from './ui/dom.js';
+import { AUTO_PAUSE, createSettings } from './ui/settings.js';
 import { createShipView } from './ui/shipview.js';
 import { renderStub, renderTitle } from './ui/title.js';
 
-const VERSION = '0.6.0';
+const VERSION = '0.7.0';
 
 const params = new URLSearchParams(window.location.search);
 const flags = {
@@ -23,6 +26,21 @@ const flags = {
   auto: params.get('auto') === '1',
   seed: params.get('seed') || newRunSeed(),
 };
+const onOff = (name) => (params.has(name) ? params.get(name) !== '0' : undefined);
+
+function storage() {
+  try {
+    return window.localStorage;
+  } catch {
+    return null; // blocked (private mode, an embedded frame)
+  }
+}
+const settings = createSettings({
+  storage: storage(),
+  touch: window.matchMedia('(pointer: coarse)').matches,
+  // ?autopause=0 and ?sound=0 override the saved settings for this visit (tests use them).
+  overrides: { autoPause: onOff('autopause'), sound: onOff('sound') },
+});
 
 const content = loadContent();
 const root = document.getElementById('screen');
@@ -36,8 +54,23 @@ setPressBinder(input.press);
 // The simulation and the one clock that drives it.
 // Placeholder crew until Stage 4 generates them (DECISIONS DF-03, DF-23).
 const crew = content.all('crew').map(({ id, name }) => ({ id, name }));
-const sim = createSim({ seed: flags.seed, ship: content.require('ships', 'margin-of-error'), crew });
+const sim = createSim({ seed: flags.seed, ship: content.require('ships', 'margin-of-error'), crew, lines: content.all('ai-lines') });
 const clock = createClock({ sim, tickSeconds: TICK_SECONDS });
+
+// Sound. Nothing can play until the first touch or key press (an iOS rule, and a polite one).
+const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+const audio = createAudio({ createContext: AudioContextClass ? () => new AudioContextClass() : null });
+audio.muted = !settings.values.sound;
+settings.onChange((values) => (audio.muted = !values.sound));
+input.on('gesture', () => audio.unlock());
+input.on('press', () => audio.play('click'));
+for (const [type, sound] of Object.entries(EVENT_SOUNDS)) {
+  sim.events.on(type, (event) => {
+    const name = typeof sound === 'function' ? sound(event) : sound;
+    if (name) audio.play(name);
+  });
+}
+clock.onChange(() => audio.play('pause'));
 
 /** Screens where the sim is live. Everywhere else the clock does not run. */
 const LIVE_STATES = new Set(['ship']);
@@ -53,7 +86,21 @@ function pickGreeting() {
 
 let stopTyping = () => {};
 
-const shipView = createShipView({ canvas: viewCanvas, root, input, sim, clock, debug: flags.debug, onBack: () => machine.go('title') });
+const shipView = createShipView({ canvas: viewCanvas, root, input, sim, clock, audio, settings, debug: flags.debug, onBack: () => machine.go('title') });
+
+// Auto-pause (brief §7): stop the clock the moment something goes badly wrong, and say what.
+const AUTO_PAUSE_TEXT = {
+  fire: (event) => `Fire in ${sim.layout.room(event.room).name}`,
+  breach: (event) => `Breach in ${sim.layout.room(event.room).name}`,
+  death: (event) => `${sim.state.crew[event.crew].name} is dead`,
+};
+for (const item of AUTO_PAUSE) {
+  sim.events.on(item.event, (event) => {
+    if (!settings.values.autoPause[item.id] || clock.paused) return;
+    clock.pause(`auto:${item.id}`);
+    shipView.announce(AUTO_PAUSE_TEXT[item.id](event));
+  });
+}
 
 const machine = createStateMachine({
   title: {
@@ -72,7 +119,17 @@ const machine = createStateMachine({
       stopTyping();
     },
   },
-  ship: shipView,
+  ship: {
+    enter() {
+      shipView.enter();
+      audio.startLoop('hum');
+    },
+    exit() {
+      shipView.exit();
+      audio.stopLoop('hum');
+    },
+    update: (dt) => shipView.update(dt),
+  },
   contracts: {
     enter() {
       renderStub(root, {
@@ -129,6 +186,10 @@ function frame(now) {
         `clock  ${clock.paused ? 'paused' : 'running'}`,
         `seed   ${flags.seed}`,
         `auto   ${flags.auto ? 'on' : 'off'}`,
+        `crew   ${Object.values(sim.state.crew).filter((c) => c.alive).length} alive`,
+        `fires  ${Object.values(sim.state.rooms).filter((r) => r.fire > 0).length}`,
+        `margo  ${sim.state.ai.said} said, ${sim.state.ai.queue.length} waiting`,
+        `sound  ${audio.muted ? 'off' : audio.unlocked ? 'on' : 'locked'}`,
       ].join('\n');
     }
   }
@@ -139,4 +200,4 @@ machine.go('title');
 requestAnimationFrame(frame);
 
 // Handle for the browser console and for automated tests.
-window.coldManifest = { version: VERSION, flags, machine, content, sim, clock, input, shipView };
+window.coldManifest = { version: VERSION, flags, machine, content, sim, clock, input, shipView, audio, settings };

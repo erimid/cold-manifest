@@ -11,7 +11,14 @@
 //   --seed S       base seed; run i uses "S-i" (default "auto")
 //   --ship ID      ship layout to fly (default "margin-of-error")
 //
-// S1.6: the bot sends three crew around the ship to deal with whatever is
+//   --report FILE  also write the report to FILE as Markdown
+//
+// Autoplay v1 (end of Stage 1) plays every seed twice over:
+//   chaos      a bot that does everything at random, to find crashes
+//   scenario   a seeded emergency (fires and breaches) and a bot that tries
+//              to save the ship, to see whether the tools work
+//
+// Chaos: the bot sends three crew around the ship to deal with whatever is
 // worst, suits them up for breaches, works doors, airlocks and lights, routes
 // power, starts fires and breaches, breaks systems and jams doors through the
 // debug commands, now and then jettisons a room, and pauses at random. Its strategy and the
@@ -23,6 +30,8 @@ import { findBadNumbers, hashState } from '../src/engine/hash.js';
 import { createRng } from '../src/engine/rng.js';
 import { POWERED, used, supply } from '../src/sim/power.js';
 import { MANUAL_DOOR_SECONDS, TICK_RATE, TICK_SECONDS, checkInvariants, createSim } from '../src/sim/sim.js';
+import { writeFileSync } from 'node:fs';
+
 import { readContentFiles } from './lib/load-content.js';
 
 function option(name, fallback) {
@@ -43,6 +52,7 @@ const content = createContent(readContentFiles());
 const shipId = String(option('ship', 'margin-of-error'));
 const ship = content.require('ships', shipId);
 const roster = content.all('crew').map(({ id, name }) => ({ id, name }));
+const lines = content.all('ai-lines');
 
 /** The longest anyone should stand still with somewhere to be: a hand-worked door, with a wide margin. */
 const MAX_STILL_TICKS = 200;
@@ -52,12 +62,12 @@ const MAX_DOOR_TICKS = Math.ceil(MANUAL_DOOR_SECONDS * TICK_RATE) + 3;
 
 /** Play one run to the end. Returns its stats, or throws on any failure. */
 function playRun(seed) {
-  const sim = createSim({ seed, ship, crew: roster });
+  const sim = createSim({ seed, ship, crew: roster, lines });
   const clock = createClock({ sim, tickSeconds: TICK_SECONDS });
   // The bot's own dice, kept apart from the sim's so its choices are not part of the game state.
   const bot = createRng(`bot:${seed}`);
   const stats = { orders: 0, refused: 0, dropped: 0, doorMoves: 0, pauses: 0, powerMoves: 0, brownouts: 0, darkTicks: 0, fires: 0, spreads: 0, firesOut: 0, scorched: 0, jettisons: 0, airlessTicks: 0, moves: 0, arrivals: 0, blocked: 0, deaths: 0, firesFought: 0, patches: 0, repairs: 0 };
-  const stillSince = new Map(); // crew id -> { tick, x, y } where they last made progress
+  const watch = stuckWatch(sim);
   const movingSince = new Map(); // door id -> tick its last order was applied
 
   sim.events.on('door.changed', ({ door, tick }) => movingSince.set(door, tick));
@@ -172,14 +182,7 @@ function playRun(seed) {
     if (used(sim) > supply(sim)) throw new Error(`tick ${sim.state.tick}: ${used(sim)} bars in use of ${supply(sim)}`);
     if (sim.state.systems.doors.power === 0) stats.darkTicks += 1;
     for (const room of Object.values(sim.state.rooms)) if (!room.jettisoned && room.oxygen < 0.15) stats.airlessTicks += 1;
-    for (const member of Object.values(sim.state.crew)) {
-      const last = stillSince.get(member.id);
-      if (!member.alive || !member.path.length || !last || last.x !== member.x || last.y !== member.y) {
-        stillSince.set(member.id, { tick: sim.state.tick, x: member.x, y: member.y });
-      } else if (sim.state.tick - last.tick > MAX_STILL_TICKS) {
-        throw new Error(`${member.id} stuck on a path in ${member.room} at ${member.x.toFixed(2)}, ${member.y.toFixed(2)} since tick ${last.tick} (${member.task}, next ${JSON.stringify(member.path[0])})`);
-      }
-    }
+    watch();
     for (const [door, since] of movingSince) {
       const d = sim.state.doors[door];
       const settled = d.state === 'jammed' || d.openness === (d.state === 'open' ? 1 : 0);
@@ -197,46 +200,181 @@ function playRun(seed) {
 
   const bad = findBadNumbers(sim.state);
   if (bad.length) throw new Error(`non-finite numbers at ${bad.join(', ')}`);
+  stats.said = sim.state.ai.said;
   return { ...stats, hash: hashState(sim.snapshot()) };
 }
 
-const sim0Rooms = ship.rooms.length;
+/** Fail if anyone with somewhere to be has not moved for too long. Call once a tick. */
+function stuckWatch(sim) {
+  const stillSince = new Map();
+  return () => {
+    for (const member of Object.values(sim.state.crew)) {
+      const last = stillSince.get(member.id);
+      if (!member.alive || !member.path.length || !last || last.x !== member.x || last.y !== member.y) {
+        stillSince.set(member.id, { tick: sim.state.tick, x: member.x, y: member.y });
+      } else if (sim.state.tick - last.tick > MAX_STILL_TICKS) {
+        throw new Error(`${member.id} stuck on a path in ${member.room} since tick ${last.tick} (${member.task})`);
+      }
+    }
+  };
+}
+
+const SCENARIO_MINUTES = 5;
+
+/**
+ * One seeded emergency: a few seconds in, one to three fires and up to two
+ * breaches open at once. The bot plays to win: it sends free hands to the
+ * worst room, suits them for breaches, pulls back anyone badly hurt, and
+ * leaves the doors alone. Returns how it went, or throws on any failure.
+ */
+function playScenario(seed) {
+  const sim = createSim({ seed, ship, crew: roster, lines });
+  const bot = createRng(`scenario:${seed}`);
+  const watch = stuckWatch(sim);
+  const rooms = bot.shuffle(sim.layout.rooms.map((room) => room.id));
+  const fires = rooms.slice(0, bot.between(1, 3));
+  const breaches = rooms.slice(3, 3 + bot.between(0, 2));
+  const end = SCENARIO_MINUTES * 60 * TICK_RATE;
+  let clearedAt = null;
+  let worstFires = 0;
+
+  const order = (command) => !sim.whyNot(command) && sim.enqueue(command);
+  const trouble = (room) => {
+    const r = sim.state.rooms[room.id];
+    const system = room.system ? sim.state.systems[room.system] : null;
+    return r.jettisoned ? 0 : r.fire * 3 + r.breach * 2 + (system && !system.lost ? system.damage * 0.5 : 0);
+  };
+
+  while (sim.state.tick < end) {
+    if (sim.state.tick === 3 * TICK_RATE) {
+      for (const room of fires) order({ type: 'debug.room', room, set: { fire: bot.range(0.3, 0.8) } });
+      for (const room of breaches) order({ type: 'debug.room', room, set: { breach: bot.range(0.2, 0.7) } });
+    }
+    // Once a second, the bot looks the ship over.
+    if (sim.state.tick > 3 * TICK_RATE && sim.state.tick % TICK_RATE === 0) {
+      const spots = sim.layout.rooms.filter((room) => trouble(room) > 0).sort((a, b) => trouble(b) - trouble(a));
+      const taken = new Map();
+      for (const member of Object.values(sim.state.crew)) {
+        if (!member.alive) continue;
+        const here = sim.layout.room(member.room);
+        // Badly hurt: get out of danger and into the medbay.
+        if (member.health < 0.35) {
+          if (member.goal !== 'medbay' && member.room !== 'medbay') order({ type: 'crew.move', crew: member.id, room: 'medbay' });
+          continue;
+        }
+        if (member.path.length || trouble(here) > 0) continue; // busy
+        // Spread out: at most two to a room.
+        const spot = spots.find((room) => (taken.get(room.id) ?? 0) < 2 && !sim.whyNot({ type: 'crew.move', crew: member.id, room: room.id }));
+        if (!spot) continue;
+        taken.set(spot.id, (taken.get(spot.id) ?? 0) + 1);
+        const needsSuit = sim.state.rooms[spot.id].breach > 0;
+        if (member.suit !== needsSuit) order({ type: 'crew.suit', crew: member.id, on: needsSuit });
+        order({ type: 'crew.move', crew: member.id, room: spot.id });
+      }
+    }
+
+    sim.step();
+    const problems = checkInvariants(sim);
+    if (problems.length) throw new Error(`tick ${sim.state.tick}: ${problems.join('; ')}`);
+    watch();
+
+    const burning = Object.values(sim.state.rooms).filter((r) => r.fire > 0).length;
+    worstFires = Math.max(worstFires, burning);
+    const holed = Object.values(sim.state.rooms).some((r) => r.breach > 0);
+    if (sim.state.tick > 3 * TICK_RATE + 1) {
+      if (!burning && !holed) clearedAt ??= sim.state.tick;
+      else clearedAt = null;
+    }
+  }
+
+  const bad = findBadNumbers(sim.state);
+  if (bad.length) throw new Error(`non-finite numbers at ${bad.join(', ')}`);
+  const crew = Object.values(sim.state.crew);
+  return {
+    fires: fires.length,
+    breaches: breaches.length,
+    cleared: clearedAt !== null,
+    clearSeconds: clearedAt === null ? null : clearedAt / TICK_RATE - 3,
+    worstFires,
+    alive: crew.filter((member) => member.alive).length,
+    damage: Object.values(sim.state.systems).reduce((sum, system) => sum + system.damage, 0),
+    said: sim.state.ai.said,
+    hash: hashState(sim.snapshot()),
+  };
+}
+
 const started = performance.now();
 const failures = [];
-const totals = { orders: 0, refused: 0, dropped: 0, doorMoves: 0, pauses: 0, powerMoves: 0, brownouts: 0, darkTicks: 0, fires: 0, spreads: 0, firesOut: 0, scorched: 0, jettisons: 0, airlessTicks: 0, moves: 0, arrivals: 0, blocked: 0, deaths: 0, firesFought: 0, patches: 0, repairs: 0 };
+const totals = { orders: 0, refused: 0, dropped: 0, doorMoves: 0, pauses: 0, powerMoves: 0, brownouts: 0, darkTicks: 0, fires: 0, spreads: 0, firesOut: 0, scorched: 0, jettisons: 0, airlessTicks: 0, moves: 0, arrivals: 0, blocked: 0, deaths: 0, firesFought: 0, patches: 0, repairs: 0, said: 0 };
+const scenarios = [];
 for (let i = 1; i <= runs; i++) {
   const seed = `${baseSeed}-${i}`;
   try {
     const first = playRun(seed);
     const second = playRun(seed);
-    if (first.hash !== second.hash) failures.push({ seed, reason: `replay mismatch (${first.hash} vs ${second.hash})` });
+    if (first.hash !== second.hash) failures.push({ seed, reason: `chaos replay mismatch (${first.hash} vs ${second.hash})` });
     for (const key of Object.keys(totals)) totals[key] += first[key];
   } catch (err) {
-    failures.push({ seed, reason: err.message });
+    failures.push({ seed, reason: `chaos: ${err.message}` });
+  }
+  try {
+    const first = playScenario(seed);
+    const second = playScenario(seed);
+    if (first.hash !== second.hash) failures.push({ seed, reason: `scenario replay mismatch (${first.hash} vs ${second.hash})` });
+    scenarios.push(first);
+  } catch (err) {
+    failures.push({ seed, reason: `scenario: ${err.message}` });
   }
 }
 const seconds = (performance.now() - started) / 1000;
 const per = (n) => (n / runs).toFixed(1);
+const mean = (values) => (values.length ? values.reduce((a, b) => a + b, 0) / values.length : 0);
+const cleared = scenarios.filter((s) => s.cleared);
+const clearTimes = cleared.map((s) => s.clearSeconds).sort((a, b) => a - b);
+const pct = (n, of) => (of ? `${Math.round((100 * n) / of)}%` : 'n/a');
 
-console.log('Cold Manifest autoplay');
-console.log(`  runs:              ${runs} (seeds ${baseSeed}-1 to ${baseSeed}-${runs})`);
-console.log(`  length:            ${minutes} game minute(s) each, ${ticks} ticks`);
-console.log(`  crashed or bad:    ${failures.length}`);
-console.log(`  replayed exact:    ${runs - failures.length} of ${runs}`);
-console.log(`  ship:              ${ship.name}`);
-console.log(`  orders per run:    ${per(totals.orders)} given, ${per(totals.refused)} refused up front, ${per(totals.dropped)} dropped`);
-console.log(`  door moves:        ${per(totals.doorMoves)} completed per run`);
-console.log(`  power per run:     ${per(totals.powerMoves)} bars routed, ${per(totals.brownouts)} brownouts, door control dark ${((100 * totals.darkTicks) / (runs * ticks)).toFixed(0)}% of the time`);
-console.log(`  hazards per run:   ${per(totals.fires)} fires lit, ${per(totals.spreads)} spread, ${per(totals.firesOut)} went out, ${per(totals.scorched)} system bars burned, ${per(totals.jettisons)} rooms jettisoned`);
-console.log(`  crew per run:      ${per(totals.moves)} sent, ${per(totals.arrivals)} arrived, ${per(totals.blocked)} blocked, ${per(totals.deaths)} of ${roster.length} died`);
-console.log(`  crew work per run: ${per(totals.firesFought)} fires put out, ${per(totals.patches)} breaches patched, ${per(totals.repairs)} system bars repaired`);
-console.log(`  air:               rooms were unbreathable ${((100 * totals.airlessTicks) / (runs * ticks * sim0Rooms)).toFixed(0)}% of room-time`);
-console.log(`  pauses per run:    ${per(totals.pauses)} (state checked every paused frame)`);
-console.log(`  wall time:         ${seconds.toFixed(2)}s`);
+const out = [];
+out.push('Cold Manifest autoplay');
+out.push(`  runs:              ${runs} (seeds ${baseSeed}-1 to ${baseSeed}-${runs}), each played as chaos and as a scenario, each twice`);
+out.push(`  ship:              ${ship.name}, crew of ${roster.length}, ${lines.length} AI lines`);
+out.push(`  crashed or bad:    ${failures.length}`);
+out.push('');
+out.push(`Chaos (${minutes} game minutes each, ${ticks} ticks): a bot doing everything at random`);
+out.push(`  orders per run:    ${per(totals.orders)} given, ${per(totals.refused)} refused up front, ${per(totals.dropped)} dropped`);
+out.push(`  door moves:        ${per(totals.doorMoves)} completed per run`);
+out.push(`  power per run:     ${per(totals.powerMoves)} bars routed, ${per(totals.brownouts)} brownouts, door control dark ${((100 * totals.darkTicks) / (runs * ticks)).toFixed(0)}% of the time`);
+out.push(`  hazards per run:   ${per(totals.fires)} fires lit, ${per(totals.spreads)} spread, ${per(totals.firesOut)} went out, ${per(totals.scorched)} system bars burned, ${per(totals.jettisons)} rooms jettisoned`);
+out.push(`  crew per run:      ${per(totals.moves)} sent, ${per(totals.arrivals)} arrived, ${per(totals.blocked)} blocked, ${per(totals.deaths)} of ${roster.length} died`);
+out.push(`  crew work per run: ${per(totals.firesFought)} fires put out, ${per(totals.patches)} breaches patched, ${per(totals.repairs)} system bars repaired`);
+out.push(`  air:               rooms were unbreathable ${((100 * totals.airlessTicks) / (runs * ticks * ship.rooms.length)).toFixed(0)}% of room-time`);
+out.push(`  AI lines per run:  ${per(totals.said)} (about one every ${totals.said ? Math.round((runs * minutes * 60) / totals.said) : 0} seconds)`);
+out.push(`  pauses per run:    ${per(totals.pauses)} (state checked every paused frame)`);
+out.push('');
+out.push(`Hazard scenarios (${SCENARIO_MINUTES} game minutes each): fires and breaches at once, and a bot trying to save the ship`);
+out.push(`  completed:         ${scenarios.length} of ${runs}`);
+out.push(`  emergencies:       ${mean(scenarios.map((s) => s.fires)).toFixed(1)} fires and ${mean(scenarios.map((s) => s.breaches)).toFixed(1)} breaches at the start; at worst ${mean(scenarios.map((s) => s.worstFires)).toFixed(1)} rooms burning at once`);
+out.push(`  ship saved:        ${cleared.length} of ${scenarios.length} (${pct(cleared.length, scenarios.length)}) ended with no fire and no breach`);
+out.push(`  time to clear:     median ${clearTimes.length ? Math.round(clearTimes[Math.floor(clearTimes.length / 2)]) : 'n/a'}s, slowest ${clearTimes.length ? Math.round(clearTimes.at(-1)) : 'n/a'}s`);
+out.push(`  crew alive at end: ${mean(scenarios.map((s) => s.alive)).toFixed(2)} of ${roster.length} on average; everyone lived in ${pct(scenarios.filter((s) => s.alive === roster.length).length, scenarios.length)} of runs, nobody in ${pct(scenarios.filter((s) => s.alive === 0).length, scenarios.length)}`);
+out.push(`  system damage:     ${mean(scenarios.map((s) => s.damage)).toFixed(1)} bars left broken at the end`);
+out.push(`  AI lines:          ${mean(scenarios.map((s) => s.said)).toFixed(1)} per scenario`);
+out.push('');
+out.push(`  wall time:         ${seconds.toFixed(2)}s`);
+const verdict = failures.length
+  ? `FAILED: ${failures.length} problem(s).`
+  : 'PASSED: no crashes, no stuck doors, no crew stuck on a path, power never over supply, no fire without air, nothing moved while paused, every run replays from its seed.';
+
+console.log(out.join('\n'));
+const reportPath = option('report', null);
+if (reportPath) {
+  const body = ['# Autoplay report', '', `Command: \`node tools/autoplay.js --runs ${runs} --minutes ${minutes} --seed ${baseSeed}\``, '', '```', ...out.filter((line) => !line.includes('wall time')), '```', '', verdict, ...failures.slice(0, 20).map((f) => `- seed ${f.seed}: ${f.reason}`), ''];
+  writeFileSync(reportPath, body.join('\n'));
+  console.log(`\nReport written to ${reportPath}`);
+}
 
 if (failures.length) {
   for (const failure of failures.slice(0, 20)) console.error(`FAILED seed ${failure.seed}: ${failure.reason}`);
   if (failures.length > 20) console.error(`...and ${failures.length - 20} more`);
   process.exit(1);
 }
-console.log('\nPASSED: no crashes, no stuck doors, no crew stuck on a path, power never over supply, no fire without air, nothing moved while paused, every run replays from its seed.');
+console.log(`\n${verdict}`);

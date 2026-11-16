@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Browser tests for the ship view, the clock, pause and the input layer, on an emulated iPad
+// Browser tests for the ship view, the clock, pause, the AI's voice, sound and the input layer, on an emulated iPad
 // (touch) and on a desktop (mouse and keyboard). Run with: npm run test:e2e
 //
 // Builds nothing itself: run `npm run build` first. Serves dist/ with
@@ -14,7 +14,7 @@ const require = createRequire(import.meta.url);
 const { chromium, devices } = require('playwright');
 
 const PORT = 4179;
-const URL = `http://localhost:${PORT}/?seed=E2E-TEST`;
+const URL = `http://localhost:${PORT}/?seed=E2E-TEST&autopause=0`;
 
 const results = [];
 async function check(name, fn) {
@@ -559,11 +559,108 @@ async function desktopTests(browser) {
   await context.close();
 }
 
+async function voiceTests(browser) {
+  console.log('iPad: voice, sound and auto-pause');
+  const context = await browser.newContext({ ...devices['iPad (gen 7) landscape'] });
+  const page = await context.newPage();
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  // No ?autopause here: a touch device gets auto-pause by default.
+  await page.goto(`http://localhost:${PORT}/?seed=E2E-VOICE`);
+  await page.waitForFunction(() => window.coldManifest?.machine.state === 'title');
+
+  await check('sound is locked until the first tap, then the ship hum starts', async () => {
+    assert.equal(await game(page, () => window.coldManifest.audio.unlocked), false);
+    await page.tap('#btn-ship');
+    await page.waitForFunction(() => window.coldManifest.machine.state === 'ship');
+    await page.waitForFunction(() => window.coldManifest.audio.unlocked, null, { timeout: 3000 });
+    await page.waitForFunction(() => window.coldManifest.audio.loops.includes('hum'), null, { timeout: 3000 });
+  });
+
+  await check('the AI greets the captain, typed out, and the line lands in her log', async () => {
+    await page.waitForFunction(() => window.coldManifest.sim.state.ai.log.length === 1, null, { timeout: 3000 });
+    const line = await game(page, () => window.coldManifest.sim.state.ai.log[0]);
+    assert.equal(line.category, 'greeting');
+    const early = await page.textContent('#ai-text');
+    assert.ok(line.text.startsWith(early), 'the box shows the start of the line while it types');
+    await page.waitForFunction((text) => document.querySelector('#ai-text').textContent === text, line.text, { timeout: 4000 });
+    assert.ok((await game(page, () => window.coldManifest.audio.stats.played.blip ?? 0)) > 0, 'her voice blips as it types');
+    await page.tap('#btn-log');
+    assert.match(await page.textContent('#ailog'), new RegExp(`00:00\\s+${line.text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+    await page.tap('#btn-log');
+    assert.equal(await page.isHidden('#sheet'), true);
+  });
+
+  await check('auto-pause: a fire stops the clock and the pause button says why', async () => {
+    assert.equal(await paused(page), false);
+    await game(page, () => window.coldManifest.sim.enqueue({ type: 'debug.room', room: 'weapons', set: { fire: 0.3 } }));
+    await page.waitForFunction(() => window.coldManifest.clock.paused, null, { timeout: 2000 });
+    assert.equal(await page.textContent('#pause-note'), 'Fire in Weapons');
+    const at = await tick(page);
+    await sleep(300);
+    assert.equal(await tick(page), at, 'and nothing moves until the captain is ready');
+    await page.tap('#btn-pause');
+    await page.waitForFunction(() => document.querySelector('#pause-note').textContent === 'Space bar');
+    await page.waitForFunction(() => window.coldManifest.sim.state.ai.log.some((l) => l.category === 'hazard'), null, { timeout: 8000 });
+    assert.ok((await game(page, () => window.coldManifest.audio.stats.played.alarm ?? 0)) > 0, 'the alarm sounded');
+  });
+
+  await check('settings: auto-pause on fire can be switched off, and the choice is kept', async () => {
+    await page.tap('#btn-settings');
+    assert.equal(await page.getAttribute('#set-pause-fire', 'aria-pressed'), 'true');
+    await page.tap('#set-pause-fire');
+    assert.equal(await page.getAttribute('#set-pause-fire', 'aria-pressed'), 'false');
+    await page.tap('#btn-settings');
+    await game(page, () => window.coldManifest.sim.enqueue({ type: 'debug.room', room: 'sensors', set: { fire: 0.3 } }));
+    await page.waitForFunction(() => window.coldManifest.sim.state.rooms.sensors.fire > 0.3, null, { timeout: 2000 });
+    assert.equal(await paused(page), false, 'no pause this time');
+    const saved = await game(page, () => JSON.parse(window.localStorage.getItem('cold-manifest.settings.v1')));
+    assert.deepEqual(saved.autoPause, { fire: false, breach: true, death: true });
+  });
+
+  await check('settings: sound off silences everything, sound on brings the hum back', async () => {
+    await page.tap('#btn-settings');
+    await page.tap('#set-sound');
+    assert.equal(await game(page, () => window.coldManifest.audio.muted), true);
+    assert.deepEqual(await game(page, () => window.coldManifest.audio.loops), []);
+    const before = await game(page, () => window.coldManifest.audio.stats.played.click ?? 0);
+    await page.tap('#set-sound');
+    assert.equal(await game(page, () => window.coldManifest.audio.muted), false);
+    assert.deepEqual(await game(page, () => window.coldManifest.audio.loops), ['hum']);
+    await page.tap('#btn-settings');
+    assert.ok((await game(page, () => window.coldManifest.audio.stats.played.click ?? 0)) > before, 'buttons click again');
+  });
+
+  await check('the ship still fits between the bars with the text box in place', async () => {
+    const all = await game(page, () => window.coldManifest.shipView.debug.targets());
+    const top = (await page.locator('.shipbar').boundingBox());
+    const dock = (await page.locator('#aibox').boundingBox()).y;
+    for (const t of all.filter((x) => x.kind === 'room')) assert.ok(t.y >= top.y + top.height && t.y + t.h <= dock, `${t.id} runs under a bar`);
+  });
+
+  await check('every control is at least 44px tall and wide, sheets included', async () => {
+    await page.tap('#btn-settings');
+    const small = await page.$$eval('.ship .btn', (nodes) => nodes.map((n) => ({ id: n.id, r: n.getBoundingClientRect() })).filter((n) => n.r.width > 0 && (n.r.width < 44 || n.r.height < 44)).map((n) => `${n.id} ${Math.round(n.r.width)}x${Math.round(n.r.height)}`));
+    assert.deepEqual(small, []);
+    await page.tap('#btn-settings');
+  });
+
+  await check('a reload keeps the settings', async () => {
+    await page.reload();
+    await page.waitForFunction(() => window.coldManifest?.machine.state === 'title');
+    assert.deepEqual(await game(page, () => window.coldManifest.settings.values.autoPause), { fire: false, breach: true, death: true });
+  });
+
+  await check('no page errors', async () => assert.deepEqual(errors, []));
+  await context.close();
+}
+
 const server = await startServer();
 const browser = await chromium.launch(process.env.PW_CHROMIUM ? { executablePath: process.env.PW_CHROMIUM } : {});
 try {
   await touchTests(browser);
   await desktopTests(browser);
+  await voiceTests(browser);
 } finally {
   await browser.close();
   server.kill();
