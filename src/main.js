@@ -20,7 +20,7 @@ import { AUTO_PAUSE, createSettings } from './ui/settings.js';
 import { createShipView } from './ui/shipview.js';
 import { renderStub, renderTitle } from './ui/title.js';
 
-const VERSION = '0.12.0';
+const VERSION = '0.17.0';
 
 const params = new URLSearchParams(window.location.search);
 const flags = {
@@ -100,6 +100,8 @@ const AUTO_PAUSE_TEXT = {
   fire: (event) => `Fire in ${sim.layout.room(event.room).name}`,
   breach: (event) => `Breach in ${sim.layout.room(event.room).name}`,
   death: (event) => `${findCrew(sim, event.crew)?.member.name ?? 'Someone'} is dead`,
+  objection: (event) => (event.kind === 'refuse' ? 'Margo refuses' : 'Margo objects'),
+  refusal: (event) => `${findCrew(sim, event.crew)?.member.name ?? 'Someone'} refuses`,
 };
 for (const item of AUTO_PAUSE) {
   const trip = (event) => {
@@ -199,6 +201,7 @@ function frame(now) {
         `fires  ${Object.values(sim.state.rooms).filter((r) => r.fire > 0).length}`,
         `fight  ${sim.state.fight ? `${sim.state.fight.enemy.ship} ${sim.state.fight.enemy.hull.points}hp, ${sim.state.fight.shots.length} shots` : 'none'}`,
         `margo  ${sim.state.ai.said} said, ${sim.state.ai.queue.length} waiting`,
+        `trust  ${Math.round(sim.state.ai.trust)}, refused ${sim.state.ai.refusals}${sim.state.ai.objection ? `, holding ${sim.state.ai.objection.command.type}` : ''}`,
         `sound  ${audio.muted ? 'off' : audio.unlocked ? 'on' : 'locked'}`,
       ].join('\n');
     }

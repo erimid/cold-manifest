@@ -2,8 +2,9 @@
 // (brief §6, §8). DOM-free.
 //
 // S1.6 crew are placeholders with a name, a position, health and a suit flag.
-// Skills, traits, needs, stress and memory arrive in Stage 4 and hang off the
-// same objects.
+// S2.10 gave them a short memory and a nerve for the dark (memory.js), and
+// with those the right to refuse an order. Skills, traits, needs and stress
+// arrive in Stage 4 and hang off the same objects.
 //
 // A crew member is sent to a room and walks there through doors, opening the
 // shut ones (and closing behind themselves the ones they opened). Once in a
@@ -18,6 +19,7 @@
 // nothing. Crossing between ships is boarding.js.
 
 import { crewEmit, harmCrew } from './atmosphere.js';
+import { refusalOf } from './memory.js';
 import { isPowered } from './power.js';
 import { SPACE, SYSTEMS } from './systems.js';
 
@@ -95,6 +97,9 @@ export function newCrewMember(layout, { id, name, engineer = false }, roomId, in
     wreck: 0, // 0 to 1 progress toward breaking the next bar of the system they are sabotaging
     carry: null, // the crate in their arms (hold.js)
     job: null, // a crate job under way: { kind, crate, to, slot, phase, t, since } (hold.js)
+    memories: [], // what they remember: { type, tick, room, who, dark } (memory.js)
+    dread: 0, // 0 to 1: how the dark is wearing on them (memory.js)
+    lampUntil: 0, // the tick until which they will not sit in the dark again
   };
 }
 
@@ -264,6 +269,12 @@ export const CREW_COMMANDS = {
     },
     apply(sim, cmd) {
       const member = sim.state.crew[cmd.crew];
+      // They may say no (S2.10): a memory can keep them out of a room. Nothing else about them changes.
+      const no = refusalOf(sim, member, cmd.room);
+      if (no) {
+        crewEmit(sim, member, 'crew.refused', { crew: cmd.crew, room: cmd.room, rule: no.rule, memory: no.memory.type, reason: no.reason, tick: sim.state.tick });
+        return;
+      }
       letGo(sim, member); // a new order: whatever they were carrying is set down here
       member.goal = cmd.room;
       member.path = planPath(sim, member, cmd.room);

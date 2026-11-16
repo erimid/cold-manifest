@@ -9,7 +9,9 @@
         "open": ["I'll crack it.", "Breaking the seal.", "Opening it up."],
         "carry": ["Taking it to {room}.", "Lifting. {room}, you said.", "Heavy. Moving it."],
         "jettison": ["Spacing it. Your call.", "Out the lock it goes.", "Dumping it."],
-        "load": ["Fetching rounds.", "Going for ammo.", "I'll feed the gun."]
+        "load": ["Fetching rounds.", "Going for ammo.", "I'll feed the gun."],
+        "refuse": ["No, Captain. Not in there.", "I'm not doing that. Ask me why later.", "Negative. Send someone else, or send nobody."],
+        "lamp": ["Lamp's on. I'll answer for it.", "I need the light. Sorry, Captain.", "Lights. I can't work blind in here."]
       }
     },
     {
@@ -22,7 +24,9 @@
         "open": ["Somebody sealed this for a reason.", "Cutting the seal.", "Fine. Let's see."],
         "carry": ["My back, your crate. {room}.", "Hauling it to {room}.", "Got it. Slowly."],
         "jettison": ["Hope that wasn't paid for.", "Cycling the lock.", "Gone in a minute."],
-        "load": ["Rounds. Right.", "I'll fetch a crate.", "Feeding the thrower."]
+        "load": ["Rounds. Right.", "I'll fetch a crate.", "Feeding the thrower."],
+        "refuse": ["No. Not a chance.", "You go in there, then.", "I remember the last time. No."],
+        "lamp": ["I'm putting the lamp on. Dock my pay.", "Can't see my own hands. Light's on.", "Something moved. Lamp's on. Don't start."]
       }
     },
     {
@@ -34,7 +38,9 @@
         "open": ["I'll have a look inside.", "Opening it.", "Let's see what we're carrying."],
         "carry": ["Carrying it to {room}.", "I've got it. {room}.", "Moving the crate."],
         "jettison": ["Taking it to the lock.", "Understood. It goes.", "Spacing it now."],
-        "load": ["Bringing rounds.", "Ammo run. Going.", "I'll load it."]
+        "load": ["Bringing rounds.", "Ammo run. Going.", "I'll load it."],
+        "refuse": ["I can't do that, Captain.", "Not that room. Not yet.", "I'm sorry. No."],
+        "lamp": ["I've put the light on. I had to.", "Lamp on. I'll take it off when I can.", "I need the light for a minute."]
       }
     }
   ]

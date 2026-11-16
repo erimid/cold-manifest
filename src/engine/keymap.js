@@ -3,7 +3,8 @@
 // Number keys pick crew (S1.6). The Q row routes power: the key adds a bar to
 // that slot of the power panel, Shift with the key takes one back.
 // The A row picks a weapon to aim (S2.1). B braces the shields (S2.8). P opens
-// or folds the breaker board (S2.9).
+// or folds the breaker board (S2.9). O overrides an order Margo is holding,
+// and Escape stands down from it (S2.10).
 
 export const KEYMAP = Object.freeze({
   Space: 'pause',
@@ -30,4 +31,5 @@ export const KEYMAP = Object.freeze({
   KeyF: 'weapon-4',
   KeyB: 'brace',
   KeyP: 'breakers',
+  KeyO: 'override',
 });

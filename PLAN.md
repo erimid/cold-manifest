@@ -126,7 +126,7 @@ Session counts are estimates. A stage is done when its exit checks pass, not whe
 | S5.1 Voice and tooling | (Personality file and 50-line sample are done in S2.10; review them here.) AI personality file (`content/ai-lines/_personality.md`) for M.A.R.G.O. ("Margo"): history, voice rules, do's and don'ts, 50 sample lines across categories. Line schema (id, category, conditions, weight, slots, priority). Slot system with fallbacks. Near-duplicate checker that treats slot variants as one line (slot-normalized n-gram similarity plus edit distance). | **Eric approves the voice sample before any bulk writing.** Checker flags a planted near-duplicate. |
 | S5.2 Selector | Triggers from bus events, condition matching, weights, no-repeat tracking (hard rule: never within a run; prefer unheard, then heard longest ago, across the meta-profile), priority queue with stale-drop, calm-period pacing (one line per 30 to 90 seconds), no talking over important events. When nothing eligible is left, stay silent rather than repeat. | Unit tests for every selection rule. |
 | S5.3 Trust and behavior | Builds on S2.10 (trust, risk detector, arguing, refusals and override already exist): AI opinions of each crew member; override effects on crew opinion; withholding and lying hooks (low trust, protecting a liked crew member, damaged core); glitch rendering for a damaged core. | Each behavior reachable via debug panel and seen in bot runs. |
-| S5.4 to S5.7 Lines, 1,000 | Four writing sessions of about 250 lines each, in batches of 50 to 100 per category, running the checker after every batch. Allocation in §3. Remove all Stage 1 placeholder lines. | Checker shows the S5 column of §3 met, zero near-duplicates, zero placeholders. |
+| S5.4 to S5.7 Lines, 1,000 (about 150 under the 500 cap, D-100; likely one or two sessions) | Four writing sessions of about 250 lines each, in batches of 50 to 100 per category, running the checker after every batch. Allocation in §3. Remove all Stage 1 placeholder lines. | Checker shows the S5 column of §3 met, zero near-duplicates, zero placeholders. |
 | S5.8 Bot v5 | Bot reports repeated AI lines within a run (must be 0), across runs, and lines per minute in calm vs crisis. | Stage exit checks. |
 
 **Exit checks:** green gate; 100 runs with zero in-run repeats; calm-period AI frequency inside 30 to 90 seconds on average.
@@ -253,6 +253,8 @@ Stage 1 to 4 use about 40 placeholder lines flagged `placeholder: true`. They do
 | **Total** | **3,280** | **1,000** | **250** | **220** | **120** | **150** | **1,540** |
 
 The category minimums add up to 3,280, so meeting every category also clears the 3,000-line floor. Lines that differ only in slots count once.
+
+**Capped at 500 to start (Eric, 2026-11-16, D-100).** The table above is the brief's. Until Eric lifts the cap, every figure in it is scaled by 500 / 3,280: the per-category targets the checker enforces are in `src/ai/categories.js` (for example idle 40, creature 40, order confirmations 30, arguments 23, refusals 9, overrides 9), and each stage writes about 15% of its column (Stage 5 about 150 lines, Stage 6 about 40, Stage 10 about 235). The 50-line voice sample from S2.10 already counts toward the 500.
 
 ### Other content by stage
 

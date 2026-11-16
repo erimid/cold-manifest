@@ -25,10 +25,12 @@
 // room), jettison, or load the guns. Each goes to the crew member selected
 // last, or the nearest free hand.
 
+import { REFUSALS_PER_RUN, trustWord } from '../ai/judgement.js';
 import { pickTarget } from '../engine/hit.js';
 import { DEBUG_ACTIONS, OUTCOMES, OFFER_SECONDS, braced, bribePrice, capacitorOf, capacity, chargeOf, enemyOf, findCrew, fixOf, offerText, ourCrew, talkChance, whyNoBrace, whyNoJump } from '../sim/combat.js';
 import { describeTask } from '../sim/crew.js';
 import { describeJob, magazineOf, pickHand, roundsInHold } from '../sim/hold.js';
+import { nerveWord, topMemory } from '../sim/memory.js';
 import { POWERED, aiCoreStatus, free, lightsDraw, litRooms, supply, usable } from '../sim/power.js';
 import { contactView, roomView, sensorsUp, signature, unseen } from '../sim/senses.js';
 import { SPACE, SYSTEMS } from '../sim/systems.js';
@@ -43,6 +45,8 @@ const POWER_KEYS = 'QWERTYUI';
 const WEAPON_KEYS = 'ASDF';
 /** How long a crew member's intercom reply stays on the monitor, in real milliseconds. */
 const INTERCOM_MS = 4000;
+/** How long a crew member's reason for refusing stays in the status panel: long enough to read a whole sentence. */
+const REFUSAL_MS = 7000;
 /** How long a shot's result stays on screen, in seconds of game time. */
 const IMPACT_SECONDS = 0.9;
 const IMPACT_TEXT = { hit: 'HIT', shield: 'SHIELD', miss: 'MISS' };
@@ -257,6 +261,35 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
     if (sheet === 'log' && logShown !== last.n) drawLog();
   }
 
+  /** Show what one of our crew just said over the intercom. */
+  function hear(event, roomId) {
+    const found = findCrew(sim, event.crew);
+    if (!found) return;
+    const said = intercom.reply(event, found.ship.layout.room(roomId)?.name ?? 'there');
+    if (!said) return;
+    heard = { name: found.member.name, text: said.text, at: performance.now() };
+    nodes.intercom.replaceChildren(el('span', { class: 'stencil intercom__who' }, `Intercom · ${heard.name}`), el('span', { class: 'intercom__text', id: 'intercom-text' }, said.text));
+    nodes.intercom.hidden = false;
+    audio?.play('blip');
+  }
+
+  /** An order Margo is holding (judgement.js): her box turns red and offers the captain's two answers, one tap each. */
+  function updateObjection() {
+    const held = sim.state.ai.objection;
+    if (nodes.objection.hidden === Boolean(held)) {
+      nodes.objection.hidden = !held;
+      nodes.aiButtons.hidden = Boolean(held);
+      nodes.ai.classList.toggle('is-objecting', Boolean(held));
+    }
+    if (!held) return setText(nodes.aiName, 'M.A.R.G.O.');
+    const left = Math.max(0, Math.ceil((held.expires - sim.state.tick) * TICK_SECONDS));
+    setText(nodes.aiName, `M.A.R.G.O. ${held.kind === 'refuse' ? 'refuses' : 'objects'} · holding your order ${left}s`);
+    setText(nodes.override, held.kind === 'refuse' ? "Captain's override" : 'Do it anyway');
+    const answered = sim.state.commands.some((command) => command.type === 'captain.override' || command.type === 'captain.standDown');
+    nodes.override.disabled = answered;
+    nodes.standDown.disabled = answered;
+  }
+
   function drawLog() {
     const { log } = sim.state.ai;
     logShown = log.at(-1)?.n ?? 0;
@@ -295,6 +328,8 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
   /** Debug only: start a fight with any enemy, and push one toward each ending (brief §7). */
   function drawDebug() {
     const fight = sim.state.fight;
+    // Whose head the memory buttons write into: whoever was picked last, if they are aboard and alive.
+    const mind = Object.values(sim.state.crew).find((member) => member.id === lastHand && member.alive && member.owner === 'player') ?? Object.values(sim.state.crew).find((member) => member.alive && member.owner === 'player') ?? null;
     const act = (fn) => () => {
       fn();
       openSheet('debug');
@@ -309,6 +344,24 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
       ),
       el('div', { class: 'stencil sheet__sub' }, 'Push the fight to an ending'),
       el('div', { class: 'sheet__grid' }, DEBUG_ACTIONS.map((action) => button(`btn-dbg-end-${action}`, DEBUG_LABELS[action], act(() => order({ type: 'debug.combat', action })), 'btn--debug'))),
+      el('div', { class: 'stencil sheet__sub', id: 'dbg-trust' }, `Margo: trust ${Math.round(sim.state.ai.trust)} (${trustWord(sim.state.ai.trust)}), refused ${sim.state.ai.refusals} of ${REFUSALS_PER_RUN}`),
+      el(
+        'div',
+        { class: 'sheet__grid' },
+        button('btn-dbg-trust-down', 'Trust -20', act(() => order({ type: 'debug.ai', trust: Math.max(0, sim.state.ai.trust - 20) })), 'btn--debug'),
+        button('btn-dbg-trust-up', 'Trust +20', act(() => order({ type: 'debug.ai', trust: Math.min(100, sim.state.ai.trust + 20) })), 'btn--debug'),
+        button('btn-dbg-refusals', 'Refusals back', act(() => order({ type: 'debug.ai', refusals: 0 })), 'btn--debug'),
+      ),
+      mind && el('div', { class: 'stencil sheet__sub' }, `Memories for ${mind.name}${selected?.kind === 'room' ? `, about ${roomName(selected.id)}` : ''}`),
+      mind &&
+        el(
+          'div',
+          { class: 'sheet__grid' },
+          ...[['death', 'A death there'], ['burn', 'Burns'], ['choke', 'No air'], ['scare', 'Scared of the dark'], ['override', 'Overridden']].map(([memory, label]) =>
+            button(`btn-dbg-mem-${memory}`, label, act(() => order({ type: 'debug.memory', crew: mind.id, memory, room: selected?.kind === 'room' ? selected.id : mind.room })), 'btn--debug'),
+          ),
+          button('btn-dbg-dread', 'Nerves on edge', act(() => order({ type: 'debug.memory', crew: mind.id, dread: 0.97 })), 'btn--debug'),
+        ),
       el('div', { class: 'stencil sheet__sub' }, 'View'),
       el('div', { class: 'sheet__grid' }, button('btn-crawlways', showCrawlways ? 'Hide crawlways' : 'Show crawlways', () => {
         showCrawlways = !showCrawlways;
@@ -917,7 +970,8 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
     panel = null;
     if (selectedCrew) {
       const { member } = findCrew(sim, selectedCrew);
-      const stats = { health: stat('Health'), where: stat('In'), doing: stat('Doing'), suit: stat('Suit') };
+      const stats = { health: stat('Health'), where: stat('In'), doing: stat('Doing'), suit: stat('Suit'), nerve: stat('Nerve') };
+      const memory = el('span', { class: 'status__hint status__hint--inline', id: 'crew-memory' });
       const suit = button('btn-suit', 'Suit up', () => order({ type: 'crew.suit', crew: member.id, on: !findCrew(sim, member.id).member.suit }));
       const note = el('span', { class: 'status__note' });
       nodes.status.replaceChildren(
@@ -929,9 +983,10 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
           suit,
           debug && button('btn-dbg-hurt', 'Hurt', () => order({ type: 'debug.crew', crew: member.id, health: Math.max(0.05, findCrew(sim, member.id).member.health - 0.3) }), 'btn--debug'),
           el('span', { class: 'status__hint status__hint--inline', id: 'crew-hint' }, sim.state.fight ? 'Tap a room to send them there, or a room of theirs to board.' : 'Tap a room to send them there.'),
+          memory,
         ),
       );
-      panel = { kind: 'crew', id: member.id, stats, suit, note };
+      panel = { kind: 'crew', id: member.id, stats, suit, note, memory };
       updatePanel();
       return;
     }
@@ -1191,6 +1246,10 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
       setText(panel.stats.suit.value, member.suit ? 'on (slower)' : 'off');
       setText(panel.suit, member.suit ? 'Suit off' : 'Suit up');
       panel.suit.disabled = !member.alive;
+      setText(panel.stats.nerve.value, member.alive ? nerveWord(member) : 'none');
+      panel.stats.nerve.node.classList.toggle('is-alarm', member.alive && member.dread >= 0.66);
+      const remembered = member.alive ? topMemory(ship, member) : null;
+      setText(panel.memory, remembered ? `Remembers ${remembered}.` : '');
       setText(panel.note, queuedFor('crew', panel.id) ? 'Order queued' : refusalText());
       return;
     }
@@ -1330,8 +1389,13 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
       openBoard(!power.open, { byHand: true });
       return;
     }
+    if (action === 'override') {
+      if (sim.state.ai.objection) order({ type: 'captain.override' });
+      return;
+    }
     if (action !== 'back') return;
-    if (sheet) openSheet(sheet);
+    if (sim.state.ai.objection) order({ type: 'captain.standDown' });
+    else if (sheet) openSheet(sheet);
     else if (movingCrate) movingCrate = null;
     else if (selectedWeapon !== null) selectWeapon(null);
     else if (selectedCrew) selectCrew(null);
@@ -1351,14 +1415,21 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
       aiText: el('span', { class: 'aibox__text', id: 'ai-text' }),
       sheet: el('div', { class: 'panel sheet', id: 'sheet', hidden: true }),
       intercom: el('div', { class: 'intercom', id: 'intercom', hidden: true, 'aria-live': 'polite' }),
+      aiName: el('span', { class: 'stencil aibox__name', id: 'ai-name' }, 'M.A.R.G.O.'),
     };
+    // The captain's two answers when she holds an order: shown in her box, in place of Log and Settings, only while she does.
+    nodes.override = button('btn-override', 'Do it anyway', () => order({ type: 'captain.override' }), 'btn--danger');
+    nodes.standDown = button('btn-stand-down', 'Stand down', () => order({ type: 'captain.standDown' }));
+    nodes.objection = el('div', { class: 'aibox__buttons aibox__objection', id: 'objection', hidden: true }, nodes.standDown, nodes.override);
+    nodes.aiButtons = el('div', { class: 'aibox__buttons' }, button('btn-log', 'Log', () => openSheet('log')), settings && button('btn-settings', 'Settings', () => openSheet('settings')));
     // Margo: her face on the monitor, and what she is saying (D-073).
     nodes.ai = el(
       'div',
       { class: 'panel aibox', id: 'aibox' },
       el('div', { class: 'margo-face', 'aria-hidden': 'true' }, el('div', { class: 'margo-face__eye' }, el('div', { class: 'margo-face__iris' })), el('div', { class: 'margo-face__mouth' })),
-      el('div', { class: 'aibox__body' }, el('span', { class: 'stencil aibox__name' }, 'M.A.R.G.O.'), nodes.aiText),
-      el('div', { class: 'aibox__buttons' }, button('btn-log', 'Log', () => openSheet('log')), settings && button('btn-settings', 'Settings', () => openSheet('settings'))),
+      el('div', { class: 'aibox__body' }, nodes.aiName, nodes.aiText),
+      nodes.objection,
+      nodes.aiButtons,
     );
     nodes.pause = el('button', { class: 'btn btn--pause', type: 'button', id: 'btn-pause', press: () => clock.toggle() }, nodes.pauseLabel, nodes.pauseNote);
     nodes.top = el(
@@ -1417,16 +1488,15 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
         // A fight opens the breaker board: power is what you play with in one (D-095).
         sim.events.on('fight.started', () => openBoard(true, { byFight: true })),
         // Our crew answer every order over the intercom (D-094).
-        sim.events.on('crew.ordered', (event) => {
-          const found = findCrew(sim, event.crew);
-          if (!found) return;
-          const said = intercom.reply(event, found.ship.layout.room(event.room)?.name ?? 'there');
-          if (!said) return;
-          heard = { name: found.member.name, text: said.text, at: performance.now() };
-          nodes.intercom.replaceChildren(el('span', { class: 'stencil intercom__who' }, `Intercom · ${heard.name}`), el('span', { class: 'intercom__text', id: 'intercom-text' }, said.text));
-          nodes.intercom.hidden = false;
-          audio?.play('blip');
+        sim.events.on('crew.ordered', (event) => hear(event, event.room)),
+        // They can say no (S2.10): their own words on the intercom, and the reason, naming what they remember, in the panel.
+        sim.events.on('crew.refused', (event) => {
+          hear(event, event.room);
+          refusal = { text: event.reason, until: performance.now() + REFUSAL_MS };
+          audio?.play('deny');
         }),
+        // And they put lamps back on when the dark gets too much.
+        sim.events.on('crew.lit', (event) => hear({ ...event, lamp: true }, event.room)),
         sim.events.on('shot.resolved', (event) => {
           impacts.push({ side: event.side, room: event.room, result: event.result, damage: event.damage, effects: event.effects, blind: event.blind, tick: event.tick });
           if (event.side === 'enemy' && event.result === 'hit') shake = { tick: event.tick, strength: SHAKE_BASE + SHAKE_PER_DAMAGE * event.damage };
@@ -1500,6 +1570,7 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
       updatePower();
       updateRoster();
       updateVoice();
+      updateObjection();
     },
     /** Say why the game just paused itself. Shown on the pause button until play resumes. */
     announce(text) {

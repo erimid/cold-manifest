@@ -3,6 +3,7 @@ import { test } from 'node:test';
 
 import { IDLE_MAX_SECONDS, LOG_MAX, QUEUE_MAX, TRIGGERS, candidates, requestLine } from '../src/ai/voice.js';
 import { AI_CATEGORIES } from '../src/ai/categories.js';
+import { RISKS } from '../src/ai/judgement.js';
 import { TICK_RATE, checkInvariants } from '../src/sim/sim.js';
 import { LINES, newCrewedSim, newTalkingSim } from './helpers.js';
 
@@ -15,17 +16,33 @@ const give = (sim, ...commands) => {
 };
 const said = (sim) => sim.state.ai.log.map((line) => line.category);
 
-test('there are about forty placeholder lines, all flagged, covering every trigger', () => {
-  assert.ok(LINES.length >= 40, `${LINES.length} lines`);
-  assert.ok(LINES.every((line) => line.placeholder === true));
+test('placeholder lines are flagged, the voice sample is 50 real lines, and every trigger has lines', () => {
+  const placeholders = LINES.filter((line) => line.id.startsWith('ph.'));
+  const sample = LINES.filter((line) => line.id.startsWith('vs.'));
+  assert.equal(placeholders.length + sample.length, LINES.length);
+  assert.ok(placeholders.length >= 40, `${placeholders.length} placeholder lines`);
+  assert.ok(placeholders.every((line) => line.placeholder === true));
+  assert.equal(sample.length, 50, 'the voice sample is 50 lines (S2.10)');
+  assert.ok(sample.every((line) => line.placeholder === undefined), 'sample lines are real: they count toward coverage');
   const known = new Set(AI_CATEGORIES.map((c) => c.id));
   for (const [trigger, rule] of Object.entries(TRIGGERS)) {
     assert.ok(known.has(rule.category), `${trigger} uses a real category`);
-    const fits = candidates(LINES, { trigger, slots: { crew_name: 'Ilse' } });
-    assert.ok(fits.length >= 3, `${trigger} has ${fits.length} lines`);
+    // Whatever the risk, she has at least three ways to say it.
+    // She only refuses the monstrous ones.
+    for (const risk of trigger === 'ai.refused' ? Object.keys(RISKS).filter((id) => RISKS[id].grave) : [null, ...Object.keys(RISKS)]) {
+      const fits = candidates(LINES, { trigger, risk, slots: { crew_name: 'Ilse', room: 'Medbay' } });
+      assert.ok(fits.length >= 3, `${trigger} has ${fits.length} lines${risk ? ` for ${risk}` : ''}`);
+    }
   }
-  // A line that names a trigger must name a real one.
-  for (const line of LINES) if (line.conditions?.trigger) assert.ok(TRIGGERS[line.conditions.trigger], line.id);
+  for (const line of LINES) {
+    // A line that names a trigger or a risk must name a real one.
+    if (line.conditions?.trigger) assert.ok(TRIGGERS[line.conditions.trigger], line.id);
+    for (const risk of [].concat(line.conditions?.risk ?? [])) assert.ok(RISKS[risk], `${line.id} names risk ${risk}`);
+  }
+  // Most of her lines are short (brief §9: most under 25 words).
+  const long = sample.filter((line) => line.text.split(/\s+/).length > 25);
+  assert.ok(long.length <= 3, `long sample lines: ${long.map((line) => line.id).join(', ')}`);
+  assert.ok(sample.every((line) => !line.text.includes('!')), 'she does not shout');
 });
 
 test('she greets the captain at the start of a run, then waits before idle talk', () => {

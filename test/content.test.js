@@ -13,11 +13,12 @@ test('the real content folder is valid', () => {
   assert.deepEqual(errors, []);
 });
 
-test('category targets match the brief', () => {
+test('category targets are the brief\'s, scaled to the 500-line cap (D-100)', () => {
   assert.equal(AI_CATEGORIES.length, 26);
-  assert.equal(AI_CATEGORIES.reduce((sum, c) => sum + c.target, 0), 3280);
+  assert.equal(AI_CATEGORIES.reduce((sum, c) => sum + c.target, 0), 500);
   assert.equal(new Set(AI_CATEGORIES.map((c) => c.id)).size, 26);
-  assert.deepEqual(CONTENT_TARGETS, { aiLines: 3000, scenes: 120, events: 150 });
+  assert.ok(AI_CATEGORIES.every((c) => Number.isInteger(c.target) && c.target >= 8));
+  assert.deepEqual(CONTENT_TARGETS, { aiLines: 500, scenes: 120, events: 150 });
 });
 
 test('registry returns items by type and id', () => {

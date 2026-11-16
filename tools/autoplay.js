@@ -82,7 +82,7 @@ function playRun(seed) {
   // The bot's own dice, kept apart from the sim's so its choices are not part of the game state.
   const bot = createRng(`bot:${seed}`);
   const endings = {}; // how chaos fights ended, by outcome
-  const stats = { orders: 0, refused: 0, dropped: 0, doorMoves: 0, pauses: 0, powerMoves: 0, brownouts: 0, darkTicks: 0, fires: 0, spreads: 0, firesOut: 0, scorched: 0, jettisons: 0, airlessTicks: 0, moves: 0, arrivals: 0, blocked: 0, deaths: 0, firesFought: 0, patches: 0, repairs: 0, fights: 0, shots: 0, hits: 0, absorbed: 0, missed: 0, kills: 0, boarded: 0, boardedUs: 0, melee: 0, captured: 0 };
+  const stats = { orders: 0, refused: 0, dropped: 0, doorMoves: 0, pauses: 0, powerMoves: 0, brownouts: 0, darkTicks: 0, fires: 0, spreads: 0, firesOut: 0, scorched: 0, jettisons: 0, airlessTicks: 0, moves: 0, arrivals: 0, blocked: 0, deaths: 0, firesFought: 0, patches: 0, repairs: 0, fights: 0, shots: 0, hits: 0, absorbed: 0, missed: 0, kills: 0, boarded: 0, boardedUs: 0, melee: 0, captured: 0, argued: 0, margoRefused: 0, overrides: 0, stoodDown: 0, lapsed: 0, crewRefused: 0, scares: 0, lamps: 0 };
   const watch = stuckWatch(sim);
   const movingSince = new Map(); // door id -> tick its last order was applied
 
@@ -117,6 +117,14 @@ function playRun(seed) {
   sim.events.on('crew.captured', () => (stats.captured += 1));
   sim.events.on('weapon.fired', () => (stats.shots += 1));
   sim.events.on('shot.resolved', ({ result }) => (stats[result === 'hit' ? 'hits' : result === 'shield' ? 'absorbed' : 'missed'] += 1));
+  sim.events.on('ai.argued', () => (stats.argued += 1));
+  sim.events.on('ai.refused', () => (stats.margoRefused += 1));
+  sim.events.on('captain.overrode', () => (stats.overrides += 1));
+  sim.events.on('captain.stood_down', () => (stats.stoodDown += 1));
+  sim.events.on('ai.objection.lapsed', () => (stats.lapsed += 1));
+  sim.events.on('crew.refused', () => (stats.crewRefused += 1));
+  sim.events.on('crew.spooked', () => (stats.scares += 1));
+  sim.events.on('crew.lit', () => (stats.lamps += 1));
   sim.events.on('fight.over', ({ outcome }) => {
     if (outcome === 'destroyed') stats.kills += 1;
     endings[outcome] = (endings[outcome] ?? 0) + 1;
@@ -238,6 +246,11 @@ function playRun(seed) {
       act();
       if (clock.paused) pausedHash = liveHash(); // the queue may have grown; that is allowed
     }
+    // Margo is holding an order (S2.10): sooner or later the bot overrides her or stands down. Now and then it lets it lapse.
+    if (sim.state.ai.objection && bot.chance(0.005)) {
+      order({ type: bot.chance(0.6) ? 'captain.override' : 'captain.standDown' });
+      if (clock.paused) pausedHash = liveHash();
+    }
 
     if (clock.paused) {
       const ran = clock.advance(TICK_SECONDS);
@@ -303,6 +316,41 @@ function stuckWatch(sim) {
   };
 }
 
+/**
+ * How a careful bot answers Margo and the crew (S2.10). When she argues about
+ * sending someone into a fire or an airless room, it stands down and has them
+ * suit up, which is what she wanted. When a crew member refuses over burns,
+ * thin air or an override, a suit answers that too; over the dark, it puts
+ * that room's lamp on; over a room where someone died, it sends them
+ * elsewhere. Returns what the bot now knows, and counts what happened.
+ */
+function carefulAnswers(sim, order) {
+  const mind = { suits: new Set(), avoid: new Map(), lit: new Map(), counts: { argued: 0, margoRefused: 0, overrides: 0, stoodDown: 0, crewRefused: 0, scares: 0, lamps: 0, byRule: {} } };
+  const { counts } = mind;
+  sim.events.on('ai.objected', (event) => {
+    counts[event.kind === 'refuse' ? 'margoRefused' : 'argued'] += 1;
+    if (event.risk === 'into_fire' || event.risk === 'into_vacuum') {
+      mind.suits.add(event.crew);
+      order({ type: 'captain.standDown' });
+    } else order({ type: 'captain.override' }); // nothing else it does should trip her; if something does, it means it
+  });
+  sim.events.on('captain.overrode', () => (counts.overrides += 1));
+  sim.events.on('captain.stood_down', () => (counts.stoodDown += 1));
+  sim.events.on('crew.spooked', () => (counts.scares += 1));
+  sim.events.on('crew.lit', () => (counts.lamps += 1));
+  sim.events.on('crew.refused', (event) => {
+    counts.crewRefused += 1;
+    counts.byRule[event.rule] = (counts.byRule[event.rule] ?? 0) + 1;
+    // The dark: a lamp for them, if there is power for one. If not, like a room where someone died, they are sent elsewhere.
+    if (event.rule === 'dark' && order({ type: 'room.lights', room: event.room, on: true })) mind.lit.set(event.room, sim.state.tick + 15 * TICK_RATE);
+    else if (event.rule === 'dark' || event.rule === 'grave') {
+      if (!mind.avoid.has(event.crew)) mind.avoid.set(event.crew, new Set());
+      mind.avoid.get(event.crew).add(event.room);
+    } else mind.suits.add(event.crew);
+  });
+  return mind;
+}
+
 const SCENARIO_MINUTES = 5;
 /** Under fire: how long the shooting goes on before the bot gets the rest of the five minutes to clean up. */
 const INCOMING_SECONDS = 120;
@@ -342,6 +390,9 @@ function playScenario(seed, { incoming = false } = {}) {
   const startPower = Object.fromEntries(Object.entries(sim.state.systems).map(([id, system]) => [id, system.power]));
 
   const order = (command) => !sim.whyNot(command) && sim.enqueue(command);
+  const mind = carefulAnswers(sim, order);
+  let sent = 0;
+  sim.events.on('crew.ordered', () => (sent += 1));
   const trouble = (room) => {
     const r = sim.state.rooms[room.id];
     const system = room.system ? sim.state.systems[room.system] : null;
@@ -370,15 +421,16 @@ function playScenario(seed, { incoming = false } = {}) {
         const here = sim.layout.room(member.room);
         // Badly hurt: get out of danger and into the medbay.
         if (member.health < 0.35) {
+          if (mind.suits.has(member.id) && !member.suit) order({ type: 'crew.suit', crew: member.id, on: true });
           if (member.goal !== 'medbay' && member.room !== 'medbay') order({ type: 'crew.move', crew: member.id, room: 'medbay' });
           continue;
         }
         if (member.path.length || trouble(here) > 0) continue; // busy
         // Spread out: at most two to a room.
-        const spot = spots.find((room) => (taken.get(room.id) ?? 0) < 2 && !sim.whyNot({ type: 'crew.move', crew: member.id, room: room.id }));
+        const spot = spots.find((room) => (taken.get(room.id) ?? 0) < 2 && !mind.avoid.get(member.id)?.has(room.id) && !sim.whyNot({ type: 'crew.move', crew: member.id, room: room.id }));
         if (!spot) continue;
         taken.set(spot.id, (taken.get(spot.id) ?? 0) + 1);
-        const needsSuit = sim.state.rooms[spot.id].breach > 0;
+        const needsSuit = sim.state.rooms[spot.id].breach > 0 || mind.suits.has(member.id);
         if (member.suit !== needsSuit) order({ type: 'crew.suit', crew: member.id, on: needsSuit });
         order({ type: 'crew.move', crew: member.id, room: spot.id });
       }
@@ -413,6 +465,9 @@ function playScenario(seed, { incoming = false } = {}) {
     alive: crew.filter((member) => member.alive).length,
     damage: Object.values(sim.state.systems).reduce((sum, system) => sum + system.damage, 0),
     said: sim.state.ai.said,
+    sent,
+    mind: mind.counts,
+    trust: sim.state.ai.trust,
     hash: hashState(sim.snapshot()),
   };
 }
@@ -471,6 +526,10 @@ function playDuel(seed, enemyId, { boarding = false, dark = false } = {}) {
   sim.events.on('weapon.fired', ({ side }) => side === 'player' && (tally.shots += 1));
   sim.events.on('fight.offer', () => (tally.offers += 1));
   const order = (command) => !sim.whyNot(command) && sim.enqueue(command);
+  const mind = carefulAnswers(sim, order);
+  let sent = 0;
+  let litTicks = 0; // room-seconds of lamp on a ship that is trying to run dark
+  sim.events.on('crew.ordered', () => (sent += 1));
   const answer = bot.next(); // how it answers a hail: talk, pay, or shoot
   const trouble = (room) => {
     const r = sim.state.rooms[room.id];
@@ -498,7 +557,9 @@ function playDuel(seed, enemyId, { boarding = false, dark = false } = {}) {
       // Running: once the hull is low the drive gets a bar, whatever it costs the guns, and we go when the sensors have a fix.
       const running = sim.state.hull.points <= sim.state.hull.max * 0.3;
       // Dark: every lamp off (S2.7). Lit: every lamp left on.
-      if (dark && !sim.whyNot({ type: 'lights.all', on: false })) order({ type: 'lights.all', on: false });
+      // A lamp it lit for someone who would not walk into the dark gets a few seconds before it goes off again (S2.10).
+      for (const [roomId, until] of mind.lit) if (until <= tick) mind.lit.delete(roomId);
+      if (dark && !mind.lit.size && !sim.whyNot({ type: 'lights.all', on: false })) order({ type: 'lights.all', on: false });
       const systems = sim.state.systems;
       const room = (id) => systems[id].power < systems[id].level - systems[id].damage;
       for (const id of ['doors', 'medbay', 'ai_core']) if (systems[id].power > 0) order({ type: 'power.add', system: id, delta: -1 });
@@ -560,9 +621,10 @@ function playDuel(seed, enemyId, { boarding = false, dark = false } = {}) {
           return;
         }
         if (trouble(sim.layout.room(member.room)) > 0) return;
-        const spot = spots[(index - 1) % Math.max(1, spots.length)];
+        const open = spots.filter((room) => !mind.avoid.get(member.id)?.has(room.id));
+        const spot = open[(index - 1) % Math.max(1, open.length)];
         if (!spot) return;
-        const needsSuit = sim.state.rooms[spot.id].breach > 0;
+        const needsSuit = sim.state.rooms[spot.id].breach > 0 || mind.suits.has(member.id);
         if (member.suit !== needsSuit) order({ type: 'crew.suit', crew: member.id, on: needsSuit });
         order({ type: 'crew.move', crew: member.id, room: spot.id });
       });
@@ -576,6 +638,7 @@ function playDuel(seed, enemyId, { boarding = false, dark = false } = {}) {
     if (now && !now.over && now.phase === 'battle' && sim.state.tick % TICK_RATE === 0) {
       tally.battleTicks += 1;
       tally.signature += signature(sim).total;
+      litTicks += Object.values(sim.state.rooms).filter((r) => r.lightsOn).length;
       if (now.enemy.contact.locked) tally.lockTicks += 1;
     }
   }
@@ -593,13 +656,16 @@ function playDuel(seed, enemyId, { boarding = false, dark = false } = {}) {
     alive: Object.values(sim.state.crew).filter((member) => member.alive && member.owner === 'player').length,
     boarding,
     dark,
+    sent,
+    litTicks,
+    mind: mind.counts,
     hash: hashState(sim.snapshot()),
   };
 }
 
 const started = performance.now();
 const failures = [];
-const totals = { orders: 0, refused: 0, dropped: 0, doorMoves: 0, pauses: 0, powerMoves: 0, brownouts: 0, darkTicks: 0, fires: 0, spreads: 0, firesOut: 0, scorched: 0, jettisons: 0, airlessTicks: 0, moves: 0, arrivals: 0, blocked: 0, deaths: 0, firesFought: 0, patches: 0, repairs: 0, fights: 0, shots: 0, hits: 0, absorbed: 0, missed: 0, kills: 0, boarded: 0, boardedUs: 0, melee: 0, captured: 0, said: 0 };
+const totals = { orders: 0, refused: 0, dropped: 0, doorMoves: 0, pauses: 0, powerMoves: 0, brownouts: 0, darkTicks: 0, fires: 0, spreads: 0, firesOut: 0, scorched: 0, jettisons: 0, airlessTicks: 0, moves: 0, arrivals: 0, blocked: 0, deaths: 0, firesFought: 0, patches: 0, repairs: 0, fights: 0, shots: 0, hits: 0, absorbed: 0, missed: 0, kills: 0, boarded: 0, boardedUs: 0, melee: 0, captured: 0, said: 0, argued: 0, margoRefused: 0, overrides: 0, stoodDown: 0, lapsed: 0, crewRefused: 0, scares: 0, lamps: 0 };
 const scenarios = [];
 const duels = [];
 const chaosEndings = {};
@@ -750,6 +816,31 @@ for (const enemyId of enemyIds) {
     out.push(`    ${' '.repeat(name.length)}      our signature ${pct(mine.reduce((n, d) => n + d.signature, 0), battle)} on average; they held a lock ${pct(mine.reduce((n, d) => n + d.lockTicks, 0), battle)} of the fight and lost it ${mean(mine.map((d) => d.lockLost)).toFixed(1)} times; we won ${pct(won, mine.length)}, lost the ship ${pct(lost, mine.length)}, hull left ${mean(mine.map((d) => d.ourHull)).toFixed(1)}`);
   }
 }
+out.push('');
+// S2.10: how often Margo and the crew say no. The plan wants both above zero and neither the main event.
+const sumMind = (list, key) => list.reduce((n, item) => n + item.mind[key], 0);
+const ruleNames = { grave: 'a room where someone died', burn: 'burns', choke: 'thin air', dark: 'the dark', override: 'an override' };
+const rules = (list) => {
+  const all = {};
+  for (const item of list) for (const [rule, n] of Object.entries(item.mind.byRule)) all[rule] = (all[rule] ?? 0) + n;
+  return Object.entries(all).sort((a, b) => b[1] - a[1]).map(([rule, n]) => `${ruleNames[rule] ?? rule} ${n}`).join(', ') || 'none';
+};
+const withAny = (list, key) => pct(list.filter((item) => item.mind[key] > 0).length, list.length);
+out.push('Margo and the crew (S2.10): orders she held, and orders the crew would not take');
+out.push(`  chaos, per run:    she argued ${per(totals.argued)} times and refused ${per(totals.margoRefused)}; the bot overrode her ${per(totals.overrides)} times, stood down ${per(totals.stoodDown)}, let ${per(totals.lapsed)} lapse`);
+out.push(`                     crew refused ${per(totals.crewRefused)} of ${per(totals.moves + totals.crewRefused)} orders to move (${pct(totals.crewRefused, totals.moves + totals.crewRefused)}); the dark got to someone ${per(totals.scares)} times and ${per(totals.lamps)} lamps went on by a crew hand`);
+for (const [label, list] of [['hazard scenarios', scenarios], ['under fire', underFire]]) {
+  const orders = list.reduce((n, item) => n + item.sent, 0) + sumMind(list, 'crewRefused') + sumMind(list, 'argued');
+  out.push(`  ${`${label}:`.padEnd(18)} she argued in ${withAny(list, 'argued')} of runs (${pct(sumMind(list, 'argued'), orders)} of orders to move); crew refused in ${withAny(list, 'crewRefused')} of runs (${pct(sumMind(list, 'crewRefused'), orders)} of orders): ${rules(list)}`);
+}
+for (const dark of [false, true]) {
+  const list = duels.filter((d) => d.dark === dark);
+  const orders = list.reduce((n, item) => n + item.sent, 0) + sumMind(list, 'crewRefused');
+  const battle = list.reduce((n, d) => n + d.battleTicks, 0);
+  out.push(`  duels, ${dark ? 'dark' : 'lit '}:       the dark got to someone ${(sumMind(list, 'scares') / Math.max(1, list.length)).toFixed(1)} times a fight and ${(sumMind(list, 'lamps') / Math.max(1, list.length)).toFixed(1)} lamps went on by a crew hand; ${(list.reduce((n, d) => n + d.litTicks, 0) / Math.max(1, battle)).toFixed(1)} of ${ship.rooms.length} rooms lit on average`);
+  out.push(`                     crew refused in ${withAny(list, 'crewRefused')} of fights (${pct(sumMind(list, 'crewRefused'), orders)} of orders to move): ${rules(list)}`);
+}
+out.push(`  her trust:         ${mean(scenarios.map((s) => s.trust)).toFixed(0)} of 100 at the end of a hazard scenario, ${mean(underFire.map((s) => s.trust)).toFixed(0)} under fire (it starts at 50)`);
 out.push('');
 out.push(`  wall time:         ${seconds.toFixed(2)}s`);
 const verdict = failures.length

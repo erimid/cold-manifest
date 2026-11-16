@@ -6,7 +6,7 @@ const KEY = 'cold-manifest.settings.v1';
 
 /** Auto-pause is on by default on touch screens, where a slip of the finger costs more (brief §7). */
 export function defaultSettings({ touch = false } = {}) {
-  return { sound: true, shake: true, scanlines: true, autoPause: { fight: touch, boarded: touch, fire: touch, breach: touch, death: touch } };
+  return { sound: true, shake: true, scanlines: true, autoPause: { fight: touch, boarded: touch, fire: touch, breach: touch, death: touch, objection: touch, refusal: touch } };
 }
 
 /** What each auto-pause setting is called, and which game event trips it. */
@@ -17,6 +17,9 @@ export const AUTO_PAUSE = Object.freeze([
   { id: 'fire', label: 'A fire starts', event: 'fire.started', found: 'fire.found' },
   { id: 'breach', label: 'The hull is breached', event: 'breach.opened', found: 'breach.found' },
   { id: 'death', label: 'A crew member dies', event: 'crew.died' },
+  // Margo holds an order, or one of the crew will not take one (S2.10; brief §7).
+  { id: 'objection', label: 'Margo holds an order', event: 'ai.objected' },
+  { id: 'refusal', label: 'A crew member refuses', event: 'crew.refused' },
 ]);
 
 /** Merge saved values over defaults, keeping only keys we know and only true or false. */

@@ -76,8 +76,8 @@ function checkWeapon(item) {
   return problems;
 }
 
-/** What crew answer over the intercom (S2.9, D-094): a walk, or one of the hold's jobs. */
-export const REPLY_KINDS = Object.freeze(['move', 'open', 'carry', 'jettison', 'load']);
+/** What crew answer over the intercom (S2.9, D-094): a walk, or one of the hold's jobs; and what they say when they refuse an order or put a lamp back on (S2.10). */
+export const REPLY_KINDS = Object.freeze(['move', 'open', 'carry', 'jettison', 'load', 'refuse', 'lamp']);
 
 /** Rules for one crew member. Their intercom replies are lists of lines by kind; `{room}` is the only slot. */
 function checkCrew(item) {
