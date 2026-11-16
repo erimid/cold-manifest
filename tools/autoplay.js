@@ -663,7 +663,8 @@ function playCrossing(seed, index) {
     else if (run.crossing.phase === 'off port' && !whyNoRunIn(sim)) give({ type: 'route.jump' });
     else if (sim.state.tick % TICK_RATE === 0) {
       // An event can leave the sensors or the engines down (S3.3), and the run in needs them: send whoever is
-      // not flying to mend them. Mended, they run again by themselves (H.4).
+      // not flying to mend them. Mended, they run again by themselves (H.4). Margo's core too: with it broken
+      // nobody runs the sensors unless someone sits at them, and the bot posts nobody there.
       const helm = sim.layout.rooms.find((room) => room.kind === 'helm')?.id;
       const hands = ourCrew(sim).map(({ member }) => member).filter((member) => member.alive);
       const bound = (room) => hands.some((member) => member.room === room || member.goal === room);
@@ -674,7 +675,7 @@ function playCrossing(seed, index) {
         if (r.fire > 0 && !r.jettisoned && free && !bound(room)) give({ type: 'crew.move', crew: free.id, room });
       }
       // The doors come first: nobody walks anywhere quickly without them.
-      for (const id of ['doors', 'sensors', 'engines']) {
+      for (const id of ['doors', 'ai_core', 'sensors', 'engines']) {
         const system = sim.state.systems[id];
         if (sim.state.stations[id].down) give({ type: 'station.stand', station: id, down: false });
         if (running(sim, id)) continue;
