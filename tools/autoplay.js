@@ -341,10 +341,9 @@ function carefulAnswers(sim, order) {
   sim.events.on('crew.refused', (event) => {
     counts.crewRefused += 1;
     counts.byRule[event.rule] = (counts.byRule[event.rule] ?? 0) + 1;
-    if (event.rule === 'dark') {
-      mind.lit.set(event.room, sim.state.tick + 15 * TICK_RATE);
-      order({ type: 'room.lights', room: event.room, on: true });
-    } else if (event.rule === 'grave') {
+    // The dark: a lamp for them, if there is power for one. If not, like a room where someone died, they are sent elsewhere.
+    if (event.rule === 'dark' && order({ type: 'room.lights', room: event.room, on: true })) mind.lit.set(event.room, sim.state.tick + 15 * TICK_RATE);
+    else if (event.rule === 'dark' || event.rule === 'grave') {
       if (!mind.avoid.has(event.crew)) mind.avoid.set(event.crew, new Set());
       mind.avoid.get(event.crew).add(event.room);
     } else mind.suits.add(event.crew);

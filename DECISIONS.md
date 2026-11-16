@@ -457,7 +457,7 @@ Items here are known shortcuts. Each names the stage that must clear it.
 **Why:** Brief §8 and PLAN S2.10: a refusal must have a reason that names a remembered event. Every rule has a way round it that is itself play (a suit, a lamp, a crewmate, another crew member, time), so a refusal changes the plan without stopping the game. Sentences avoid pronouns because crew have none in content yet. Room names are used bare, as stencilled. **Review gate decided without Eric** under his standing approval (2026-11-16).
 
 ### D-103 The dark wears on the crew: they light the lamp (S2.10)
-**What:** Standing still in a room with light below 0.2 fills a crew member's dread in 75 s alone, 2.5 times slower with a crewmate beside them, twice as fast with a bad memory of the dark; light drains it in 20 s. At full dread they switch the room's lamp on (power allowing), say so on the intercom, remember the scare, and for 45 s will not have a lamp off in any room they stand in: the Lights button says why, and Go dark skips those rooms. Our crew aboard our ship only. In 100 bot duels run dark this happened about once a fight; our signature rose two to six points and their lock held a little longer, with win rates unchanged within noise (figures in `reports/stage-2.md`).
+**What:** Standing still in a room with light below 0.2 fills a crew member's dread in 75 s alone, 2.5 times slower with a crewmate beside them, twice as fast with a bad memory of the dark; light drains it in 20 s. At full dread they switch the room's lamp on (power allowing), say so on the intercom, remember the scare, and for 45 s will not have a lamp off in any room they stand in: the Lights button says why, and Go dark skips those rooms. Our crew aboard our ship only. In 100 bot duels run dark per enemy type the dark got to someone 1.2 times a fight and 1.1 lamps went on (`reports/stage-2.md`). A 10-run comparison with and without the rule showed our signature two to six points higher and their lock held a little longer; win rates lit against dark stay close for every enemy type.
 **Why:** DF-41: fear was the missing price of running dark. Speed costs (D-096) tax the captain; this one takes a lamp out of the captain's hands for a while, which is the part that feels like a crew. Kept mild on purpose: S2.5 had already balanced lit against dark. **Review gate decided without Eric** under his standing approval (2026-11-16).
 
 ---
@@ -475,6 +475,28 @@ Items here are known shortcuts. Each names the stage that must clear it.
 - Eric plays 10 minutes on his iPad: done 2026-11-15. "Good FPS, no issues." Stage 1 is closed.
 
 **Carried forward:** the open DF items above. Nothing in Stage 1 was left out of the plan's scope.
+
+### Stage 2: combat and identity (built 2026-11-16)
+
+**What exists:** fights against a second whole ship on the same code: six enemy types with captains who hail, bargain, run and board; weapons charged by power, hand-loaded heavy guns and a hold you can work in; the ship drawn side-on as four decks with lifts and crawlways; Margo's monitor with the enemy as a sensor return; one signature model, with scanning, locks, running dark and a jump that needs a fix; capacitor shields dumped as a brace; a breaker board; crew who answer over the intercom; Margo, who holds an order she objects to until the captain overrides or stands down; and crew who remember and refuse.
+
+**What changed and why:** after S2.3 Eric said the game read as FTL, so the stage grew from five sessions to ten (D-070 to D-078). Evasion, shield layers, the top-down cutaway, the power strip and teleporter boarding are all gone. Margo's pushback and crew refusal were pulled forward from Stages 4 and 5; S3.3 ports their hard-coded rules into the condition language. The AI line library is capped at 500 lines to start (D-100).
+
+**Exit checks:**
+- Green gate: 269 unit tests, 117 browser checks, content check, build. Passed.
+- Seeded bot fights with no crash and no endless fight: 100 runs, 100 fights for each enemy type with and without boarding, no failures. The longest fight was 525 s (the bulwark). Passed (`reports/stage-2.md`).
+- Each enemy type has a visibly different win rate and length. Won, parted, lost: skiff 74/23/3, cutter 76/8/16, tender 73/24/3, bulwark 15/83/2, carrier 83/1/16; median length 72 s to 134 s. Passed.
+- Margo argues and crew refuse at rates above zero that do not take over. Margo argued in 50% of hazard scenarios (17% of orders to move) and 13% of under-fire runs; a careless bot draws 0.6 arguments and 0.1 refusals a run. Crew refused in 1% of hazard scenarios, 4% of lit duels and 9% of dark duels (6% of orders to move). Passed.
+- Eric plays a fight on his iPad and it no longer reads as FTL (brief §3): **open**, his to do. Work went on to Stage 3 under his standing approval of 2026-11-16.
+
+**Known issues:** combat numbers are still first passes (DF-34); the bulwark mostly ends with both ships parting, by design; Margo's 50 real lines sit beside 129 placeholders until Stage 5; the open DF items above carry forward.
+
+**What to try (PC or iPad, `?debug=1`):**
+1. Start a fight. Check the breaker board, Go dark, Brace, and aiming only at rooms the scan has resolved.
+2. Put a crew member in the airlock and open the outer door. Margo refuses and holds the order; Override (O) or Stand down (Esc). Her trust shows in the debug overlay.
+3. Light a big fire (More sheet) and order someone unsuited into it. She argues. Raise trust to 70 and she lets it by.
+4. More sheet: give a crew member a burn memory, then order them into a fire. They refuse and the panel says why. Put a suit on and they go.
+5. Go dark and leave someone alone in an unlit room for about 75 s, or press Nerves on edge in the More sheet. They light the lamp and will not have it off for 45 s.
 
 ### Session log
 
@@ -496,3 +518,4 @@ Items here are known shortcuts. Each names the stage that must clear it.
 - **Lifts (2026-11-16):** Ladders replaced by a deck lift under every hatch, and every lift is hand-cranked slowly when door control is dark (D-093).
 - **S2.9 (2026-11-16):** The breaker board replaces the power strip (D-095): a breaker per system with full names, folded to a strip of lamps outside a fight, opened by the handle, P or a fight, Q-row keys kept. Crew answer every order over the intercom in their own words (D-094), 45 placeholder lines in the crew file, checked by the content check. 241 unit tests, 104 browser checks. DF-19 closed; DF-43 added.
 - **S2.5 (2026-11-16):** Four enemy types (D-098): the knife cutter, grapple tender, bulwark and drone carrier, with a carrier archetype and drones that zap, burn out on a brace and drop with their bay (D-097). Running dark now costs speed at dark stations and on dark walks (D-096): the bot wins 62% lit and dark against the skiff, and dark still cuts their hits from 56% to 18%. Autoplay reports a table per enemy type. 6 placeholder lines (124). 250 unit tests, 107 browser checks. DF-31, DF-34, DF-41 and DF-15 updated; DF-44 added.
+- **S2.10 (2026-11-16):** Margo's personality file and 50-line voice sample (D-099), with the line library capped at 500 (D-100). Her trust and risk check: she argues with a risky order, refuses a monstrous one up to three times a run, and holds it until the captain overrides or stands down (D-101). Crew memory of six kinds and refusals that name what they remember (D-102). Dread in the dark, the lamp they light and hold on (D-103). Debug buttons for trust, memories and dread; two auto-pause switches; the bot answers objections and works round refusals, and the report counts both. 269 unit tests, 117 browser checks. DF-41 and DF-43 narrowed; DF-45 and DF-46 added. Stage 2 is built; its last exit check is Eric's iPad playtest.
