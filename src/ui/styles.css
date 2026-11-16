@@ -251,6 +251,77 @@ body {
   color: #aab2bf;
 }
 
+.stub--wide {
+  max-width: 1080px;
+  width: 100%;
+  overflow-y: auto;
+  justify-content: flex-start;
+  padding: 12px 4px;
+}
+
+.stub .cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 14px;
+  width: 100%;
+}
+
+.stub .card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 14px 16px;
+}
+
+.stub .card h3 {
+  margin: 0;
+  color: var(--amber);
+  font-size: 1.05em;
+}
+
+.stub .card .btn {
+  margin-top: auto;
+}
+
+.stub .dim {
+  color: #7d8593;
+  font-size: 0.85em;
+}
+
+.stub .list {
+  margin: 0;
+  padding-left: 1.2em;
+  line-height: 1.6;
+}
+
+.stub .menu {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 18px;
+  margin: 0;
+  font-size: 0.9em;
+}
+
+.facts dt {
+  color: #7d8593;
+}
+
+.facts dd {
+  margin: 0;
+  color: var(--paper);
+}
+
+.btn[disabled] {
+  opacity: 0.45;
+}
+
 .btn--small {
   min-width: 0;
   padding: 10px 18px;

@@ -1590,6 +1590,7 @@ async function chartTests(browser) {
 
   await check('New run puts the chart up on the monitor, with every point a big enough target and the ship still running under it', async () => {
     await page.tap('#btn-new-run');
+    await page.tap('#accept-stub-courier');
     await page.waitForFunction(() => window.coldManifest.machine.state === 'ship' && window.coldManifest.shipView.debug.chartOpen);
     assert.equal(await page.isVisible('#chart'), true);
     const r = await run();
@@ -1619,6 +1620,12 @@ async function chartTests(browser) {
     const lane = r.map.lanes.find((l) => (l.a === r.at && l.b === to) || (l.b === r.at && l.a === to));
     await page.tap('#btn-chart-jump');
     await page.waitForFunction((id) => window.coldManifest.sim.state.run.at === id, to, { timeout: 2000 });
+    // On a contract the arrival may open a port or an event (S3.2): leave it, and the chart is back up.
+    await sleep(300);
+    if ((await game(page, () => window.coldManifest.machine.state)) !== 'ship') {
+      await page.locator('#btn-depart, #event .btn').first().tap();
+      await page.waitForFunction(() => window.coldManifest.machine.state === 'ship');
+    }
     const after = await run();
     assert.equal(after.fuel, r.fuel - lane.fuel);
     assert.equal(after.jumps, 1);
@@ -1690,11 +1697,190 @@ async function chartTests(browser) {
   await desk.close();
 }
 
+/** The whole run loop on screens: title, contract board, chart, ports and events, the drop, the summary, records (S3.2, D-108). */
+async function loopTests(browser) {
+  console.log('iPad: a run from the contract board to the summary (S3.2)');
+  const context = await browser.newContext({ ...devices['iPad (gen 7) landscape'] });
+  const page = await context.newPage();
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  await page.goto(`http://localhost:${PORT}/?seed=E2E-LOOP&autopause=0`);
+  await page.waitForFunction(() => window.coldManifest?.machine.state === 'title');
+  const shots = process.env.E2E_SHOTS;
+  const state = () => game(page, () => window.coldManifest.machine.state);
+  const shot = async (name) => shots && page.screenshot({ path: `${shots}/${name}.png` });
+  const big = async (selector) => {
+    const sizes = await page.$$eval(selector, (list) => list.map((b) => ({ id: b.id, w: b.getBoundingClientRect().width, h: b.getBoundingClientRect().height })));
+    for (const size of sizes) assert.ok(size.w >= 44 && size.h >= 44, `${size.id} is ${size.w}x${size.h}`);
+  };
+
+  await check('the records hub opens from the title with its four panels and nothing in the Wall yet', async () => {
+    await page.tap('#btn-hub');
+    assert.equal(await state(), 'hub');
+    for (const id of ['hub-ship', 'hub-wall', 'hub-unlocks', 'hub-stats']) assert.equal(await page.isVisible(`#${id}`), true, id);
+    assert.match(await page.textContent('#hub-wall'), /Nobody has died yet/);
+    await shot('s3-2-hub-ipad');
+    await big('#screen button');
+    await page.tap('#btn-back');
+    assert.equal(await state(), 'title');
+  });
+
+  await check('New run opens the contract board with three contracts and no run until one is taken', async () => {
+    assert.equal(await page.isVisible('#btn-resume'), false, 'nothing to resume yet');
+    await page.tap('#btn-new-run');
+    assert.equal(await state(), 'contracts');
+    assert.equal(await page.locator('.card').count(), 3);
+    await shot('s3-2-board-ipad');
+    await big('#screen button');
+    await page.tap('#accept-stub-courier');
+    await page.waitForFunction(() => window.coldManifest.machine.state === 'ship' && window.coldManifest.shipView.debug.chartOpen);
+    assert.equal(await game(page, () => window.coldManifest.run.contract.id), 'stub-courier');
+  });
+
+  await check('Back to the title and Resume run returns to the same run', async () => {
+    const at = await game(page, () => window.coldManifest.sim.seed ?? window.coldManifest.run.seed);
+    await page.keyboard.press('Escape'); // closes the chart
+    await page.tap('#btn-back');
+    assert.equal(await state(), 'title');
+    await page.tap('#btn-resume');
+    await page.waitForFunction(() => window.coldManifest.machine.state === 'ship');
+    assert.equal(await game(page, () => window.coldManifest.run.seed), at);
+  });
+
+  /** Fly one lane: plot, fix, jump. Leaves the screen the arrival opened. */
+  const fly = async (to) => {
+    await game(page, (id) => window.coldManifest.sim.enqueue({ type: 'course.plot', to: id }), to);
+    await game(page, () => window.coldManifest.sim.enqueue({ type: 'debug.run', fix: true }));
+    await page.waitForFunction(() => window.coldManifest.sim.state.fix >= 1, null, { timeout: 4000 });
+    await game(page, () => window.coldManifest.sim.enqueue({ type: 'course.jump' }));
+    await page.waitForFunction((id) => window.coldManifest.sim.state.run.at === id, to, { timeout: 4000 });
+    await sleep(200);
+  };
+  /** The cheapest way across, as a list of points, worked out here from the run's chart. */
+  const route = async () =>
+    game(page, () => {
+      const r = window.coldManifest.sim.state.run;
+      const best = { [r.at]: { fuel: 0, path: [] } };
+      const open = [r.at];
+      while (open.length) {
+        open.sort((a, b) => best[a].fuel - best[b].fuel);
+        const here = open.shift();
+        for (const lane of r.map.lanes) {
+          const next = lane.a === here ? lane.b : lane.b === here ? lane.a : null;
+          if (!next) continue;
+          const fuel = best[here].fuel + lane.fuel;
+          if (!best[next] || fuel < best[next].fuel) {
+            best[next] = { fuel, path: [...best[here].path, next] };
+            open.push(next);
+          }
+        }
+      }
+      return best[r.map.delivery].path;
+    });
+
+  let sawPort = false;
+  let sawEvent = false;
+  await check('every arrival opens its screen and leaves for the ship again: events, ports with refuel and the bar, open space quiet', async () => {
+    const path = await route();
+    for (let i = 0; i < path.length; i++) {
+      const to = path[i];
+      const last = i === path.length - 1;
+      await fly(to);
+      const kind = await game(page, (id) => window.coldManifest.sim.state.run.map.nodes.find((n) => n.id === id).kind, to);
+      const now = await state();
+      if (last) {
+        assert.equal(now, 'port', 'the drop is a port');
+        break;
+      }
+      if (kind === 'port') {
+        assert.equal(now, 'port');
+        if (!sawPort) {
+          sawPort = true;
+          await game(page, () => window.coldManifest.sim.state.run && window.coldManifest.sim.enqueue({ type: 'debug.run', fuel: 3 }));
+          await game(page, () => window.coldManifest.sim.step());
+          await page.tap('#btn-bar');
+          assert.equal(await state(), 'scene');
+          assert.match(await page.textContent('#scene'), /Scenes between crew arrive in Stage 4/);
+          await page.tap('#btn-back');
+          assert.equal(await state(), 'port');
+          assert.match(await page.textContent('#port-facts'), /Fuel\s*3 of 12/);
+          await page.tap('#btn-refuel');
+          assert.match(await page.textContent('#port-facts'), /Fuel\s*12 of 12/);
+          assert.equal(await page.isDisabled('#btn-refuel'), true, 'full tanks, nothing to buy');
+          await shot('s3-2-port-ipad');
+          await big('#screen button');
+        }
+        await page.tap('#btn-depart');
+      } else if (['hazard', 'derelict', 'checkpoint'].includes(kind)) {
+        assert.equal(now, 'event', `${kind} opens an event`);
+        if (!sawEvent) {
+          sawEvent = true;
+          await shot('s3-2-event-ipad');
+          await big('#screen button');
+        }
+        await page.locator('#event .btn').first().tap();
+      } else assert.equal(now, 'ship', 'open space opens nothing');
+      await page.waitForFunction(() => window.coldManifest.machine.state === 'ship');
+      assert.equal(await page.isVisible('#chart'), true, 'back on the ship with the chart up');
+    }
+  });
+
+  await check('the drop: handing over the cargo ends the run with a summary that adds up', async () => {
+    assert.equal(await page.isVisible('#btn-handover'), true);
+    assert.equal(await page.isVisible('#btn-retire'), false, 'no retiring at the drop');
+    await page.tap('#btn-handover');
+    assert.equal(await state(), 'summary');
+    const title = await page.textContent('#summary-title');
+    assert.match(title, /Delivered/);
+    const facts = await page.textContent('#summary-facts');
+    assert.match(facts, /Courier/);
+    assert.match(facts, /3 of 3 alive/);
+    assert.match(facts, /Pay\s*(600|300) of 600/);
+    await shot('s3-2-summary-ipad');
+    await big('#screen button');
+  });
+
+  await check('records remember the run, and Resume is gone once it has ended', async () => {
+    await page.tap('#btn-records');
+    assert.equal(await state(), 'hub');
+    assert.match(await page.textContent('#hub-stats'), /Runs this visit\s*1/);
+    assert.match(await page.textContent('#hub-stats'), /Delivered\s*1/);
+    await page.tap('#btn-back');
+    assert.equal(await page.isVisible('#btn-resume'), false);
+  });
+
+  await check('a second run starts fresh from the board; retiring at a port and losing the crew both end it with a summary', async () => {
+    await page.tap('#btn-new-run');
+    await page.tap('#accept-stub-smuggling');
+    await page.waitForFunction(() => window.coldManifest.machine.state === 'ship');
+    assert.equal(await game(page, () => window.coldManifest.sim.state.run.jumps), 0);
+    assert.equal(await game(page, () => window.coldManifest.sim.state.run.pursuit !== null), true, 'the smuggling job is followed');
+    // Kill everyone on board: the run ends on the next frame.
+    await game(page, () => Object.values(window.coldManifest.sim.state.crew).forEach((m) => (m.alive = false)));
+    await page.waitForFunction(() => window.coldManifest.machine.state === 'summary', null, { timeout: 2000 });
+    assert.match(await page.textContent('#summary-title'), /Everyone is dead/);
+    await page.tap('#btn-title');
+    await page.tap('#btn-hub');
+    assert.match(await page.textContent('#hub-wall'), /Smuggling|Cold freight/);
+    await page.tap('#btn-back');
+    await page.tap('#btn-new-run');
+    await page.tap('#accept-stub-salvage');
+    await page.waitForFunction(() => window.coldManifest.machine.state === 'ship');
+    // At the origin port nothing opens, so reach the port screen through a debug arrival: retire from there.
+    await game(page, () => window.coldManifest.machine.go('port', { node: window.coldManifest.sim.state.run.at }));
+    await page.tap('#btn-retire');
+    assert.match(await page.textContent('#summary-title'), /Retired/);
+  });
+
+  await check('no page errors', async () => assert.deepEqual(errors, []));
+  await context.close();
+}
+
 const server = await startServer();
 const browser = await chromium.launch(process.env.PW_CHROMIUM ? { executablePath: process.env.PW_CHROMIUM } : {});
 // E2E_ONLY=boarding (or a comma list of suite names) runs just those suites, for chasing one failure.
 const only = process.env.E2E_ONLY?.split(',');
-const suites = { touch: touchTests, desktop: desktopTests, voice: voiceTests, fight: fightTests, hit: hitTests, ending: endingTests, boarding: boardingTests, dark: darkTests, hold: holdTests, enemies: enemyTests, margo: margoTests, chart: chartTests };
+const suites = { touch: touchTests, desktop: desktopTests, voice: voiceTests, fight: fightTests, hit: hitTests, ending: endingTests, boarding: boardingTests, dark: darkTests, hold: holdTests, enemies: enemyTests, margo: margoTests, chart: chartTests, loop: loopTests };
 try {
   for (const [name, run] of Object.entries(suites)) if (!only || only.includes(name)) await run(browser);
 } finally {
