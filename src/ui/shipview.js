@@ -24,11 +24,15 @@
 // crates in the holds are drawn and can be tapped: open, move (then tap a
 // room), jettison, or load the guns. Each goes to the crew member selected
 // last, or the nearest free hand.
+// From H.1 (D-151) the corner of the monitor is the passive scope: contacts as patches of space they could
+// be in. Tap a return to read it and hail it with a lie; tap anywhere else on the dial to come round to
+// that heading. With nothing selected the status panel lights or cuts the drive and puts out a flare.
 
 import { REFUSALS_PER_RUN, trustWord } from '../ai/judgement.js';
 import { pickTarget } from '../engine/hit.js';
 import { DEBUG_ACTIONS, OUTCOMES, OFFER_SECONDS, braced, bribePrice, capacitorOf, capacity, chargeOf, enemyOf, findCrew, fixOf, offerText, ourCrew, talkChance, whyNoBrace, whyNoJump } from '../sim/combat.js';
 import { describeTask } from '../sim/crew.js';
+import { BLUFFS, ENDINGS, bluffChance, scopeView, whyNoHail } from '../sim/encounters.js';
 import { describeJob, magazineOf, pickHand, roundsInHold } from '../sim/hold.js';
 import { nerveWord, topMemory } from '../sim/memory.js';
 import { POWERED, aiCoreStatus, free, lightsDraw, litRooms, supply, usable } from '../sim/power.js';
@@ -41,6 +45,7 @@ import { el } from './dom.js';
 import { createIntercom } from './intercom.js';
 import { AUTO_PAUSE } from './settings.js';
 import { createShipRenderer } from './ship-render.js';
+import { bearingText, drawScope, rangeText, scopeDial, scopeHit, scopeMarks } from './scope.js';
 
 const percent = (value) => `${Math.round(value * 100)}%`;
 const POWER_KEYS = 'QWERTYUI';
@@ -101,6 +106,7 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
   let foeView = null; // where the enemy ship is drawn
   let monitor = { x: 0, y: 0, w: 0, h: 0 }; // Margo's schematic screen, in CSS pixels
   let sensorBox = null; // the enemy's sensor-return screen, in a fight
+  let scopeBox = null; // the passive scope, the rest of the time (H.1)
   let fightBar = null; // the weapons bar's live parts
   let impacts = []; // shots that just landed, for a moment: { side, room, result, damage, effects, tick }
   let shake = null; // { tick, strength } the last hit on our ship, while the screen shakes
@@ -164,6 +170,13 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
     return null;
   }
 
+  /** What a long press on the scope says. */
+  function describeScope(hit) {
+    const contact = hit.contact !== undefined ? scopeView(sim).contacts.find((item) => item.id === hit.contact) : null;
+    if (contact) return `${contact.label}, ${contact.name.toLowerCase()}. ${contact.intent}. Bearing ${bearingText(contact.bearing)}, give or take ${Math.round(contact.bearingError)} degrees; about ${rangeText(contact.range, contact.rangeError)}. The patch is where it could be.`;
+    return 'The scope. It only listens: what it shows is what other ships give off, and how well the sensors hear it. Tap the dial to turn the ship that way.';
+  }
+
   // ---------- layout ----------
 
   function measure() {
@@ -188,18 +201,21 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
     nodes.intercom.style.top = `${monitor.y + monitor.h - 58}px`;
     // The chart takes the whole monitor when it is up (D-106).
     if (chart) Object.assign(chart.node.style, { left: `${monitor.x}px`, top: `${monitor.y}px`, width: `${monitor.w}px`, height: `${monitor.h}px` });
+    // A small green screen is let into the corner of Margo's (D-073): the passive scope (H.1), or in a
+    // fight their ship as a sensor return. Our ship is fitted to what is left either way, so it never jumps.
+    const boxW = Math.round(Math.min(320, Math.max(240, monitor.w * 0.29)));
+    const corner = { x: monitor.x + monitor.w - boxW - 10, y: monitor.y + 10, w: boxW, h: monitor.h - 20 };
+    view = renderer.fit({ x: monitor.x + 12, y: monitor.y + 10, w: monitor.w - boxW - 34, h: monitor.h - 20 });
     if (!enemyId) {
       foe = null;
       foeView = null;
       sensorBox = null;
-      view = renderer.fit({ x: monitor.x + 12, y: monitor.y + 10, w: monitor.w - 24, h: monitor.h - 20 });
+      scopeBox = corner;
       return;
     }
-    // A fight: their ship is a sensor return in a small green screen let into the corner of Margo's (D-073).
+    scopeBox = null;
     if (foe?.id !== enemyId) foe = { id: enemyId, renderer: createShipRenderer(enemyOf(sim).layout, { sensor: true }) };
-    const boxW = Math.round(Math.min(320, Math.max(240, monitor.w * 0.29)));
-    sensorBox = { x: monitor.x + monitor.w - boxW - 10, y: monitor.y + 10, w: boxW, h: monitor.h - 20 };
-    view = renderer.fit({ x: monitor.x + 12, y: monitor.y + 10, w: monitor.w - boxW - 34, h: monitor.h - 20 });
+    sensorBox = corner;
     foeView = foe.renderer.fit({ x: sensorBox.x + 8, y: sensorBox.y + 24, w: sensorBox.w - 16, h: sensorBox.h - 50 }); // clear of the title above and the lock readout below
   }
 
@@ -394,6 +410,16 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
           'div',
           { class: 'sheet__grid' },
           sim.transit.all.map((event) => button(`btn-dbg-event-${event.id.replace(/\./g, '-')}`, event.id, act(() => order({ type: 'debug.event', event: event.id })), 'btn--debug')),
+        ),
+      sim.encounters.all.length > 0 && el('div', { class: 'stencil sheet__sub', id: 'dbg-scope' }, `Scope: ${sim.state.scope.contacts.length} on it${sim.state.scope.record.length ? `, last ended "${ENDINGS[sim.state.scope.record.at(-1).outcome]}"` : ''}`),
+      sim.encounters.all.length > 0 &&
+        el(
+          'div',
+          { class: 'sheet__grid' },
+          // A contact far out on its own course, or already closing from near; and an empty scope.
+          sim.encounters.all.map((def) => button(`btn-dbg-contact-${def.id}`, def.name, act(() => order({ type: 'debug.contact', encounter: def.id, range: 95, bearing: 40, miss: 15 })), 'btn--debug')),
+          sim.encounters.all.map((def) => button(`btn-dbg-closing-${def.id}`, `${def.name}, closing`, act(() => order({ type: 'debug.contact', encounter: def.id, range: 45, bearing: 300, state: 'closing' })), 'btn--debug')),
+          button('btn-dbg-contact-clear', 'Clear the scope', act(() => order({ type: 'debug.contact', clear: true })), 'btn--debug'),
         ),
       el('div', { class: 'stencil sheet__sub' }, 'View'),
       el('div', { class: 'sheet__grid' }, button('btn-crawlways', showCrawlways ? 'Hide crawlways' : 'Show crawlways', () => {
@@ -765,7 +791,8 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
     ctx.font = "700 10px ui-monospace, 'SF Mono', Menlo, Consolas, monospace";
     ctx.textBaseline = 'bottom';
     ctx.textAlign = 'right';
-    ctx.fillText('M.A.R.G.O. SCHEMATIC · COMPANY ISSUE', x + w - (sensorBox ? sensorBox.w + 28 : 18), y + h - 6);
+    ctx.fillText('M.A.R.G.O. SCHEMATIC · COMPANY ISSUE', x + w - ((sensorBox ?? scopeBox) ? (sensorBox ?? scopeBox).w + 28 : 18), y + h - 6);
+    if (scopeBox) drawScope(ctx, scopeBox, scopeView(sim), { selected: selected?.kind === 'contact' ? selected.id : null, time: (sim.state.tick + clock.alpha) * TICK_SECONDS, active: sensorsUp(sim), reduce: reduceMotion() });
     if (sensorBox) {
       const b = sensorBox;
       ctx.fillStyle = '#04100a';
@@ -1115,13 +1142,34 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
       // Nothing picked: how loud the ship is and why (D-074), and the one switch that matters most to it.
       const stats = { total: stat('Signature'), light: stat('Light'), noise: stat('Noise'), heat: stat('Heat'), burn: stat('Burn'), eyes: stat('Eyes') };
       const dark = button('btn-dark', 'Go dark', () => order({ type: 'lights.all', on: litRooms(sim) === 0 }));
+      // The helm (H.1): light the drive or cut it and drift, and a flare for something to chase instead of us.
+      const burn = button('btn-burn', 'Burn', () => order({ type: 'helm.burn', on: !sim.state.helm.burn }));
+      const flare = button('btn-flare', 'Flare', () => order({ type: 'decoy.flare' }));
       const note = el('span', { class: 'status__note' });
       nodes.status.replaceChildren(
         el('div', { class: 'status__head' }, el('div', { class: 'status__title', id: 'status-title' }, layout.name), el('div', { class: 'stencil' }, 'What we give off'), note),
         el('div', { class: 'status__stats' }, Object.values(stats).map((s) => s.node)),
-        el('div', { class: 'status__controls status__controls--row' }, dark, el('span', { class: 'status__hint status__hint--inline' }, 'Tap a crew member, then a room, to send them there. Tap a room or a door to work it. Long-press anything to ask what it is.')),
+        el('div', { class: 'status__controls status__controls--row' }, dark, burn, flare, el('span', { class: 'status__hint status__hint--inline' }, 'Tap crew, then a room, to send them. Tap the scope to turn the ship, or a contact on it to read it. Long-press anything to ask what it is.')),
       );
-      panel = { kind: 'ship', stats, dark, note };
+      panel = { kind: 'ship', stats, dark, burn, flare, note };
+      updatePanel();
+      return;
+    }
+
+    if (selected.kind === 'contact') {
+      // A return on the scope (H.1): what Margo makes of it, and the lies we can hail it with.
+      const stats = { bearing: stat('Bearing'), range: stat('Range'), intent: stat('Doing'), fix: stat('Return') };
+      const title = el('div', { class: 'status__title', id: 'status-title' });
+      const sub = el('div', { class: 'stencil' });
+      const note = el('span', { class: 'status__note' });
+      const id = selected.id;
+      const hails = Object.fromEntries(Object.entries(BLUFFS).map(([bluff, label]) => [bluff, button(`btn-hail-${bluff}`, label, () => order({ type: 'contact.hail', contact: id, bluff }))]));
+      nodes.status.replaceChildren(
+        el('div', { class: 'status__head' }, title, sub, note),
+        el('div', { class: 'status__stats' }, Object.values(stats).map((s) => s.node)),
+        el('div', { class: 'status__controls status__controls--row' }, Object.values(hails), el('span', { class: 'status__hint status__hint--inline', id: 'contact-hint' }, 'A hail is a lie told once. If they do not believe it, they know exactly where it came from.')),
+      );
+      panel = { kind: 'contact', id, stats, title, sub, note, hails };
       updatePanel();
       return;
     }
@@ -1272,7 +1320,40 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
       setText(panel.stats.eyes.value, blind ? `${blind} rooms unseen` : 'every room');
       panel.stats.eyes.node.classList.toggle('is-alarm', blind > 0);
       setText(panel.dark, litRooms(sim) === 0 ? 'Lights up' : 'Go dark');
-      setText(panel.note, queuedFor('type', 'lights.all') ? 'Order queued' : refusalText() || (blind ? 'Static is a room nobody can see: lamps, sensors, or someone standing in it.' : ''));
+      setText(panel.burn, sim.state.helm.burn ? 'Cut drive' : 'Burn');
+      panel.burn.classList.toggle('is-on', sim.state.helm.burn);
+      setText(panel.flare, `Flare (${sim.state.helm.flares})`);
+      panel.flare.disabled = sim.state.helm.flares < 1;
+      setText(panel.note, ['lights.all', 'helm.burn', 'helm.heading', 'decoy.flare'].some((type) => queuedFor('type', type)) ? 'Order queued' : refusalText() || (blind ? 'Static is a room nobody can see: lamps, sensors, or someone standing in it.' : ''));
+      return;
+    }
+    if (panel.kind === 'contact') {
+      const seen = scopeView(sim).contacts.find((item) => item.id === panel.id);
+      if (!seen) {
+        // Off the scope: gone, docked, or lost in the clutter for good.
+        const last = sim.state.scope.record.at(-1);
+        setText(panel.title, `C${panel.id}`);
+        setText(panel.sub, 'No longer on the scope');
+        for (const s of Object.values(panel.stats)) setText(s.value, 'none');
+        for (const node of Object.values(panel.hails)) node.disabled = true;
+        setText(panel.note, last ? `${ENDINGS[last.outcome]}.` : '');
+        return;
+      }
+      setText(panel.title, `${seen.label} · ${seen.name}`);
+      setText(panel.sub, seen.stale ? `Last seen ${seconds(seen.age)} ago` : 'On the scope');
+      setText(panel.stats.bearing.value, `${bearingText(seen.bearing)} ±${Math.round(seen.bearingError)}°`);
+      setText(panel.stats.range.value, `${rangeText(seen.range, seen.rangeError)} ±${Math.round(seen.rangeError * 100)}%`);
+      setText(panel.stats.intent.value, seen.intent);
+      panel.stats.intent.node.classList.toggle('is-alarm', seen.state === 'closing' || seen.state === 'alongside');
+      setText(panel.stats.fix.value, seen.stale ? 'lost' : percent(seen.quality));
+      const contact = sim.state.scope.contacts.find((item) => item.id === panel.id);
+      for (const [bluff, node] of Object.entries(panel.hails)) {
+        const why = whyNoHail(sim, { contact: panel.id, bluff });
+        node.disabled = Boolean(why);
+        node.title = why ? sentence(why) : `About ${percent(bluffChance(sim, contact, bluff))}, as far as Margo can judge`;
+      }
+      const blocked = Object.keys(BLUFFS).map((bluff) => whyNoHail(sim, { contact: panel.id, bluff })).filter(Boolean);
+      setText(panel.note, queuedFor('type', 'contact.hail') ? 'Hailing' : refusalText() || (blocked.length === Object.keys(BLUFFS).length ? sentence(blocked[0]) : ''));
       return;
     }
     if (panel.kind === 'foe') {
@@ -1388,6 +1469,13 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
 
   function onTap({ x, y, pointerType }) {
     counts.canvasTaps += 1;
+    const onScope = scopeBox ? scopeHit(scopeBox, scopeView(sim), x, y, pointerType) : null;
+    if (onScope) {
+      // The scope: a return is read, anywhere else on the dial is a new heading.
+      if (onScope.contact !== undefined) select({ kind: 'contact', id: onScope.contact });
+      else if (onScope.heading !== undefined) order({ type: 'helm.heading', heading: Math.round(onScope.heading) });
+      return;
+    }
     let target = pickTarget(allTargets(), x, y, pointerType);
     if (!target) {
       selectedCrew = null;
@@ -1430,7 +1518,8 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
 
   function onInfo({ x, y, pointerType }) {
     counts.infos += 1;
-    const text = describe(pickTarget(allTargets(), x, y, pointerType)) ?? 'Open space. Cold, and a long way from anywhere.';
+    const onScope = scopeBox ? scopeHit(scopeBox, scopeView(sim), x, y, pointerType) : null;
+    const text = onScope ? describeScope(onScope) : (describe(pickTarget(allTargets(), x, y, pointerType)) ?? 'Open space. Cold, and a long way from anywhere.');
     nodes.info.textContent = text;
     nodes.info.hidden = false;
     nodes.info.style.left = `${Math.max(8, Math.min(x + 14, size.w - 300))}px`;
@@ -1455,6 +1544,14 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
     }
     if (action === 'brace') {
       if (sim.state.fight) order({ type: 'ship.brace' });
+      return;
+    }
+    if (action === 'burn') {
+      order({ type: 'helm.burn', on: !sim.state.helm.burn });
+      return;
+    }
+    if (action === 'flare') {
+      order({ type: 'decoy.flare' });
       return;
     }
     if (action === 'breakers') {
@@ -1635,7 +1732,7 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
         // Game time, so flames and alarms hold still while paused.
         time: (sim.state.tick + clock.alpha) * TICK_SECONDS,
         alpha: clock.alpha,
-        selected: selected?.kind === 'foe' || selected?.kind === 'crate' ? null : selected,
+        selected: selected?.kind === 'foe' || selected?.kind === 'crate' || selected?.kind === 'contact' ? null : selected,
         selectedCrew,
         selectedCrate: selected?.kind === 'crate' ? selected.id : null,
         showCrawlways,
@@ -1700,6 +1797,10 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
       },
       get foeView() {
         return foeView;
+      },
+      /** The scope's box and where each return is drawn on it (null in a fight). */
+      get scope() {
+        return scopeBox ? { box: scopeBox, dial: scopeDial(scopeBox), marks: scopeMarks(scopeBox, scopeView(sim)) } : null;
       },
       get selectedCrew() {
         return selectedCrew;

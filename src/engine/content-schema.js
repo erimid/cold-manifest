@@ -14,6 +14,7 @@ import { CONTRACT_TYPES } from '../sim/contracts.js';
 import { SERVICES } from '../sim/port.js';
 import { CRATE_KINDS } from '../sim/hold.js';
 import { validateLayout } from '../sim/ship.js';
+import { validateEncounter } from '../sim/encounters.js';
 import { createRng } from './rng.js';
 import { CONTENT_TYPES, typeOfPath } from './content.js';
 
@@ -171,6 +172,15 @@ function checkSectorDef(item) {
         if (!share(chance)) problems.push(`events.${kind} must be between 0 and 1`);
       }
   }
+  if (item.contacts !== undefined) {
+    if (!item.contacts || typeof item.contacts !== 'object' || Array.isArray(item.contacts)) problems.push('contacts must be an object of kind of point: chance of a contact on arriving');
+    else
+      for (const [kind, chance] of Object.entries(item.contacts)) {
+        if (!NODE_KINDS[kind]) problems.push(`contacts: unknown kind "${kind}" (${Object.keys(NODE_KINDS).join(', ')})`);
+        else if (kind === 'port') problems.push('contacts: a contact cannot turn up at a port');
+        if (!share(chance)) problems.push(`contacts.${kind} must be between 0 and 1`);
+      }
+  }
   const chase = item.pursuit;
   if (!chase || !share(chase.chance) || !isNonEmptyString(chase.ship) || !Number.isInteger(chase.lead) || chase.lead < 0 || !Number.isInteger(chase.sight) || chase.sight < 0) problems.push('pursuit must be { chance, ship, lead, sight }');
   if (problems.length) return problems;
@@ -257,6 +267,7 @@ const ITEM_RULES = {
   contracts: checkContract,
   ports: (item) => checkPort(item),
   factions: (item) => checkFaction(item),
+  encounters: (item, refs) => validateEncounter(item, { ships: refs.ships, nodeKinds: new Set(Object.keys(NODE_KINDS)) }),
 };
 
 /**

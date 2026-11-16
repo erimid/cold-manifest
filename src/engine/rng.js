@@ -15,6 +15,7 @@ export const STREAMS = Object.freeze([
   'market',
   'hazard', // fire spread and other accidents aboard
   'tactics', // enemy captains: where they aim, what they offer, whether talk works
+  'encounters', // the scope: who turns up, where, and how the returns wander
   'cosmetic', // visual-only rolls (stars, flicker). Never used by the sim.
 ]);
 

@@ -26,6 +26,7 @@ export const CONTENT_TYPES = Object.freeze([
   'memories',
   'refusals',
   'risks',
+  'encounters',
 ]);
 
 /** The content type of a file, from its path, or null if it is not in a known folder. */

@@ -683,7 +683,7 @@ async function voiceTests(browser) {
     await page.waitForFunction(() => window.coldManifest.sim.state.rooms.sensors.fire > 0.3, null, { timeout: 2000 });
     assert.equal(await paused(page), false, 'no pause this time');
     const saved = await game(page, () => JSON.parse(window.localStorage.getItem('cold-manifest.settings.v1')));
-    assert.deepEqual(saved.autoPause, { fight: true, boarded: true, fire: false, breach: true, death: true, objection: true, refusal: true });
+    assert.deepEqual(saved.autoPause, { fight: true, boarded: true, fire: false, breach: true, death: true, objection: true, refusal: true, contact: true });
   });
 
   await check('settings: sound off silences everything, sound on brings the hum back', async () => {
@@ -716,7 +716,7 @@ async function voiceTests(browser) {
   await check('a reload keeps the settings', async () => {
     await page.reload();
     await page.waitForFunction(() => window.coldManifest?.machine.state === 'title');
-    assert.deepEqual(await game(page, () => window.coldManifest.settings.values.autoPause), { fight: true, boarded: true, fire: false, breach: true, death: true, objection: true, refusal: true });
+    assert.deepEqual(await game(page, () => window.coldManifest.settings.values.autoPause), { fight: true, boarded: true, fire: false, breach: true, death: true, objection: true, refusal: true, contact: true });
   });
 
   await check('no page errors', async () => assert.deepEqual(errors, []));
@@ -1978,9 +1978,109 @@ async function loopTests(browser) {
 
 const server = await startServer();
 const browser = await chromium.launch(process.env.PW_CHROMIUM ? { executablePath: process.env.PW_CHROMIUM } : {});
+async function scopeTests(browser) {
+  console.log('iPad and desktop: the scope, the helm, a flare and a hail (H.1)');
+  const errors = [];
+  const scope = (page) => game(page, () => JSON.parse(JSON.stringify({ view: window.coldManifest.shipView.debug.scope, helm: window.coldManifest.sim.state.helm, contacts: window.coldManifest.sim.state.scope.contacts.map((c) => ({ id: c.id, state: c.state, tried: c.tried, shown: c.track.shown })), decoys: window.coldManifest.sim.state.scope.decoys.length, record: window.coldManifest.sim.state.scope.record })));
+  for (const [name, options, press] of [
+    ['iPad', devices['iPad (gen 7) landscape'], (page) => (selector) => page.tap(selector)],
+    ['desktop', { viewport: { width: 1366, height: 1024 } }, (page) => (selector) => page.click(selector)],
+  ]) {
+    const context = await browser.newContext(options);
+    const page = await context.newPage();
+    page.on('pageerror', (e) => errors.push(e.message));
+    const tapAt = (x, y) => (name === 'iPad' ? page.touchscreen.tap(x, y) : page.mouse.click(x, y));
+    await openShip(page, press(page), '&debug=1');
+
+    await check(`${name}: the scope stands in the corner of the monitor, clear of the ship, and a tap on the dial brings her round`, async () => {
+      const { view, helm } = await scope(page);
+      assert.ok(view.box.w >= 240 && view.box.h >= 200, JSON.stringify(view.box));
+      const rooms = (await game(page, () => window.coldManifest.shipView.debug.targets())).filter((t) => t.kind === 'room');
+      for (const room of rooms) assert.ok(room.x + room.w <= view.box.x, `${room.id} runs under the scope`);
+      assert.equal(view.marks.length, 0);
+      assert.equal(helm.heading, 90);
+      // Straight down the dial is a heading of 180.
+      await tapAt(view.dial.cx, view.dial.cy + view.dial.r / 2);
+      await page.waitForFunction(() => window.coldManifest.sim.state.helm.wanted === 180, null, { timeout: 2000 });
+      await page.waitForFunction(() => window.coldManifest.sim.state.helm.heading > 100, null, { timeout: 4000 });
+      assert.equal(await selected(page), null, 'a tap on the dial selects nothing');
+    });
+
+    await check(`${name}: Burn lights the drive and the ship gathers way; pressed again she drifts`, async () => {
+      assert.match(await page.textContent('#btn-burn'), /Burn/);
+      await press(page)('#btn-burn');
+      await page.waitForFunction(() => window.coldManifest.sim.state.helm.burn === true, null, { timeout: 2000 });
+      await page.waitForFunction(() => Math.hypot(window.coldManifest.sim.state.helm.vx, window.coldManifest.sim.state.helm.vy) > 0.05, null, { timeout: 5000 });
+      assert.match(await page.textContent('#btn-burn'), /Cut drive/);
+      await press(page)('#btn-burn');
+      await page.waitForFunction(() => window.coldManifest.sim.state.helm.burn === false, null, { timeout: 2000 });
+      const before = (await scope(page)).helm;
+      await sleep(300);
+      const after = (await scope(page)).helm;
+      assert.equal(after.vx, before.vx, 'drifting on as she was');
+    });
+
+    await check(`${name}: a contact from the debug panel shows on the scope, and tapping it reads it in the panel`, async () => {
+      await press(page)('#btn-dbg-menu');
+      await press(page)('#btn-dbg-closing-patrol-cutter');
+      if (await page.isVisible('#sheet')) await press(page)('#btn-dbg-menu');
+      await page.waitForSelector('#sheet', { state: 'hidden', timeout: 2000 });
+      await page.waitForFunction(() => window.coldManifest.shipView.debug.scope?.marks.length === 1, null, { timeout: 5000 });
+      const { view } = await scope(page);
+      const mark = view.marks[0];
+      const dx = mark.x - (view.box.x + view.box.w / 2);
+      assert.ok(mark.x > view.box.x && mark.x < view.box.x + view.box.w && dx < 0, 'bearing 300 is up and to the left of us');
+      await tapAt(mark.x, mark.y);
+      assert.deepEqual(await selected(page), { kind: 'contact', id: mark.id });
+      await page.waitForFunction(() => /^C\d+ · /.test(document.querySelector('#status-title')?.textContent ?? ''), null, { timeout: 2000 });
+      assert.match(await page.textContent('#status'), /Bearing\s*\d{3} ±\d+°/);
+      assert.match(await page.textContent('#status'), /Range\s*\d+ km/);
+      const size = await page.$eval('#btn-hail-manifest', (b) => ({ w: b.getBoundingClientRect().width, h: b.getBoundingClientRect().height }));
+      assert.ok(size.w >= 44 && size.h >= 44, `the hail button is ${size.w}x${size.h}`);
+    });
+
+    await check(`${name}: a hail is told once, and a flare goes out astern`, async () => {
+      await press(page)('#btn-hail-manifest');
+      await page.waitForFunction(() => window.coldManifest.sim.state.scope.record.length + window.coldManifest.sim.state.scope.contacts.filter((c) => c.tried.length).length >= 1, null, { timeout: 3000 });
+      const state = await scope(page);
+      const worked = state.record.some((entry) => entry.outcome === 'bluff');
+      if (!worked) {
+        assert.deepEqual(state.contacts[0].tried, ['manifest']);
+        assert.equal(await page.isDisabled('#btn-hail-manifest'), true, 'they have heard that one');
+        assert.equal(await page.isDisabled('#btn-hail-transponder'), true, 'and have stopped listening');
+      }
+      // Back to the ship's own panel for the flare (Escape on a keyboard, a tap on open space by hand).
+      const { view } = await scope(page);
+      await tapAt(view.box.x - 20, view.box.y + view.box.h - 6);
+      assert.equal(await selected(page), null);
+      assert.match(await page.textContent('#btn-flare'), /Flare \(2\)/);
+      await press(page)('#btn-flare');
+      await page.waitForFunction(() => window.coldManifest.sim.state.helm.flares === 1 && window.coldManifest.sim.state.scope.decoys.length === 1, null, { timeout: 2000 });
+      await page.waitForFunction(() => /Flare \(1\)/.test(document.querySelector('#btn-flare').textContent), null, { timeout: 2000 });
+    });
+
+    if (name === 'desktop') {
+      await check('desktop: V lights and cuts the drive, X puts out the last flare, and a long look at the scope says what it is', async () => {
+        await page.keyboard.press('v');
+        await page.waitForFunction(() => window.coldManifest.sim.state.helm.burn === true, null, { timeout: 2000 });
+        await page.keyboard.press('v');
+        await page.waitForFunction(() => window.coldManifest.sim.state.helm.burn === false, null, { timeout: 2000 });
+        await page.keyboard.press('x');
+        await page.waitForFunction(() => window.coldManifest.sim.state.helm.flares === 0, null, { timeout: 2000 });
+        assert.equal(await page.isDisabled('#btn-flare'), true);
+        const { view } = await scope(page);
+        await page.mouse.click(view.box.x + 30, view.box.y + view.box.h - 20, { button: 'right' });
+        assert.match(await game(page, () => window.coldManifest.shipView.debug.infoText), /The scope\. It only listens/);
+      });
+    }
+    await context.close();
+  }
+  await check('the scope: no page errors', async () => assert.deepEqual(errors, []));
+}
+
 // E2E_ONLY=boarding (or a comma list of suite names) runs just those suites, for chasing one failure.
 const only = process.env.E2E_ONLY?.split(',');
-const suites = { touch: touchTests, desktop: desktopTests, voice: voiceTests, fight: fightTests, hit: hitTests, ending: endingTests, boarding: boardingTests, dark: darkTests, hold: holdTests, enemies: enemyTests, margo: margoTests, chart: chartTests, loop: loopTests };
+const suites = { touch: touchTests, desktop: desktopTests, voice: voiceTests, fight: fightTests, hit: hitTests, ending: endingTests, boarding: boardingTests, dark: darkTests, hold: holdTests, enemies: enemyTests, margo: margoTests, chart: chartTests, loop: loopTests, scope: scopeTests };
 try {
   for (const [name, run] of Object.entries(suites)) if (!only || only.includes(name)) await run(browser);
 } finally {
