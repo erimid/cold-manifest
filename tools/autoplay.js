@@ -20,7 +20,9 @@
 //   under fire shots land on the ship for two minutes and do what hits do
 //              (S2.2); the same bot then has three minutes to clean up
 //   duels      every enemy in turn against a bot that fights (S2.3; it replaced
-//              S2.1's target practice)
+//              S2.1's target practice), and fights off boarders (S2.4)
+//   boarding   every crewed enemy again, with the bot sending its own boarding
+//              party once their shields are down (S2.4)
 //
 // Chaos: the bot sends three crew around the ship to deal with whatever is
 // worst, suits them up for breaches, works doors, airlocks and lights, routes
@@ -33,7 +35,8 @@ import { createContent } from '../src/engine/content.js';
 import { findBadNumbers, hashState } from '../src/engine/hash.js';
 import { createRng } from '../src/engine/rng.js';
 import { POWERED, used, supply } from '../src/sim/power.js';
-import { DEBUG_ACTIONS, OUTCOMES, chargeOf } from '../src/sim/combat.js';
+import { BOARD_SECONDS } from '../src/sim/boarding.js';
+import { DEBUG_ACTIONS, OUTCOMES, chargeOf, enemyOf, ourCrew } from '../src/sim/combat.js';
 import { MANUAL_DOOR_SECONDS, TICK_RATE, TICK_SECONDS, checkInvariants, createSim } from '../src/sim/sim.js';
 import { writeFileSync } from 'node:fs';
 
@@ -64,6 +67,9 @@ const ships = content.all('ships');
 /** The longest anyone should stand still with somewhere to be: a hand-worked door, with a wide margin. */
 const MAX_STILL_TICKS = 200;
 
+/** The longest anyone may spend boarding, from the order to coming out the other side: a long walk, a wait, the tube. */
+const MAX_BOARDING_TICKS = (60 + BOARD_SECONDS) * TICK_RATE;
+
 /** The longest a door can take to finish moving, plus a margin. Longer means stuck. */
 const MAX_DOOR_TICKS = Math.ceil(MANUAL_DOOR_SECONDS * TICK_RATE) + 3;
 
@@ -74,7 +80,7 @@ function playRun(seed) {
   // The bot's own dice, kept apart from the sim's so its choices are not part of the game state.
   const bot = createRng(`bot:${seed}`);
   const endings = {}; // how chaos fights ended, by outcome
-  const stats = { orders: 0, refused: 0, dropped: 0, doorMoves: 0, pauses: 0, powerMoves: 0, brownouts: 0, darkTicks: 0, fires: 0, spreads: 0, firesOut: 0, scorched: 0, jettisons: 0, airlessTicks: 0, moves: 0, arrivals: 0, blocked: 0, deaths: 0, firesFought: 0, patches: 0, repairs: 0, fights: 0, shots: 0, hits: 0, absorbed: 0, missed: 0, kills: 0 };
+  const stats = { orders: 0, refused: 0, dropped: 0, doorMoves: 0, pauses: 0, powerMoves: 0, brownouts: 0, darkTicks: 0, fires: 0, spreads: 0, firesOut: 0, scorched: 0, jettisons: 0, airlessTicks: 0, moves: 0, arrivals: 0, blocked: 0, deaths: 0, firesFought: 0, patches: 0, repairs: 0, fights: 0, shots: 0, hits: 0, absorbed: 0, missed: 0, kills: 0, boarded: 0, boardedUs: 0, melee: 0, captured: 0 };
   const watch = stuckWatch(sim);
   const movingSince = new Map(); // door id -> tick its last order was applied
 
@@ -102,6 +108,11 @@ function playRun(seed) {
   sim.events.on('breach.sealed', () => (stats.patches += 1));
   sim.events.on('system.repaired', () => (stats.repairs += 1));
   sim.events.on('fight.started', () => (stats.fights += 1));
+  sim.events.on('crew.boarded', () => (stats.boarded += 1));
+  sim.events.on('enemy.crew.boarded', () => (stats.boardedUs += 1));
+  sim.events.on('crew.died', ({ cause }) => cause === 'melee' && (stats.melee += 1));
+  sim.events.on('enemy.crew.died', ({ cause }) => cause === 'melee' && (stats.melee += 1));
+  sim.events.on('crew.captured', () => (stats.captured += 1));
   sim.events.on('weapon.fired', () => (stats.shots += 1));
   sim.events.on('shot.resolved', ({ result }) => (stats[result === 'hit' ? 'hits' : result === 'shield' ? 'absorbed' : 'missed'] += 1));
   sim.events.on('fight.over', ({ outcome }) => {
@@ -133,10 +144,18 @@ function playRun(seed) {
   }
 
   function crewAct() {
-    const alive = Object.values(sim.state.crew).filter((member) => member.alive);
+    const alive = ourCrew(sim).filter(({ member }) => member.alive);
     if (!alive.length) return;
-    const member = bot.pick(alive);
+    const { member, ship: aboard } = bot.pick(alive);
     if (bot.chance(0.15)) return order({ type: 'crew.suit', crew: member.id, on: !member.suit });
+    // In a fight, now and then: over to their ship, or back home.
+    const enemy = enemyOf(sim);
+    if (enemy && bot.chance(0.2)) {
+      const there = bot.chance(0.6) ? enemy : sim;
+      const rooms = there.layout.rooms.filter((room) => !there.state.rooms[room.id].jettisoned);
+      if (rooms.length) return order({ type: 'crew.move', crew: member.id, room: bot.pick(rooms).id, ship: there === sim ? 'us' : 'them' });
+    }
+    if (aboard !== sim) return;
     const room = troubleSpot();
     if (sim.state.rooms[room.id].breach > 0 && !member.suit) order({ type: 'crew.suit', crew: member.id, on: true });
     order({ type: 'crew.move', crew: member.id, room: room.id });
@@ -241,16 +260,28 @@ function playRun(seed) {
   return { ...stats, endings, hash: hashState(sim.snapshot()) };
 }
 
-/** Fail if anyone with somewhere to be has not moved for too long. Call once a tick. */
+/**
+ * Fail if anyone with somewhere to be has not moved for too long, on either
+ * ship, or anyone has been boarding (walking to an airlock, waiting, in the
+ * tube) for longer than MAX_BOARDING_TICKS. Call once a tick.
+ */
 function stuckWatch(sim) {
   const stillSince = new Map();
+  const boardingSince = new Map();
   return () => {
-    for (const member of Object.values(sim.state.crew)) {
-      const last = stillSince.get(member.id);
-      if (!member.alive || !member.path.length || !last || last.x !== member.x || last.y !== member.y) {
-        stillSince.set(member.id, { tick: sim.state.tick, x: member.x, y: member.y });
-      } else if (sim.state.tick - last.tick > MAX_STILL_TICKS) {
-        throw new Error(`${member.id} stuck on a path in ${member.room} since tick ${last.tick} (${member.task})`);
+    const enemy = enemyOf(sim);
+    const { tick } = sim.state;
+    for (const ship of enemy ? [sim, enemy] : [sim]) {
+      for (const member of Object.values(ship.state.crew)) {
+        const last = stillSince.get(member.id);
+        if (!member.alive || !member.path.length || !last || last.side !== ship.side || last.x !== member.x || last.y !== member.y) {
+          stillSince.set(member.id, { tick, side: ship.side, x: member.x, y: member.y });
+        } else if (tick - last.tick > MAX_STILL_TICKS) {
+          throw new Error(`${member.id} stuck on a path in ${member.room} aboard the ${ship.side} ship since tick ${last.tick} (${member.task}, next ${JSON.stringify(member.path[0])}${member.path[0]?.door ? `, door ${JSON.stringify(ship.state.doors[member.path[0].door])}` : ""})`);
+        }
+        if (!member.board) boardingSince.delete(member.id);
+        else if (!boardingSince.has(member.id)) boardingSince.set(member.id, tick);
+        else if (tick - boardingSince.get(member.id) > MAX_BOARDING_TICKS) throw new Error(`${member.id} has been boarding since tick ${boardingSince.get(member.id)} (${member.task} in ${member.room})`);
       }
     }
   };
@@ -383,12 +414,17 @@ const DUEL_LIT = ['bridge', 'weapons', 'shields', 'engines', 'reactor'];
  * how it ended, or throws on any failure, including a fight still going at
  * the end (the stalemate rule should make that impossible).
  */
-function playDuel(seed, enemyId) {
+function playDuel(seed, enemyId, { boarding = false } = {}) {
   const sim = createSim({ seed, ship, crew: roster, lines, weapons, ships });
-  const bot = createRng(`duel:${enemyId}:${seed}`);
+  const bot = createRng(`duel:${boarding ? 'board:' : ''}${enemyId}:${seed}`);
   const end = DUEL_MINUTES * 60 * TICK_RATE;
   const watch = stuckWatch(sim);
-  const tally = { shots: 0, hit: 0, shield: 0, miss: 0, incoming: 0, incomingHits: 0, offers: 0, hail: null };
+  const tally = { shots: 0, hit: 0, shield: 0, miss: 0, incoming: 0, incomingHits: 0, offers: 0, hail: null, boarded: 0, boardedUs: 0, killedAboard: 0, lostAboard: 0, captured: 0 };
+  sim.events.on('crew.boarded', ({ onto }) => onto === 'enemy' && (tally.boarded += 1));
+  sim.events.on('enemy.crew.boarded', ({ onto }) => onto === 'player' && (tally.boardedUs += 1));
+  sim.events.on('enemy.crew.died', ({ cause }) => cause === 'melee' && (tally.killedAboard += 1));
+  sim.events.on('crew.died', ({ cause }) => cause === 'melee' && (tally.lostAboard += 1));
+  sim.events.on('crew.captured', () => (tally.captured += 1));
   sim.events.on('shot.resolved', ({ side, result }) => {
     if (side === 'player') tally[result] += 1;
     else {
@@ -403,7 +439,8 @@ function playDuel(seed, enemyId) {
   const trouble = (room) => {
     const r = sim.state.rooms[room.id];
     const system = room.system ? sim.state.systems[room.system] : null;
-    return r.jettisoned ? 0 : r.fire * 3 + r.breach * 2 + (system && !system.lost ? system.damage * 0.5 : 0);
+    const boarders = Object.values(sim.state.crew).filter((member) => member.alive && member.owner === 'enemy' && member.room === room.id).length;
+    return r.jettisoned ? 0 : boarders * 4 + r.fire * 3 + r.breach * 2 + (system && !system.lost ? system.damage * 0.5 : 0);
   };
 
   while (sim.state.tick < end && !sim.state.fight?.over) {
@@ -442,11 +479,26 @@ function playDuel(seed, enemyId) {
       }
       // Get out if it is going badly.
       if (sim.state.hull.points <= sim.state.hull.max * 0.3) order({ type: 'ship.jump' });
-      // Crew: the first stays at the helm, the others go to the worst trouble.
-      const crew = Object.values(sim.state.crew).filter((member) => member.alive);
+      // Crew: the first stays at the helm, the others go to the worst trouble: boarders first.
+      const crew = ourCrew(sim).filter(({ member }) => member.alive);
       const spots = sim.layout.rooms.filter((room) => trouble(room) > 0).sort((a, b) => trouble(b) - trouble(a));
-      crew.forEach((member, index) => {
-        if (member.path.length) return;
+      const theirs = enemyOf(sim);
+      const theirShieldsDown = theirs && theirs.state.shield.charge < 1 && fight.phase === 'battle';
+      const repelling = Object.values(sim.state.crew).some((m) => m.alive && m.owner === 'enemy');
+      crew.forEach(({ member, ship: aboard }, index) => {
+        if (member.path.length || member.board) return;
+        if (aboard !== sim) {
+          // Aboard them: home when hurt, or when we are being boarded; otherwise to wherever their crew are.
+          if (member.health < 0.35 || repelling) return order({ type: 'crew.move', crew: member.id, room: 'medbay', ship: 'us' });
+          const foes = Object.values(theirs.state.crew).filter((m) => m.alive && m.owner === 'enemy');
+          const at = foes.find((m) => m.room === member.room) ?? foes[0];
+          if (at && at.room !== member.room && !at.path.length) order({ type: 'crew.move', crew: member.id, room: at.room, ship: 'them' });
+          return;
+        }
+        if (boarding && index > 0 && theirShieldsDown && !repelling && member.health >= 0.7) {
+          const bridge = theirs.layout.rooms.find((room) => room.kind === 'helm') ?? theirs.layout.rooms[0];
+          return order({ type: 'crew.move', crew: member.id, room: bridge.id, ship: 'them' });
+        }
         if (index === 0) {
           if (member.room !== 'bridge') order({ type: 'crew.move', crew: member.id, room: 'bridge' });
           return;
@@ -475,18 +527,20 @@ function playDuel(seed, enemyId) {
     outcome: over.outcome,
     seconds: (over.tick - sim.state.fight.started) / TICK_RATE,
     ourHull: sim.state.hull.points,
-    alive: Object.values(sim.state.crew).filter((member) => member.alive).length,
+    alive: Object.values(sim.state.crew).filter((member) => member.alive && member.owner === 'player').length,
+    boarding,
     hash: hashState(sim.snapshot()),
   };
 }
 
 const started = performance.now();
 const failures = [];
-const totals = { orders: 0, refused: 0, dropped: 0, doorMoves: 0, pauses: 0, powerMoves: 0, brownouts: 0, darkTicks: 0, fires: 0, spreads: 0, firesOut: 0, scorched: 0, jettisons: 0, airlessTicks: 0, moves: 0, arrivals: 0, blocked: 0, deaths: 0, firesFought: 0, patches: 0, repairs: 0, fights: 0, shots: 0, hits: 0, absorbed: 0, missed: 0, kills: 0, said: 0 };
+const totals = { orders: 0, refused: 0, dropped: 0, doorMoves: 0, pauses: 0, powerMoves: 0, brownouts: 0, darkTicks: 0, fires: 0, spreads: 0, firesOut: 0, scorched: 0, jettisons: 0, airlessTicks: 0, moves: 0, arrivals: 0, blocked: 0, deaths: 0, firesFought: 0, patches: 0, repairs: 0, fights: 0, shots: 0, hits: 0, absorbed: 0, missed: 0, kills: 0, boarded: 0, boardedUs: 0, melee: 0, captured: 0, said: 0 };
 const scenarios = [];
 const duels = [];
 const chaosEndings = {};
 const enemyIds = ships.filter((item) => item.enemy === true).map((item) => item.id);
+const crewedIds = ships.filter((item) => item.enemy === true && item.crew?.length).map((item) => item.id);
 const underFire = [];
 for (let i = 1; i <= runs; i++) {
   const seed = `${baseSeed}-${i}`;
@@ -516,13 +570,16 @@ for (let i = 1; i <= runs; i++) {
     failures.push({ seed, reason: `under fire: ${err.message}` });
   }
   for (const enemyId of enemyIds) {
-    try {
-      const first = playDuel(seed, enemyId);
-      const second = playDuel(seed, enemyId);
-      if (first.hash !== second.hash) failures.push({ seed, reason: `duel with ${enemyId}: replay mismatch (${first.hash} vs ${second.hash})` });
-      duels.push(first);
-    } catch (err) {
-      failures.push({ seed, reason: `duel with ${enemyId}: ${err.message}` });
+    for (const boarding of crewedIds.includes(enemyId) ? [false, true] : [false]) {
+      const label = `${boarding ? 'boarding duel' : 'duel'} with ${enemyId}`;
+      try {
+        const first = playDuel(seed, enemyId, { boarding });
+        const second = playDuel(seed, enemyId, { boarding });
+        if (first.hash !== second.hash) failures.push({ seed, reason: `${label}: replay mismatch (${first.hash} vs ${second.hash})` });
+        duels.push(first);
+      } catch (err) {
+        failures.push({ seed, reason: `${label}: ${err.message}` });
+      }
     }
   }
 }
@@ -548,6 +605,7 @@ out.push(`  crew per run:      ${per(totals.moves)} sent, ${per(totals.arrivals)
 out.push(`  crew work per run: ${per(totals.firesFought)} fires put out, ${per(totals.patches)} breaches patched, ${per(totals.repairs)} system bars repaired`);
 out.push(`  air:               rooms were unbreathable ${((100 * totals.airlessTicks) / (runs * ticks * ship.rooms.length)).toFixed(0)}% of room-time`);
 out.push(`  fights per run:    ${per(totals.fights)} started, ${per(totals.shots)} shots fired (${per(totals.hits)} hit, ${per(totals.absorbed)} stopped by shields, ${per(totals.missed)} missed), ${per(totals.kills)} enemies destroyed`);
+out.push(`  boarding per run:  ${per(totals.boarded)} of ours crossed, ${per(totals.boardedUs)} of theirs crossed, ${per(totals.melee)} killed hand to hand, ${per(totals.captured)} captured`);
 out.push(`  fight endings:     ${Object.keys(OUTCOMES).map((k) => `${OUTCOMES[k].toLowerCase()} ${chaosEndings[k] ?? 0}`).join(', ')}`);
 out.push(`  AI lines per run:  ${per(totals.said)} (about one every ${totals.said ? Math.round((runs * minutes * 60) / totals.said) : 0} seconds)`);
 out.push(`  pauses per run:    ${per(totals.pauses)} (state checked every paused frame)`);
@@ -575,9 +633,9 @@ out.push(`  deaths by cause:   ${Object.entries(causes).sort((a, b) => b[1] - a[
 out.push(`  hull left:         ${mean(underFire.map((s) => s.hull)).toFixed(1)} of ${ship.hullPoints} on average; ${mean(underFire.map((s) => s.damage)).toFixed(1)} system bars still broken at the end`);
 out.push('');
 out.push(`Duels (up to ${DUEL_MINUTES} game minutes each): every enemy in turn, and a bot fighting it`);
-for (const enemyId of enemyIds) {
-  const mine = duels.filter((d) => d.enemy === enemyId);
-  const name = ships.find((item) => item.id === enemyId).name;
+for (const [enemyId, boarding] of enemyIds.flatMap((id) => (crewedIds.includes(id) ? [[id, false], [id, true]] : [[id, false]]))) {
+  const mine = duels.filter((d) => d.enemy === enemyId && d.boarding === boarding);
+  const name = `${ships.find((item) => item.id === enemyId).name}${boarding ? ', and we board them' : ''}`;
   const counts = {};
   for (const d of mine) counts[d.outcome] = (counts[d.outcome] ?? 0) + 1;
   const times = mine.map((d) => d.seconds).sort((a, b) => a - b);
@@ -589,6 +647,7 @@ for (const enemyId of enemyIds) {
   out.push(`    length:         median ${times.length ? Math.round(times[Math.floor(times.length / 2)]) : 'n/a'}s, longest ${times.length ? Math.round(times.at(-1)) : 'n/a'}s`);
   out.push(`    our shots:      ${mean(mine.map((d) => d.shots)).toFixed(1)} per fight; ${pct(mine.reduce((n, d) => n + d.hit, 0), fired)} hit, ${pct(mine.reduce((n, d) => n + d.shield, 0), fired)} stopped by shields, ${pct(mine.reduce((n, d) => n + d.miss, 0), fired)} missed`);
   out.push(`    their shots:    ${mean(mine.map((d) => d.incoming)).toFixed(1)} per fight, ${mean(mine.map((d) => d.incomingHits)).toFixed(1)} hit; our hull at the end ${mean(mine.map((d) => d.ourHull)).toFixed(1)} of ${ship.hullPoints}, crew alive ${mean(mine.map((d) => d.alive)).toFixed(2)} of ${roster.length}`);
+  if (crewedIds.includes(enemyId)) out.push(`    boarding:       ${mean(mine.map((d) => d.boardedUs)).toFixed(1)} of theirs crossed to us, ${mean(mine.map((d) => d.boarded)).toFixed(1)} of ours to them per fight; ${mine.reduce((n, d) => n + d.killedAboard, 0)} of theirs and ${mine.reduce((n, d) => n + d.lostAboard, 0)} of ours killed hand to hand, ${mine.reduce((n, d) => n + d.captured, 0)} captured`);
   if (Object.keys(hails).length) out.push(`    hails answered: ${Object.entries(hails).map(([k, n]) => `${k} ${n}`).join(', ')}; ${mine.reduce((n, d) => n + d.offers, 0)} surrender offers made`);
 }
 out.push('');

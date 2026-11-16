@@ -102,15 +102,15 @@ export function createShipRenderer(layout) {
   /** Everything tappable, in CSS pixels. Crew sit above doors, doors above rooms. */
   function targets(view, crew = {}, { foe = false } = {}) {
     const out = [];
+    for (const member of Object.values(crew)) {
+      out.push({ id: member.id, kind: 'crew', cx: view.ox + member.x * view.scale, cy: view.oy + member.y * view.scale, r: CREW_RADIUS * view.scale, priority: 3 });
+    }
     if (foe) {
-      // The other ship: only its rooms can be picked, to aim at or to look at.
+      // The other ship: its rooms, to aim at, send boarders to or look at, and any of ours aboard.
       for (const room of layout.rooms) {
         out.push({ id: room.id, kind: 'foe', x: view.ox + room.x * view.scale, y: view.oy + room.y * view.scale, w: room.w * view.scale, h: room.h * view.scale, priority: 1 });
       }
       return out;
-    }
-    for (const member of Object.values(crew)) {
-      out.push({ id: member.id, kind: 'crew', cx: view.ox + member.x * view.scale, cy: view.oy + member.y * view.scale, r: CREW_RADIUS * view.scale, priority: 3 });
     }
     for (const room of layout.rooms) {
       out.push({ id: room.id, kind: 'room', x: view.ox + room.x * view.scale, y: view.oy + room.y * view.scale, w: room.w * view.scale, h: room.h * view.scale, priority: 1 });
@@ -519,7 +519,8 @@ export function createShipRenderer(layout) {
     }
   }
 
-  function drawCrew(ctx, view, member, alpha, selected, hostile = false) {
+  function drawCrew(ctx, view, member, alpha, selected) {
+    const hostile = member.owner === 'enemy';
     const s = view.scale;
     const at = crewAt(member, alpha);
     const cx = view.ox + at.x * s;
@@ -724,9 +725,10 @@ export function createShipRenderer(layout) {
    *   chosenWeapon  the slot picked for aiming, or null
    *   aimed      Map of room id -> [weapon slots of the other ship pointed at it]
    *   inviting   true while the other ship is choosing a room of this one to aim at
-   *   hostile    true to draw the crew aboard as enemies
+   * Crew are drawn by whose they are: the enemy's in alarm red with an initial,
+   * wherever they stand. Anyone in the docking tube is drawn faded.
    */
-  function draw(ctx, { view, width, height, dpr, state, time, alpha = 1, selected, selectedCrew = null, showVents = false, reduceFlicker = false, clear = true, charges = [], chosenWeapon = null, aimed = null, inviting = false, hostile = false }) {
+  function draw(ctx, { view, width, height, dpr, state, time, alpha = 1, selected, selectedCrew = null, showVents = false, reduceFlicker = false, clear = true, charges = [], chosenWeapon = null, aimed = null, inviting = false }) {
     if (clear) ctx.clearRect(0, 0, width, height);
     ctx.drawImage(staticLayer(view, width, height, dpr), 0, 0, width, height);
     const s = view.scale;
@@ -751,8 +753,13 @@ export function createShipRenderer(layout) {
 
     // The dead first, so the living are drawn over them.
     const crew = Object.values(state.crew);
-    for (const member of crew) if (!member.alive) drawCrew(ctx, view, member, alpha, member.id === selectedCrew, hostile);
-    for (const member of crew) if (member.alive) drawCrew(ctx, view, member, alpha, member.id === selectedCrew, hostile);
+    for (const member of crew) if (!member.alive) drawCrew(ctx, view, member, alpha, member.id === selectedCrew);
+    for (const member of crew) {
+      if (!member.alive) continue;
+      if (member.task === 'crossing') ctx.globalAlpha = 0.45;
+      drawCrew(ctx, view, member, alpha, member.id === selectedCrew);
+      ctx.globalAlpha = 1;
+    }
 
     state.weapons.forEach((slot, index) => drawHardpoint(ctx, view, index, slot, charges[index] ?? 0, chosenWeapon === index));
     drawShield(ctx, view, state.shield, time, reduceFlicker);

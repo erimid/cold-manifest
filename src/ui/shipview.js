@@ -10,9 +10,13 @@
 // their ship, to aim it. It all works while paused. From S2.3 a card above the
 // weapons bar answers a hail (talk, pay, open fire) or a surrender (accept,
 // refuse), and the weapons bar has a Jump button that fills as the drive charges.
+// From S2.4, with one of ours selected, a tap on a room of theirs sends them
+// across to board; a tap on a room of ours brings them home. Ours aboard them
+// are drawn on their ship and say so on their chip; their boarders are drawn
+// red aboard ours and cannot be selected.
 
 import { pickTarget } from '../engine/hit.js';
-import { DEBUG_ACTIONS, OUTCOMES, OFFER_SECONDS, bribePrice, chargeOf, enemyOf, evasion, jumpCharge, offerText, shieldLayers, shieldMax, talkChance } from '../sim/combat.js';
+import { DEBUG_ACTIONS, OUTCOMES, OFFER_SECONDS, bribePrice, chargeOf, enemyOf, evasion, findCrew, jumpCharge, offerText, ourCrew, shieldLayers, shieldMax, talkChance } from '../sim/combat.js';
 import { describeTask } from '../sim/crew.js';
 import { POWERED, aiCoreStatus, free, lightsDraw, litRooms, supply, usable } from '../sim/power.js';
 import { SPACE, SYSTEMS } from '../sim/systems.js';
@@ -45,12 +49,12 @@ function effectWords(effects) {
   return words.join('  ');
 }
 /** Short task names for the crew bar, where there is no room for a sentence. */
-const CHIP_TASKS = { walking: 'Walking', waiting: 'At a door', extinguish: 'Fighting fire', patch: 'Patching hull', repair: 'Repairing', unjam: 'Freeing door', idle: 'Standing by' };
+const CHIP_TASKS = { walking: 'Walking', waiting: 'At a door', extinguish: 'Fighting fire', patch: 'Patching hull', repair: 'Repairing', unjam: 'Freeing door', idle: 'Standing by', fighting: 'Fighting', sabotage: 'Wrecking', crossing: 'In the tube' };
 /** Start a sentence with a capital: the sim's reasons are written to follow "because". */
 const sentence = (text) => `${text.charAt(0).toUpperCase()}${text.slice(1)}.`;
 
 /** What each debug ending button is called (DEBUG_ACTIONS in combat.js). */
-const DEBUG_LABELS = { cripple: 'Cripple them', killCrew: 'Kill their crew', surrender: 'They surrender', flee: 'They run', chargeJump: 'Charge our jump', stalemate: 'Stalemate now', sinkUs: 'Sink us', money: '+100 money' };
+const DEBUG_LABELS = { cripple: 'Cripple them', killCrew: 'Kill their crew', surrender: 'They surrender', flee: 'They run', chargeJump: 'Charge our jump', stalemate: 'Stalemate now', sinkUs: 'Sink us', money: '+100 money', boardUs: 'They board us' };
 const seconds = (ticks) => `${Math.max(0, Math.ceil(ticks * TICK_SECONDS))}s`;
 
 /** How fast the AI's lines type out, in characters per second of real time, and how often a character blips. */
@@ -108,8 +112,8 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
       return `${enemy.layout.name}: ${room.name}. ${room.system ? SYSTEMS[room.system].blurb : 'Part of their ship.'}`;
     }
     if (target?.kind === 'crew') {
-      const member = sim.state.crew[target.id];
-      return `${member.name}. ${describeTask(sim, member)}.${member.alive ? ` Health ${percent(member.health)}.` : ''}`;
+      const { member, ship } = findCrew(sim, target.id);
+      return `${member.name}${ship === sim ? '' : `, aboard the ${ship.layout.name}`}. ${describeTask(ship, member)}.${member.alive ? ` Health ${percent(member.health)}.` : ''}`;
     }
     if (target?.kind === 'door') {
       const door = layout.door(target.id);
@@ -150,10 +154,14 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
     foeView = foe.renderer.fit({ x: area.x + area.w - column, y: area.y + 24, w: column, h: area.h - 28 });
   }
 
-  /** Everything tappable on the canvas: our ship, and in a fight the rooms of theirs. */
+  /** Our own people aboard a ship: the ones that can be tapped. Their boarders are only looked at. */
+  const oursOn = (ship) => Object.values(ship.state.crew).filter((member) => member.owner === 'player');
+
+  /** Everything tappable on the canvas: our ship and our crew, and in a fight the rooms of theirs and any of ours aboard. */
   function allTargets() {
-    const own = renderer.targets(view, sim.state.crew);
-    return foe && foeView ? [...own, ...foe.renderer.targets(foeView, {}, { foe: true })] : own;
+    const own = renderer.targets(view, oursOn(sim));
+    const enemy = enemyOf(sim);
+    return foe && foeView && enemy ? [...own, ...foe.renderer.targets(foeView, oursOn(enemy), { foe: true })] : own;
   }
 
   // ---------- orders ----------
@@ -231,10 +239,9 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
     } }, label, el('small', {}, on ? 'On' : 'Off'));
     nodes.sheet.replaceChildren(
       el('div', { class: 'stencil' }, 'Settings'),
-      toggle('set-sound', 'Sound', 'sound', settings.values.sound),
-      toggle('set-shake', 'Screen shake', 'shake', settings.values.shake),
+      el('div', { class: 'sheet__pairs' }, toggle('set-sound', 'Sound', 'sound', settings.values.sound), toggle('set-shake', 'Screen shake', 'shake', settings.values.shake)),
       el('div', { class: 'stencil sheet__sub' }, 'Pause the game when'),
-      ...AUTO_PAUSE.map((item) => toggle(`set-pause-${item.id}`, item.label, `autoPause.${item.id}`, settings.values.autoPause[item.id])),
+      el('div', { class: 'sheet__pairs' }, ...AUTO_PAUSE.map((item) => toggle(`set-pause-${item.id}`, item.label, `autoPause.${item.id}`, settings.values.autoPause[item.id]))),
     );
   }
 
@@ -622,7 +629,7 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
   }
 
   function buildRoster() {
-    const chips = Object.values(sim.state.crew).map((member) => {
+    const chips = ourCrew(sim).map(({ member }) => {
       const health = el('i', { class: 'crewchip__health' });
       const task = el('span', { class: 'crewchip__task' });
       const node = el(
@@ -639,8 +646,12 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
 
   function updateRoster() {
     for (const chip of roster) {
-      const member = sim.state.crew[chip.id];
-      setText(chip.task, member.alive ? (CHIP_TASKS[member.task] ?? 'Standing by') : 'Dead');
+      const found = findCrew(sim, chip.id);
+      if (!found) continue;
+      const { member, ship } = found;
+      const away = ship !== sim && member.alive;
+      setText(chip.task, member.alive ? `${away ? 'Aboard: ' : ''}${CHIP_TASKS[member.task] ?? 'Standing by'}` : 'Dead');
+      chip.node.classList.toggle('is-away', away);
       const width = `${Math.round(member.health * 100)}%`;
       if (chip.health.style.width !== width) chip.health.style.width = width;
       chip.node.classList.toggle('is-selected', selectedCrew === chip.id);
@@ -652,9 +663,9 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
   function buildPanel() {
     panel = null;
     if (selectedCrew) {
-      const member = sim.state.crew[selectedCrew];
+      const { member } = findCrew(sim, selectedCrew);
       const stats = { health: stat('Health'), where: stat('In'), doing: stat('Doing'), suit: stat('Suit') };
-      const suit = button('btn-suit', 'Suit up', () => order({ type: 'crew.suit', crew: member.id, on: !sim.state.crew[member.id].suit }));
+      const suit = button('btn-suit', 'Suit up', () => order({ type: 'crew.suit', crew: member.id, on: !findCrew(sim, member.id).member.suit }));
       const note = el('span', { class: 'status__note' });
       nodes.status.replaceChildren(
         el('div', { class: 'status__head' }, el('div', { class: 'status__title', id: 'status-title' }, member.name), el('div', { class: 'stencil' }, `Crew ${member.index + 1}`), note),
@@ -663,8 +674,8 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
           'div',
           { class: 'status__controls' },
           suit,
-          debug && button('btn-dbg-hurt', 'Hurt', () => order({ type: 'debug.crew', crew: member.id, health: Math.max(0.05, sim.state.crew[member.id].health - 0.3) }), 'btn--debug'),
-          el('span', { class: 'status__hint status__hint--inline', id: 'crew-hint' }, 'Tap a room to send them there.'),
+          debug && button('btn-dbg-hurt', 'Hurt', () => order({ type: 'debug.crew', crew: member.id, health: Math.max(0.05, findCrew(sim, member.id).member.health - 0.3) }), 'btn--debug'),
+          el('span', { class: 'status__hint status__hint--inline', id: 'crew-hint' }, sim.state.fight ? 'Tap a room to send them there, or a room of theirs to board.' : 'Tap a room to send them there.'),
         ),
       );
       panel = { kind: 'crew', id: member.id, stats, suit, note };
@@ -816,11 +827,14 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
       return;
     }
     if (panel.kind === 'crew') {
-      const member = sim.state.crew[panel.id];
+      const found = findCrew(sim, panel.id);
+      if (!found) return;
+      const { member, ship } = found;
       setText(panel.stats.health.value, member.alive ? percent(member.health) : 'dead');
       panel.stats.health.node.classList.toggle('is-alarm', !member.alive || member.health < 0.35);
-      setText(panel.stats.where.value, layout.room(member.room).name);
-      setText(panel.stats.doing.value, describeTask(sim, member));
+      setText(panel.stats.where.value, ship === sim ? layout.room(member.room).name : `Their ${ship.layout.room(member.room).name.toLowerCase()}`);
+      panel.stats.where.node.classList.toggle('is-alarm', ship !== sim);
+      setText(panel.stats.doing.value, describeTask(ship, member));
       setText(panel.stats.suit.value, member.suit ? 'on (slower)' : 'off');
       setText(panel.suit, member.suit ? 'Suit off' : 'Suit up');
       panel.suit.disabled = !member.alive;
@@ -900,6 +914,8 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
     if (target.kind === 'foe') {
       // A weapon is selected: a room of theirs is what it should shoot. It stays selected, to change its mind.
       if (selectedWeapon !== null) order({ type: 'weapon.target', slot: selectedWeapon, room: target.id });
+      // Someone of ours is selected: that is where they board (or, aboard already, go next).
+      else if (selectedCrew) order({ type: 'crew.move', crew: selectedCrew, room: target.id, ship: 'them' });
       else select({ kind: 'foe', id: target.id });
       return;
     }
@@ -909,7 +925,7 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
     }
     if (target.kind === 'room' && selectedCrew) {
       // Someone is selected: a room is where they should go. They stay selected for the next order.
-      order({ type: 'crew.move', crew: selectedCrew, room: target.id });
+      order({ type: 'crew.move', crew: selectedCrew, room: target.id, ship: 'us' });
       return;
     }
     select({ kind: target.kind, id: target.id });
@@ -942,7 +958,7 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
       return;
     }
     if (action.startsWith('select-')) {
-      const member = Object.values(sim.state.crew)[Number(action.slice(7)) - 1];
+      const member = ourCrew(sim)[Number(action.slice(7)) - 1]?.member;
       if (member) selectCrew(selectedCrew === member.id ? null : member.id);
       return;
     }
@@ -1079,7 +1095,7 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
           charges: enemy.state.weapons.map((_, slot) => chargeOf(enemy, slot)),
           aimed: aimedBy(sim),
           inviting: selectedWeapon !== null && !sim.state.fight.over,
-          hostile: true,
+          selectedCrew,
         });
         drawFight(clock.alpha);
       }
@@ -1097,8 +1113,8 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
     },
     /** For automated tests and the debug console. */
     debug: {
-      targets: () => renderer.targets(view, sim.state.crew),
-      foeTargets: () => (foe && foeView ? foe.renderer.targets(foeView, {}, { foe: true }) : []),
+      targets: () => renderer.targets(view, oursOn(sim)),
+      foeTargets: () => (foe && foeView && enemyOf(sim) ? foe.renderer.targets(foeView, oursOn(enemyOf(sim)), { foe: true }) : []),
       get shake() {
         return shake;
       },

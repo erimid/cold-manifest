@@ -10,6 +10,7 @@
 // triggers, and no trust, memory or damage behaviour yet.
 
 import { slotsIn } from '../engine/content-schema.js';
+import { findCrew } from '../sim/combat.js';
 import { aiCoreStatus } from '../sim/power.js';
 
 const TICKS = 20; // per second (DECISIONS D-002); voice.js is imported by sim.js, so it cannot import the constant back
@@ -24,7 +25,7 @@ export const IDLE_MAX_SECONDS = 90;
 export const QUEUE_MAX = 6;
 export const LOG_MAX = 60;
 
-const crewName = (sim, event) => ({ crew_name: sim.state.crew[event.crew]?.name });
+const crewName = (sim, event) => ({ crew_name: findCrew(sim, event.crew)?.member.name });
 
 /**
  * What makes her speak. For each game event: the line category, how urgent it
@@ -50,6 +51,9 @@ export const TRIGGERS = Object.freeze({
   'fight.fleeing': { category: 'combat_progress', priority: 3, ttl: 10 },
   'hull.hit': { category: 'hazard', priority: 4, ttl: 6, cooldown: 15 },
   'enemy.hull.hit': { category: 'combat_progress', priority: 2, ttl: 5, cooldown: 20, chance: 0.5 },
+  'enemy.crew.boarded': { category: 'combat_progress', priority: 4, ttl: 10, cooldown: 30 },
+  'crew.boarded': { category: 'combat_progress', priority: 2, ttl: 8, cooldown: 30, slots: crewName },
+  'crew.captured': { category: 'combat_end', priority: 2, ttl: 15, cooldown: 20 },
 });
 
 export function newVoiceState() {
