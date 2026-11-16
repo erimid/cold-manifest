@@ -3,11 +3,11 @@
 
 export const SYSTEMS = Object.freeze({
   reactor: { name: 'Reactor', code: 'RX', blurb: 'Makes power. Damage reduces output.' },
-  engines: { name: 'Engines', code: 'ENG', blurb: 'Evasion in a fight, and needed to jump.' },
+  engines: { name: 'Engines', code: 'ENG', blurb: 'Needed to jump. A burning drive is easy to see from a long way off.' },
   shields: { name: 'Shields', code: 'SHD', blurb: 'Absorb incoming fire.' },
   weapons: { name: 'Weapons', code: 'WPN', blurb: 'Hardpoints. Each weapon needs power and charges over time.' },
   life_support: { name: 'Life support', code: 'O2', blurb: 'Keeps oxygen up across the ship.' },
-  sensors: { name: 'Sensors', code: 'SNS', blurb: 'Shows enemy interiors, hazards, and what else is aboard.' },
+  sensors: { name: 'Sensors', code: 'SNS', blurb: 'See into our own dark rooms, hold a lock on another ship, and take the fix a jump needs.' },
   doors: { name: 'Door control', code: 'DR', blurb: 'Remote door control. Without power, doors are opened by hand.' },
   medbay: { name: 'Medbay', code: 'MED', blurb: 'Heals crew.' },
   cargo: { name: 'Cargo hold', code: 'CGO', blurb: 'Holds cargo, and contraband.' },

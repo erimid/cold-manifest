@@ -1,7 +1,10 @@
 // Draws a ship. Ours is seen side-on, as stacked decks (D-071): back walls,
 // pipes, deck plates, ladders under the hatches, the lift shaft, crawlway
 // hatches and the old company's stencils. The enemy is drawn as a sensor
-// return (D-073): room outlines in phosphor green, nothing else. All art is
+// return (D-073): room outlines in phosphor green, nothing else, and only the
+// rooms our sensors have resolved; the rest is static (D-074). A room of our
+// own that Margo cannot see into is drawn as she last saw it, behind static.
+// All art is
 // drawn in code. The parts that never change are drawn once to an offscreen
 // canvas; lighting, doors, hazards, the lift car and crew go on top every frame.
 //
@@ -68,6 +71,35 @@ const CREW_COLOURS = ['#5ec8ff', '#ffd166', '#ef7bbf', '#8be28b', '#c9a0ff', '#f
 export function createShipRenderer(layout, { sensor = false } = {}) {
   let cache = null; // { canvas, key }
   let liftCar = null; // where the lift car was last drawn, in tiles: the top of the car
+  let staticFrames = null; // a few tiles of screen static, made once
+  /** Screen static, as a canvas pattern: a few frames to flick between. Seeded, like everything else. */
+  const staticPattern = (ctx, time, still) => {
+    if (!staticFrames) {
+      const rng = createRng(`static:${layout.id}`);
+      staticFrames = Array.from({ length: 4 }, () => {
+        const tile = document.createElement('canvas');
+        tile.width = 64;
+        tile.height = 64;
+        const t = tile.getContext('2d');
+        for (let y = 0; y < 64; y += 2) {
+          for (let x = 0; x < 64; x += 2) {
+            const v = rng.next();
+            // Our own schematic keeps its rooms readable under the snow; an unresolved return is mostly snow.
+            const floor = sensor ? 0.45 : 0.72;
+            if (v < floor) continue;
+            t.fillStyle = sensor ? `rgba(127, 227, 154, ${(v - floor) * 0.9})` : `rgba(233, 220, 195, ${(v - floor) * 2.4})`;
+            t.fillRect(x, y, 2, 2);
+          }
+        }
+        return tile;
+      });
+    }
+    return ctx.createPattern(staticFrames[still ? 0 : Math.floor(time * 10) % staticFrames.length], 'repeat');
+  };
+  const clock = (ticks) => {
+    const s = Math.floor(ticks / 20);
+    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  };
   /** Places along the floor that must stay clear of crates: ladders, doorways and crawlway hatches. */
   const clearOf = (room) => {
     const xs = [];
@@ -278,9 +310,8 @@ export function createShipRenderer(layout, { sensor = false } = {}) {
     }
 
     if (sensor) {
-      drawSensorRooms(ctx, px);
+      // Only the outline of the return is fixed: its rooms are drawn live, as the scan makes them out.
       ctx.restore();
-      drawRoomNames(ctx, view, 'rgba(150, 230, 170, 0.75)');
       return;
     }
 
@@ -404,29 +435,100 @@ export function createShipRenderer(layout, { sensor = false } = {}) {
     }
   }
 
-  /** A sensor return: room outlines in phosphor green on black, nothing of the paint or the clutter. */
-  function drawSensorRooms(ctx, px) {
-    for (const room of layout.rooms) {
-      ctx.fillStyle = 'rgba(20, 60, 36, 0.55)';
-      ctx.fillRect(room.x, room.y, room.w, room.h);
-      ctx.strokeStyle = 'rgba(120, 230, 150, 0.16)';
-      ctx.lineWidth = px;
-      ctx.beginPath();
-      for (let x = 1; x < room.w; x++) {
-        ctx.moveTo(room.x + x, room.y);
-        ctx.lineTo(room.x + x, room.y + room.h);
+  /**
+   * A room on the sensor return (D-074). Until the scan resolves it, it is a
+   * smear of static that thickens; then a phosphor outline with its name.
+   * Returns true once it is resolved, so its hazards can be drawn over it.
+   */
+  function drawSensorRoom(ctx, view, room, known, time, still) {
+    const s = view.scale;
+    const x = view.ox + room.x * s;
+    const y = view.oy + room.y * s;
+    const w = room.w * s;
+    const h = room.h * s;
+    const resolve = known ? known.resolve : 1;
+    if (resolve < 1) {
+      ctx.save();
+      ctx.globalAlpha = 0.25 + 0.6 * resolve;
+      ctx.fillStyle = staticPattern(ctx, time, still);
+      ctx.fillRect(x + 3, y + 3, w - 6, h - 6);
+      ctx.restore();
+      if (resolve > 0.4) {
+        ctx.strokeStyle = `rgba(127, 227, 154, ${(resolve - 0.4) * 0.8})`;
+        ctx.lineWidth = 1;
+        ctx.setLineDash([3, 5]);
+        ctx.strokeRect(x + 1.5, y + 1.5, w - 3, h - 3);
+        ctx.setLineDash([]);
       }
-      for (let y = 1; y < room.h; y++) {
-        ctx.moveTo(room.x, room.y + y);
-        ctx.lineTo(room.x + room.w, room.y + y);
-      }
-      ctx.stroke();
+      return false;
     }
-    for (const room of layout.rooms) {
-      ctx.strokeStyle = C.phosphor;
-      ctx.lineWidth = 2 * px;
-      ctx.strokeRect(room.x, room.y, room.w, room.h);
+    ctx.fillStyle = 'rgba(20, 60, 36, 0.55)';
+    ctx.fillRect(x, y, w, h);
+    ctx.strokeStyle = 'rgba(120, 230, 150, 0.16)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let gx = 1; gx < room.w; gx++) {
+      ctx.moveTo(x + gx * s, y);
+      ctx.lineTo(x + gx * s, y + h);
     }
+    for (let gy = 1; gy < room.h; gy++) {
+      ctx.moveTo(x, y + gy * s);
+      ctx.lineTo(x + w, y + gy * s);
+    }
+    ctx.stroke();
+    ctx.strokeStyle = C.phosphor;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(x, y, w, h);
+    ctx.font = `700 ${Math.max(9, Math.min(13, s * 0.36))}px ${MONO}`;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.fillStyle = 'rgba(150, 230, 170, 0.75)';
+    ctx.fillText(room.name.toUpperCase(), x + 7, y + 5, w - 12);
+    ctx.textAlign = 'start';
+    ctx.textBaseline = 'alphabetic';
+    return true;
+  }
+
+  /** Static over a room nobody can see into, and how long ago it was last seen. What is drawn under it is a memory. */
+  function drawFog(ctx, view, room, age, time, still, label) {
+    const s = view.scale;
+    const x = view.ox + room.x * s;
+    const y = view.oy + room.y * s;
+    const w = room.w * s;
+    const h = room.h * s;
+    ctx.fillStyle = sensor ? 'rgba(2, 10, 6, 0.45)' : 'rgba(40, 46, 58, 0.22)';
+    ctx.fillRect(x, y, w, h);
+    ctx.save();
+    ctx.globalAlpha = sensor ? 0.5 : 0.3;
+    ctx.fillStyle = staticPattern(ctx, time, still);
+    ctx.fillRect(x, y, w, h);
+    ctx.restore();
+    if (!sensor) {
+      // The schematic still knows the room is there: its outline and name stay on top of the snow.
+      ctx.strokeStyle = 'rgba(233, 220, 195, 0.3)';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([6, 4]);
+      ctx.strokeRect(x + 2.5, y + 2.5, w - 5, h - 5);
+      ctx.setLineDash([]);
+      const name = room.name.toUpperCase();
+      ctx.font = `700 ${Math.max(9, Math.min(13, s * 0.36))}px ${MONO}`;
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      ctx.fillStyle = 'rgba(233, 220, 195, 0.7)';
+      if (ctx.measureText(name).width <= w - 12 || (room.kind !== 'corridor' && room.kind !== 'lift')) ctx.fillText(name, x + 7, y + 0.5 * s, w - 12);
+    }
+    if (w < 64) return; // a lift shaft has no room for words
+    const text = `${label} ${clock(age)}`;
+    ctx.font = `700 ${Math.max(9, Math.min(11, s * 0.3))}px ${MONO}`;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'bottom';
+    const tw = Math.min(w - 8, ctx.measureText(text).width + 8);
+    ctx.fillStyle = 'rgba(5, 7, 11, 0.85)';
+    ctx.fillRect(x + 4, y + h - 19, tw, 15);
+    ctx.fillStyle = sensor ? C.phosphor : C.paper;
+    ctx.fillText(text, x + 8, y + h - 5, w - 16);
+    ctx.textAlign = 'start';
+    ctx.textBaseline = 'alphabetic';
   }
 
   function drawShaft(ctx, room, px) {
@@ -1027,6 +1129,10 @@ export function createShipRenderer(layout, { sensor = false } = {}) {
   }
 
   /**
+   * What is known, not what is so (senses.js):
+   *   rooms      our own rooms as Margo knows them: { id: roomView }. A room with live: false is drawn from memory, behind static
+   *   contact    for a sensor return: { id: contactView }. A room is static until its scan resolves it
+   * Without them the ship is drawn exactly as it is.
    * Extra, for fights:
    *   clear      false to draw over what is already on the canvas (the second ship)
    *   charges    each weapon's charge, 0 to 1, by slot
@@ -1036,19 +1142,36 @@ export function createShipRenderer(layout, { sensor = false } = {}) {
    * Crew are drawn by whose they are: the enemy's in alarm red with an initial,
    * wherever they stand. Anyone in the docking tube is drawn faded.
    */
-  function draw(ctx, { view, width, height, dpr, state, time, alpha = 1, selected, selectedCrew = null, showCrawlways = false, reduceFlicker = false, clear = true, charges = [], chosenWeapon = null, aimed = null, inviting = false }) {
+  function draw(ctx, { view, width, height, dpr, state, time, alpha = 1, selected, selectedCrew = null, showCrawlways = false, reduceFlicker = false, clear = true, charges = [], chosenWeapon = null, aimed = null, inviting = false, rooms = null, contact = null }) {
     if (clear) ctx.clearRect(0, 0, width, height);
     ctx.drawImage(staticLayer(view, width, height, dpr), 0, 0, width, height);
     const s = view.scale;
 
-    for (const room of layout.rooms) drawRoomLive(ctx, view, room, state.rooms[room.id], time, reduceFlicker);
+    /** Rooms whose people cannot be seen: unresolved or stale on a sensor return, unwatched aboard our own ship. */
+    const unseen = new Set();
+    for (const room of layout.rooms) {
+      const known = sensor ? (contact?.[room.id] ?? null) : (rooms?.[room.id] ?? null);
+      if (sensor && !drawSensorRoom(ctx, view, room, known, time, reduceFlicker)) {
+        unseen.add(room.id);
+        continue;
+      }
+      drawRoomLive(ctx, view, room, known ?? state.rooms[room.id], time, reduceFlicker);
+      if (known && !known.live) {
+        unseen.add(room.id);
+        drawFog(ctx, view, room, known.age, time, reduceFlicker, sensor ? 'LAST SCAN' : 'NO EYES');
+      }
+    }
     drawLift(ctx, view, state, alpha);
-    for (const door of layout.doors) drawDoor(ctx, view, door, state.doors[door.id], state.doors[door.id].openness);
+    // A sensor return does not show their doors until the rooms either side are made out.
+    for (const door of layout.doors) {
+      if (sensor && contact && [door.a, door.b].some((id) => id !== 'space' && (contact[id]?.resolve ?? 1) < 1)) continue;
+      drawDoor(ctx, view, door, state.doors[door.id], state.doors[door.id].openness);
+    }
 
     if (showCrawlways) drawCrawlways(ctx, view);
 
-    // The dead first, so the living are drawn over them.
-    const crew = Object.values(state.crew);
+    // The dead first, so the living are drawn over them. The other side's people only show where we can see.
+    const crew = Object.values(state.crew).filter((member) => member.owner !== 'enemy' || !unseen.has(member.room));
     for (const member of crew) if (!member.alive) drawCrew(ctx, view, member, alpha, member.id === selectedCrew);
     for (const member of crew) {
       if (!member.alive) continue;
@@ -1067,11 +1190,13 @@ export function createShipRenderer(layout, { sensor = false } = {}) {
       ctx.lineWidth = 2.5;
       if (selected.kind === 'room' || selected.kind === 'foe') {
         const room = layout.room(selected.id);
+        if (sensor && contact && (contact[selected.id]?.resolve ?? 1) < 1) ctx.setLineDash([4, 5]);
         ctx.strokeRect(view.ox + room.x * s - 1, view.oy + room.y * s - 1, room.w * s + 2, room.h * s + 2);
       } else {
         const rect = doorRect(layout.door(selected.id));
         ctx.strokeRect(view.ox + rect.x * s - 5, view.oy + rect.y * s - 5, rect.w * s + 10, rect.h * s + 10);
       }
+      ctx.setLineDash([]);
     }
   }
 

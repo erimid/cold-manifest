@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { validateContent } from '../src/engine/content-schema.js';
-import { DEBUG_ACTIONS, HAIL_SECONDS, JUMP_CHARGE, OFFER_SECONDS, OUTCOMES, STALEMATE_SECONDS, START_MONEY, enemyOf, jumpCharge, talkChance } from '../src/sim/combat.js';
+import { DEBUG_ACTIONS, FIX, HAIL_SECONDS, OFFER_SECONDS, OUTCOMES, STALEMATE_SECONDS, START_MONEY, enemyOf, fixOf, talkChance } from '../src/sim/combat.js';
 import { TICK_RATE, checkInvariants } from '../src/sim/sim.js';
 import { ARCHETYPES, validateTactics } from '../src/sim/tactics.js';
 import { content, newCrewedSim, newTalkingSim } from './helpers.js';
@@ -70,6 +70,7 @@ test('a hail: nobody fires while they talk, even with guns charged and aimed; th
   armUs(sim);
   const fired = collect(sim, 'weapon.fired');
   const engaged = collect(sim, 'fight.engaged');
+  go(sim, { type: 'debug.combat', action: 'scan' });
   go(sim, { type: 'weapon.target', slot: 0, room: 'shields' });
   assert.equal(sim.state.fight.phase, 'hail');
   seconds(sim, HAIL_SECONDS - 3);
@@ -193,7 +194,7 @@ test('turned down, or left unanswered, they fight on and do not offer twice', ()
   }
 });
 
-test('badly hurt, they run: engines first, and they are gone when their drive is charged', () => {
+test('badly hurt, they run: engines first, and they are gone when they have a fix; a hit sets it back', () => {
   const sim = fight();
   go(sim, { type: 'fight.engage' });
   const enemy = enemyOf(sim);
@@ -205,28 +206,49 @@ test('badly hurt, they run: engines first, and they are gone when their drive is
   assert.equal(sim.state.fight.fleeing, true);
   assert.equal(fleeing.length, 1);
   assert.equal(enemy.state.systems.engines.power, enemy.state.systems.engines.level, 'engines got their bars');
-  const bars = enemy.state.systems.engines.power;
-  seconds(sim, JUMP_CHARGE / bars + 1);
+  seconds(sim, FIX.seconds / 2);
+  const before = fixOf(enemy);
+  assert.ok(before > 0.2 && before < 0.6, `partway to a fix, less what their own guns cost them: ${before}`);
+  enemy.state.hull.points = enemy.state.hull.max; // so the hit does not end it
+  go(sim, { type: 'debug.hit', at: 'them', room: 'reactor', weapon: 'pulse-laser', force: true });
+  assert.ok(Math.abs(fixOf(enemy) - (before - FIX.hit)) < 0.01, 'a hit knocks their fix back');
+  enemy.state.hull.points = 2;
+  seconds(sim, FIX.seconds * 3); // their own guns keep costing them, so it takes a while
   assert.equal(sim.state.fight.over?.outcome, 'fled');
 });
 
-test('our jump drive charges with engines and a pilot, and jumping out ends the fight', () => {
+test('a jump needs a sensor fix: sensors, a pilot, and a bar on the engines when the moment comes', () => {
   const sim = fight(DRONE);
-  assert.match(sim.whyNot({ type: 'ship.jump' }), /jump drive is at 0%/);
+  assert.match(sim.whyNot({ type: 'ship.jump' }), /sensor fix is at 0%/);
   seconds(sim, 10);
-  const bars = sim.state.systems.engines.power;
-  assert.ok(Math.abs(jumpCharge(sim) - (10 * bars) / JUMP_CHARGE) < 0.01);
-  // No pilot, no charge.
+  assert.ok(Math.abs(fixOf(sim) - 10 / FIX.seconds) < 0.01, 'one sensor bar takes FIX.seconds');
+  // No pilot: the fix slips away.
   const pilot = Object.values(sim.state.crew).find((m) => m.room === 'bridge');
   sim.enqueue({ type: 'crew.move', crew: pilot.id, room: 'medbay' });
-  seconds(sim, 10);
-  const before = sim.state.jump;
-  seconds(sim, 10);
-  assert.equal(sim.state.jump, before, 'nobody at the helm, so the drive held still');
-  sim.state.jump = JUMP_CHARGE;
+  seconds(sim, 6);
+  assert.ok(fixOf(sim) < 10 / FIX.seconds, 'nobody at the helm, so the fix drained');
+  sim.state.fix = 1;
   assert.match(sim.whyNot({ type: 'ship.jump' }), /nobody is at the helm/);
   sim.enqueue({ type: 'crew.move', crew: pilot.id, room: 'bridge' });
   seconds(sim, 10);
+  sim.state.fix = 1;
+  // No power to the sensors: no fix to be had, and what there was goes.
+  go(sim, { type: 'power.add', system: 'sensors', delta: -1 });
+  seconds(sim, 2);
+  assert.match(sim.whyNot({ type: 'ship.jump' }), /sensors have no power to take a fix/);
+  assert.ok(fixOf(sim) < 1 && fixOf(sim) > 0.85, 'and what there was drains');
+  go(sim, { type: 'power.add', system: 'sensors', delta: 1 });
+  const ready = collect(sim, 'fix.ready');
+  seconds(sim, 4);
+  assert.equal(ready.length, 1);
+  // A hit on us costs a quarter of it; firing a gun costs a tenth.
+  go(sim, { type: 'debug.hit', at: 'us', room: 'cargo', weapon: 'pulse-laser', force: true });
+  assert.ok(Math.abs(fixOf(sim) - (1 - FIX.hit)) < 0.01);
+  sim.state.fix = 1;
+  // The drive has to have a bar.
+  go(sim, { type: 'power.add', system: 'engines', delta: -1 });
+  assert.match(sim.whyNot({ type: 'ship.jump' }), /engines have no power/);
+  go(sim, { type: 'power.add', system: 'engines', delta: 1 });
   go(sim, { type: 'ship.jump' });
   assert.equal(sim.state.fight.over.outcome, 'escaped');
   assert.match(newCrewedSim().whyNot({ type: 'ship.jump' }), /nowhere to jump/);
@@ -333,7 +355,8 @@ test('a fight replays exactly from its seed', () => {
     const sim = fight(SKIFF, 'replay');
     armUs(sim);
     go(sim, { type: 'fight.engage' });
-    go(sim, { type: 'weapon.target', slot: 0, room: 'weapons' });
+    go(sim, { type: 'debug.combat', action: 'scan' });
+  go(sim, { type: 'weapon.target', slot: 0, room: 'weapons' });
     seconds(sim, 120);
     return JSON.stringify(sim.snapshot());
   };

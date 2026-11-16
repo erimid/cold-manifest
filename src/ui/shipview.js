@@ -9,16 +9,22 @@
 // weapons bar appears above the status panel: tap a weapon, then a room on
 // their ship, to aim it. It all works while paused. From S2.3 a card above the
 // weapons bar answers a hail (talk, pay, open fire) or a surrender (accept,
-// refuse), and the weapons bar has a Jump button that fills as the drive charges.
+// refuse), and the weapons bar has a Jump button that fills as the sensors take a fix.
+// From S2.7 the screen shows what Margo knows, not what is so (senses.js): a
+// room of ours she cannot see into is drawn as last seen, behind static, and
+// their ship is static until the sensors resolve it room by room. Each side's
+// signature and the other's lock on it are in the weapons bar, and with nothing
+// selected the status panel breaks our signature down and has the Go dark button.
 // From S2.4, with one of ours selected, a tap on a room of theirs sends them
 // across to board; a tap on a room of ours brings them home. Ours aboard them
 // are drawn on their ship and say so on their chip; their boarders are drawn
 // red aboard ours and cannot be selected.
 
 import { pickTarget } from '../engine/hit.js';
-import { DEBUG_ACTIONS, OUTCOMES, OFFER_SECONDS, bribePrice, chargeOf, enemyOf, evasion, findCrew, jumpCharge, offerText, ourCrew, shieldLayers, shieldMax, talkChance } from '../sim/combat.js';
+import { DEBUG_ACTIONS, OUTCOMES, OFFER_SECONDS, bribePrice, chargeOf, enemyOf, findCrew, fixOf, offerText, ourCrew, shieldLayers, shieldMax, talkChance, whyNoJump } from '../sim/combat.js';
 import { describeTask } from '../sim/crew.js';
 import { POWERED, aiCoreStatus, free, lightsDraw, litRooms, supply, usable } from '../sim/power.js';
+import { contactView, roomView, sensorsUp, signature, unseen } from '../sim/senses.js';
 import { SPACE, SYSTEMS } from '../sim/systems.js';
 import { TICK_SECONDS } from '../sim/sim.js';
 import { el } from './dom.js';
@@ -54,7 +60,7 @@ const CHIP_TASKS = { walking: 'Walking', waiting: 'At a door', extinguish: 'Figh
 const sentence = (text) => `${text.charAt(0).toUpperCase()}${text.slice(1)}.`;
 
 /** What each debug ending button is called (DEBUG_ACTIONS in combat.js). */
-const DEBUG_LABELS = { cripple: 'Cripple them', killCrew: 'Kill their crew', surrender: 'They surrender', flee: 'They run', chargeJump: 'Charge our jump', stalemate: 'Stalemate now', sinkUs: 'Sink us', money: '+100 money', boardUs: 'They board us' };
+const DEBUG_LABELS = { cripple: 'Cripple them', killCrew: 'Kill their crew', surrender: 'They surrender', flee: 'They run', chargeJump: 'Get our fix', scan: 'Perfect lock', stalemate: 'Stalemate now', sinkUs: 'Sink us', money: '+100 money', boardUs: 'They board us' };
 const seconds = (ticks) => `${Math.max(0, Math.ceil(ticks * TICK_SECONDS))}s`;
 
 /** How fast the AI's lines type out, in characters per second of real time, and how often a character blips. */
@@ -113,6 +119,7 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
     if (target?.kind === 'foe') {
       const enemy = enemyOf(sim);
       const room = enemy.layout.room(target.id);
+      if (!contactView(sim, target.id)?.resolved) return `${enemy.layout.name}: a part of the return the sensors have not made out yet. Sensor power resolves it faster; so does anything they have lit, hot or loud.`;
       return `${enemy.layout.name}: ${room.name}. ${room.system ? SYSTEMS[room.system].blurb : 'Part of their ship.'}`;
     }
     if (target?.kind === 'crew') {
@@ -158,7 +165,7 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
     const boxW = Math.round(Math.min(320, Math.max(240, monitor.w * 0.29)));
     sensorBox = { x: monitor.x + monitor.w - boxW - 10, y: monitor.y + 10, w: boxW, h: monitor.h - 20 };
     view = renderer.fit({ x: monitor.x + 12, y: monitor.y + 10, w: monitor.w - boxW - 34, h: monitor.h - 20 });
-    foeView = foe.renderer.fit({ x: sensorBox.x + 8, y: sensorBox.y + 24, w: sensorBox.w - 16, h: sensorBox.h - 32 });
+    foeView = foe.renderer.fit({ x: sensorBox.x + 8, y: sensorBox.y + 24, w: sensorBox.w - 16, h: sensorBox.h - 50 }); // clear of the title above and the lock readout below
   }
 
   /** Our own people aboard a ship: the ones that can be tapped. Their boarders are only looked at. */
@@ -381,8 +388,9 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
     const fill = el('i', {});
     const hull = el('span', { class: 'fightside__hull', id: `${id}-hull` });
     const line = el('span', { class: 'fightside__line', id: `${id}-line` });
+    const lock = el('span', { class: 'fightside__line fightside__lock', id: `${id}-lock` });
     const name = el('span', { class: 'stencil' }, title);
-    return { node: el('div', { class: 'fightside', id }, el('div', { class: 'fightside__head' }, name, hull), el('span', { class: 'fightside__bar' }, fill), line), fill, hull, line, name };
+    return { node: el('div', { class: 'fightside', id }, el('div', { class: 'fightside__head' }, name, hull), el('span', { class: 'fightside__bar' }, fill), line, lock), fill, hull, line, lock, name };
   }
 
   function buildFightBar() {
@@ -457,7 +465,21 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
     const width = `${Math.round((hull.points / hull.max) * 100)}%`;
     if (part.fill.style.width !== width) part.fill.style.width = width;
     part.node.classList.toggle('is-alarm', hull.points <= hull.max * 0.3);
-    setText(part.line, `Shields ${shieldLayers(ship)}/${shieldMax(ship)} · Evade ${percent(evasion(ship))}`);
+    // How loud the ship is, and how good a firing solution the other side has on it (D-074).
+    const watcher = ship === sim ? enemyOf(sim) : sim;
+    const contact = watcher?.state.contact;
+    setText(part.line, `Shields ${shieldLayers(ship)}/${shieldMax(ship)} · Signature ${percent(signature(ship).total)}`);
+    const ours = ship === sim;
+    setText(part.lock, !contact || sim.state.fight?.over ? '' : contact.locked ? `${ours ? 'Their' : 'Our'} lock on ${ours ? 'us' : 'them'} ${percent(contact.lock)}` : ours ? 'They have no lock on us' : 'We have no lock on them');
+    // Good news on our side is no lock; on theirs it is a lock.
+    part.lock.classList.toggle('is-good', Boolean(contact) && contact.locked !== ours);
+  }
+
+  /** The Jump button's small print: the fix as it builds, then whatever else is missing, then Ready. */
+  function jumpNote() {
+    if (fixOf(sim) < 1) return sim.state.systems.sensors.power > 0 ? `Fix ${percent(fixOf(sim))}` : 'No sensors';
+    const problem = whyNoJump(sim);
+    return !problem ? 'Ready' : /helm/.test(problem) ? 'No pilot' : 'No drive';
   }
 
   function weaponStatus(slot) {
@@ -485,13 +507,13 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
     const enemy = enemyOf(sim);
     updateSide(fightBar.own, sim);
     updateSide(fightBar.theirs, enemy);
-    if (fight.fleeing && !fight.over) setText(fightBar.theirs.line, `Running · jump ${percent(jumpCharge(enemy))}`);
+    if (fight.fleeing && !fight.over) setText(fightBar.theirs.line, `Running · jump fix ${percent(fixOf(enemy))}`);
     setText(fightBar.theirs.name, fight.over ? OUTCOMES[fight.over.outcome] : enemy.layout.name);
     fightBar.leave.hidden = !fight.over;
     fightBar.jump.hidden = Boolean(fight.over);
-    const charged = jumpCharge(sim);
-    setText(fightBar.jumpNote, charged >= 1 ? 'Ready' : percent(charged));
-    fightBar.jump.classList.toggle('is-ready', charged >= 1);
+    const note = jumpNote();
+    setText(fightBar.jumpNote, note);
+    fightBar.jump.classList.toggle('is-ready', note === 'Ready');
     updateCall(fight, enemy);
     for (const tile of fightBar.tiles) {
       const state = sim.state.weapons[tile.index];
@@ -564,6 +586,16 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
       ctx.textAlign = 'left';
       ctx.textBaseline = 'top';
       ctx.fillText(`SENSOR RETURN · ${enemyOf(sim)?.layout.name.toUpperCase() ?? ''}`, b.x + 10, b.y + 7, b.w - 20);
+      const contact = sim.state.contact;
+      if (contact && !sim.state.fight?.over) {
+        // How good our firing solution is, in words as well as a number.
+        const text = `${sensorsUp(sim) ? 'ACTIVE' : 'PASSIVE'} · ${contact.locked ? `LOCK ${percent(contact.lock)}` : 'NO LOCK'}`;
+        ctx.textBaseline = 'bottom';
+        ctx.fillStyle = 'rgba(4, 16, 10, 0.85)';
+        ctx.fillRect(b.x + 4, b.y + b.h - 22, b.w - 8, 18);
+        ctx.fillStyle = contact.locked ? '#7fe39a' : '#ff8a2b';
+        ctx.fillText(text, b.x + 10, b.y + b.h - 6, b.w - 20);
+      }
     }
     ctx.textAlign = 'start';
     ctx.textBaseline = 'alphabetic';
@@ -593,6 +625,8 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
     ctx.fillRect(x, y, w, h);
     ctx.restore();
   }
+
+  const reduceMotion = () => Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
 
   function roundRect(x, y, w, h, r) {
     ctx.beginPath();
@@ -681,8 +715,10 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       const rise = age * 14;
-      ctx.fillText(impact.result === 'hit' ? `${IMPACT_TEXT.hit} ${impact.damage}` : IMPACT_TEXT[impact.result], at.x, at.y - 14 - rise);
-      const words = effectWords(impact.effects);
+      const wild = impact.blind ? 'WILD ' : '';
+      ctx.fillText(impact.result === 'hit' ? `${wild}${IMPACT_TEXT.hit} ${impact.damage}` : `${wild}${IMPACT_TEXT[impact.result]}`, at.x, at.y - 14 - rise);
+      // What a hit did is only known if someone could see the room it landed in.
+      const words = (ours ? contactView(sim, impact.room)?.live : !unseen(sim, impact)) ? effectWords(impact.effects) : impact.result === 'hit' ? '?' : '';
       if (words) {
         ctx.font = "700 10px ui-monospace, 'SF Mono', Menlo, Consolas, monospace";
         ctx.fillStyle = `rgba(255, 214, 150, ${fade})`;
@@ -801,22 +837,30 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
     if (selected?.kind === 'foe') {
       const enemy = enemyOf(sim);
       const room = enemy.layout.room(selected.id);
-      const stats = { system: stat(room.system ? SYSTEMS[room.system].name : 'Room'), hull: stat('Hull'), fire: stat('Fire'), breach: stat('Breach'), oxygen: stat('Oxygen') };
+      const resolved = Boolean(contactView(sim, room.id)?.resolved);
+      const stats = { system: stat(resolved && room.system ? SYSTEMS[room.system].name : 'Room'), hull: stat('Hull'), fire: stat('Fire'), breach: stat('Breach'), oxygen: stat('Oxygen') };
       const note = el('span', { class: 'status__note' });
       nodes.status.replaceChildren(
-        el('div', { class: 'status__head' }, el('div', { class: 'status__title', id: 'status-title' }, room.name), el('div', { class: 'stencil' }, enemy.layout.name), note),
+        el('div', { class: 'status__head' }, el('div', { class: 'status__title', id: 'status-title' }, resolved ? room.name : 'Unresolved return'), el('div', { class: 'stencil' }, enemy.layout.name), note),
         el('div', { class: 'status__stats' }, Object.values(stats).map((s) => s.node)),
         el('p', { class: 'status__hint' }, 'Their ship. Tap a weapon, then a room here, to aim at it.'),
       );
-      panel = { kind: 'foe', id: room.id, sys: room.system ?? null, stats, note };
+      panel = { kind: 'foe', id: room.id, sys: room.system ?? null, stats, note, resolved };
       updatePanel();
       return;
     }
     if (!selected) {
+      // Nothing picked: how loud the ship is and why (D-074), and the one switch that matters most to it.
+      const stats = { total: stat('Signature'), light: stat('Light'), noise: stat('Noise'), heat: stat('Heat'), burn: stat('Burn'), eyes: stat('Eyes') };
+      const dark = button('btn-dark', 'Go dark', () => order({ type: 'lights.all', on: litRooms(sim) === 0 }));
+      const note = el('span', { class: 'status__note' });
       nodes.status.replaceChildren(
-        el('div', { class: 'stencil' }, layout.name),
-        el('p', { class: 'status__hint' }, 'Tap a crew member, then a room, to send them there. Tap a room for its status, or a door to open or close it. Long-press anything to ask what it is.'),
+        el('div', { class: 'status__head' }, el('div', { class: 'status__title', id: 'status-title' }, layout.name), el('div', { class: 'stencil' }, 'What we give off'), note),
+        el('div', { class: 'status__stats' }, Object.values(stats).map((s) => s.node)),
+        el('div', { class: 'status__controls status__controls--row' }, dark, el('span', { class: 'status__hint status__hint--inline' }, 'Tap a crew member, then a room, to send them there. Tap a room or a door to work it. Long-press anything to ask what it is.')),
       );
+      panel = { kind: 'ship', stats, dark, note };
+      updatePanel();
       return;
     }
 
@@ -908,11 +952,29 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
       setText(panel.note, queuedFor('slot', panel.slot) ? 'Order queued' : refusalText() || (state.powered ? '' : 'Route power to weapons (WPN) to charge it.'));
       return;
     }
+    if (panel.kind === 'ship') {
+      const sig = signature(sim);
+      setText(panel.stats.total.value, percent(sig.total));
+      for (const part of ['light', 'noise', 'heat', 'burn']) setText(panel.stats[part].value, percent(sig[part]));
+      const blind = layout.rooms.filter((room) => !sim.state.seen[room.id].live).length;
+      setText(panel.stats.eyes.value, blind ? `${blind} rooms unseen` : 'every room');
+      panel.stats.eyes.node.classList.toggle('is-alarm', blind > 0);
+      setText(panel.dark, litRooms(sim) === 0 ? 'Lights up' : 'Go dark');
+      setText(panel.note, queuedFor('type', 'lights.all') ? 'Order queued' : refusalText() || (blind ? 'Static is a room nobody can see: lamps, sensors, or someone standing in it.' : ''));
+      return;
+    }
     if (panel.kind === 'foe') {
       const enemy = enemyOf(sim);
       if (!enemy) return;
-      const r = enemy.state.rooms[panel.id];
-      if (panel.sys) {
+      const r = contactView(sim, panel.id, enemy);
+      if (r.resolved !== panel.resolved) return buildPanel(); // the scan just made it out
+      if (!r.resolved) {
+        for (const s of Object.values(panel.stats)) setText(s.value, '?');
+        setText(panel.note, refusalText() || `Resolving: ${percent(r.resolve)}`);
+        return;
+      }
+      if (panel.sys && !r.live) setText(panel.stats.system.value, 'unknown');
+      else if (panel.sys) {
         const system = enemy.state.systems[panel.sys];
         const works = system.level - system.damage;
         setText(panel.stats.system.value, panel.sys === 'reactor' ? `${works} of ${system.level} bars` : POWERED.includes(panel.sys) ? `power ${system.power} of ${works}` : system.damage ? 'damaged' : 'working');
@@ -922,7 +984,7 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
       setText(panel.stats.fire.value, r.fire > 0 ? percent(r.fire) : 'none');
       setText(panel.stats.breach.value, r.breach > 0 ? percent(r.breach) : 'none');
       setText(panel.stats.oxygen.value, percent(r.oxygen));
-      setText(panel.note, refusalText());
+      setText(panel.note, refusalText() || (r.live ? '' : `Sensors are dark: this is the last scan, ${seconds(r.age)} ago.`));
       return;
     }
     if (panel.kind === 'crew') {
@@ -941,7 +1003,7 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
       return;
     }
     if (panel.kind === 'room') {
-      const r = sim.state.rooms[panel.id];
+      const r = roomView(sim, panel.id); // what Margo knows: live, or the last she saw
       setText(panel.stats.oxygen.value, percent(r.oxygen));
       setText(panel.stats.temperature.value, `${Math.round(r.temperature)}°C`);
       setText(panel.stats.light.value, percent(r.light));
@@ -969,7 +1031,7 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
         panel.jettison.disabled = r.jettisoned;
         panel.jettison.classList.toggle('is-armed', armed && !r.jettisoned);
       }
-      let note = refusalText();
+      let note = refusalText() || (r.live ? '' : `No eyes in here. This is what it looked like ${seconds(r.age)} ago.`);
       if (r.jettisoned) note = 'This section was cut loose. It is gone.';
       else if (queuedFor('room', panel.id)) note = 'Order queued';
       else if (armed) note = 'Everything inside will be lost. Press again to confirm.';
@@ -1144,7 +1206,7 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
         input.on('key', onKey),
         input.on('dragstart', () => (nodes.info.hidden = true)),
         sim.events.on('shot.resolved', (event) => {
-          impacts.push({ side: event.side, room: event.room, result: event.result, damage: event.damage, effects: event.effects, tick: event.tick });
+          impacts.push({ side: event.side, room: event.room, result: event.result, damage: event.damage, effects: event.effects, blind: event.blind, tick: event.tick });
           if (event.side === 'enemy' && event.result === 'hit') shake = { tick: event.tick, strength: SHAKE_BASE + SHAKE_PER_DAMAGE * event.damage };
         }),
       ];
@@ -1180,6 +1242,8 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
         charges: sim.state.weapons.map((_, slot) => chargeOf(sim, slot)),
         chosenWeapon: selectedWeapon,
         aimed: enemy ? aimedBy(enemy) : null,
+        rooms: Object.fromEntries(layout.rooms.map((room) => [room.id, roomView(sim, room.id)])),
+        reduceFlicker: reduceMotion(),
       });
       if (enemy && foe) {
         foe.renderer.draw(ctx, {
@@ -1196,6 +1260,8 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
           aimed: aimedBy(sim),
           inviting: selectedWeapon !== null && !sim.state.fight.over,
           selectedCrew,
+          contact: Object.fromEntries(enemy.layout.rooms.map((room) => [room.id, contactView(sim, room.id, enemy)])),
+          reduceFlicker: reduceMotion(),
         });
         drawFight(clock.alpha);
       }

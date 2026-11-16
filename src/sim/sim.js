@@ -26,6 +26,7 @@ import { ATMOSPHERE_COMMANDS, checkAtmosphereInvariants, stepAtmosphere } from '
 import { START_MONEY, checkCombatInvariants, checkFightInvariants, combatCommands, enemyOf, newCombatState, stepCombat } from './combat.js';
 import { CREW_COMMANDS, checkCrewInvariants, newCrewState, stepCrew } from './crew.js';
 import { POWER_COMMANDS, checkPowerInvariants, isPowered, lightsNeedPower, newSystemsState, stepPower } from './power.js';
+import { checkSenseInvariants, newSenseState, stepSenses } from './senses.js';
 import { buildLayout } from './ship.js';
 
 /** Sim ticks per second (DECISIONS D-002). */
@@ -87,6 +88,7 @@ export function newShipState(layout, roster, owner = 'player') {
     systems,
     crew: newCrewState(layout, roster, owner),
     ...newCombatState(layout, systems),
+    ...newSenseState(layout),
   };
 }
 
@@ -136,6 +138,28 @@ const COMMANDS = {
       if (room.lightsOn === cmd.on) return;
       room.lightsOn = cmd.on;
       sim.events.emit('room.lights', { room: cmd.room, on: cmd.on, tick: sim.state.tick });
+    },
+  },
+  // Every lamp at once: off to run dark, or back on for as many rooms as there is power to light.
+  'lights.all': {
+    check(sim, cmd) {
+      if (typeof cmd.on !== 'boolean') return 'needs on: true or false';
+      const rooms = Object.values(sim.state.rooms).filter((room) => !room.jettisoned);
+      if (!rooms.some((room) => room.lightsOn !== cmd.on)) return cmd.on ? 'every lamp is already on' : 'the ship is already dark';
+      if (cmd.on && lightsNeedPower(sim)) return 'no spare power for more lights';
+      return null;
+    },
+    apply(sim, cmd) {
+      let changed = 0;
+      for (const { id } of sim.layout.rooms) {
+        const room = sim.state.rooms[id];
+        if (room.jettisoned || room.lightsOn === cmd.on) continue;
+        if (cmd.on && lightsNeedPower(sim)) break;
+        room.lightsOn = cmd.on;
+        changed += 1;
+        sim.events.emit('room.lights', { room: id, on: cmd.on, reason: 'all', tick: sim.state.tick });
+      }
+      if (changed) sim.events.emit('lights.all', { on: cmd.on, rooms: changed, tick: sim.state.tick });
     },
   },
   // Debug panel only (?debug=1): set room values directly, or jam and free a door.
@@ -201,7 +225,7 @@ function stepLights(sim) {
 // Order matters: crew act on the world as it stood, then fire can break a system, so power is settled
 // after the air and before anything reads it.
 // In a fight the enemy ship then takes the same steps, and the shooting is settled once both ships are up to date.
-const SHIP_SYSTEMS = [(ship) => stepCrew(ship, TICK_SECONDS), (ship) => stepAtmosphere(ship, TICK_SECONDS), stepPower, stepDoors, stepLights];
+const SHIP_SYSTEMS = [(ship) => stepCrew(ship, TICK_SECONDS), (ship) => stepAtmosphere(ship, TICK_SECONDS), stepPower, stepDoors, stepLights, (ship) => stepSenses(ship, TICK_SECONDS)];
 
 function stepEnemy(sim) {
   const enemy = enemyOf(sim);
@@ -355,7 +379,7 @@ function shipProblems(ship, foe) {
     if (!['open', 'closed', 'locked', 'jammed'].includes(d.state)) problems.push(`${door.id}.state is ${d.state}`);
     if (!in01(d.openness)) problems.push(`${door.id}.openness is ${d.openness}`);
   }
-  problems.push(...checkPowerInvariants(ship), ...checkAtmosphereInvariants(ship), ...checkCrewInvariants(ship), ...checkCombatInvariants(ship, foe));
+  problems.push(...checkPowerInvariants(ship), ...checkAtmosphereInvariants(ship), ...checkCrewInvariants(ship), ...checkCombatInvariants(ship, foe), ...checkSenseInvariants(ship));
   if (Object.keys(state.rooms).length !== layout.rooms.length) problems.push('room states do not match the layout');
   if (Object.keys(state.doors).length !== layout.doors.length) problems.push('door states do not match the layout');
   return problems;

@@ -12,6 +12,7 @@
 import { slotsIn } from '../engine/content-schema.js';
 import { findCrew } from '../sim/combat.js';
 import { aiCoreStatus } from '../sim/power.js';
+import { unseen } from '../sim/senses.js';
 
 const TICKS = 20; // per second (DECISIONS D-002); voice.js is imported by sim.js, so it cannot import the constant back
 
@@ -38,8 +39,13 @@ export const TRIGGERS = Object.freeze({
   'crew.ordered': { category: 'order_confirm', priority: 1, ttl: 4, cooldown: 10, chance: 0.4, slots: crewName },
   'power.brownout': { category: 'hazard', priority: 3, ttl: 10, cooldown: 30 },
   'crew.hurt': { category: 'crew_injury', priority: 3, ttl: 12, cooldown: 15, slots: crewName },
-  'fire.started': { category: 'hazard', priority: 4, ttl: 12, cooldown: 20 },
-  'breach.opened': { category: 'hazard', priority: 4, ttl: 12, cooldown: 20 },
+  // A fire or a hole in a room she cannot see into is not news until someone looks (senses.js): then it is "found".
+  'fire.started': { category: 'hazard', priority: 4, ttl: 12, cooldown: 20, seen: true },
+  'breach.opened': { category: 'hazard', priority: 4, ttl: 12, cooldown: 20, seen: true },
+  'fire.found': { category: 'hazard', priority: 4, ttl: 12, cooldown: 20 },
+  'breach.found': { category: 'hazard', priority: 4, ttl: 12, cooldown: 20 },
+  'rooms.hidden': { category: 'sensor_uncertain', priority: 2, ttl: 10, cooldown: 90 },
+  'lights.all': { category: 'order_confirm', priority: 1, ttl: 6, cooldown: 30, when: (event) => event.on === false },
   'room.jettisoned': { category: 'hazard', priority: 4, ttl: 15 },
   'crew.died': { category: 'crew_death', priority: 5, ttl: 40, slots: crewName },
   'fight.started': { category: 'combat_start', priority: 4, ttl: 15 },
@@ -54,6 +60,11 @@ export const TRIGGERS = Object.freeze({
   'enemy.crew.boarded': { category: 'combat_progress', priority: 4, ttl: 10, cooldown: 30 },
   'crew.boarded': { category: 'combat_progress', priority: 2, ttl: 8, cooldown: 30, slots: crewName },
   'crew.captured': { category: 'combat_end', priority: 2, ttl: 15, cooldown: 20 },
+  // Their lock on us, and ours on them (D-074).
+  'enemy.lock.gained': { category: 'combat_progress', priority: 3, ttl: 8, cooldown: 25 },
+  'enemy.lock.lost': { category: 'combat_progress', priority: 3, ttl: 8, cooldown: 25 },
+  'lock.lost': { category: 'combat_progress', priority: 2, ttl: 8, cooldown: 40 },
+  'fix.ready': { category: 'combat_progress', priority: 3, ttl: 12, cooldown: 20 },
 });
 
 export function newVoiceState() {
@@ -79,6 +90,7 @@ export function requestLine(sim, trigger, event = {}) {
   const ai = sim.state.ai;
   const { tick } = sim.state;
   if (!rule || (ai.cooldowns[trigger] ?? 0) > tick) return false;
+  if ((rule.seen && unseen(sim, event)) || (rule.when && !rule.when(event))) return false;
   if (rule.chance !== undefined && !sim.rng.stream('ai').chance(rule.chance)) return false;
   if (rule.cooldown) ai.cooldowns[trigger] = tick + rule.cooldown * TICKS;
   const slots = rule.slots ? rule.slots(sim, event) : {};

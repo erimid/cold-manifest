@@ -10,7 +10,8 @@
 //   1. routes power: bars go to its systems in the archetype's order, taken
 //      from the bottom of the list when the top wants more (engines go first
 //      when it is running away);
-//   2. aims: once every powered gun is charged, each gets a room of ours,
+//   2. aims: once every powered gun is charged, each gets a room of ours
+//      that its sensors have resolved (senses.js),
 //      picked by the archetype's weights on the `tactics` random stream, so
 //      they fire together. It picks again after every shot;
 //   3. works its crew: one stays at the helm, the rest go to the worst
@@ -24,6 +25,7 @@
 import { hostilesBeside, isHome, CREW_COMMANDS } from './crew.js';
 import { sendAcross, whyNotCross } from './boarding.js';
 import { POWERED, POWER_COMMANDS, free } from './power.js';
+import { contactView } from './senses.js';
 import { SYSTEM_IDS } from './systems.js';
 
 /** Seconds between a captain's decisions. */
@@ -257,7 +259,8 @@ export function think(ship, foe, { fleeing = false, boarding = false, battleSeco
       return;
     }
     if (slot.target !== null && foe.state.rooms[slot.target] && !foe.state.rooms[slot.target].jettisoned) return;
-    slot.target = pickTarget(ship, foe, plan);
+    // Guns are laid on what the sensors have made out; a room they have not resolved is not there to aim at.
+    slot.target = pickTarget(ship, foe, plan, (room) => contactView(ship, room.id)?.resolved);
   });
   board(ship, foe, plan, { fleeing, boarding, battleSeconds });
   workCrew(ship);
