@@ -287,6 +287,7 @@ export const CREW_COMMANDS = {
     check(sim, cmd) {
       const problem = living(sim, cmd.crew);
       if (problem) return problem;
+      if (cmd.ship !== undefined && cmd.ship !== 'us') return 'there is no other ship to send them to'; // boarding by clamp only, and only theirs onto ours (H.3)
       const room = sim.state.rooms[cmd.room];
       if (!room) return `no room "${cmd.room}"`;
       if (room.jettisoned) return 'that section is gone';

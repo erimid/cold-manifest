@@ -317,6 +317,14 @@ function stepWeapons(sim, dt) {
     slot.charge = slot.powered ? Math.min(weapon.charge, slot.charge + dt * pace) : Math.max(0, slot.charge - dt * DISCHARGE_RATE);
     const ready = slot.charge >= weapon.charge - EPS;
     if (ready && !wasReady && role === 'gun') sim.events.emit('weapon.ready', { slot: index, weapon: slot.id, tick });
+    if (role === 'gun' && slot.target !== null) {
+      const on = findContact(sim, slot.target);
+      if (!on || on.state === 'lost') {
+        // It has gone (docked, left, broke off): the gun comes off it.
+        slot.target = null;
+        sim.events.emit('weapon.targeted', { slot: index, weapon: slot.id, contact: null, tick });
+      }
+    }
     if (!ready) return;
 
     if (role === 'pd') {
@@ -332,12 +340,6 @@ function stepWeapons(sim, dt) {
 
     if (slot.target === null) return;
     const contact = findContact(sim, slot.target);
-    if (!contact || contact.state === 'lost') {
-      // It has gone (docked, left, broke off): the gun comes off it.
-      slot.target = null;
-      sim.events.emit('weapon.targeted', { slot: index, weapon: slot.id, contact: null, tick });
-      return;
-    }
     const view = contactView(sim, contact);
     const range = Math.hypot(contact.x, contact.y);
     if (!view || view.stale || range > weapon.range || sim.state.shots.length >= MAX_SHOTS) return; // nothing to lay on, or out of reach: it holds

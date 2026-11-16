@@ -1046,7 +1046,8 @@ export function whyNoHail(sim, cmd) {
   if (contact.tried.includes(cmd.bluff)) return 'they have heard that one';
   if (contact.wary) return 'they have stopped listening';
   if (negotiation(sim) < 1) return 'nobody aboard can talk their way past a hail';
-  if (!(defOf(sim, contact).bluffs?.[cmd.bluff] > 0)) return contact.track.known ? `the ${defOf(sim, contact).name.toLowerCase()} will not believe that` : 'Margo cannot tell what it is, let alone what it would believe';
+  // A drone has nobody aboard to lie to (H.3). Margo only knows that once she has made out what it is.
+  if (!defOf(sim, contact).bluffs && contact.track.known) return `there is nobody aboard the ${defOf(sim, contact).name.toLowerCase()} to lie to`;
   return null;
 }
 

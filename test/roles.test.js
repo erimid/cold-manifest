@@ -4,7 +4,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { validateContent } from '../src/engine/content-schema.js';
-import { enemyOf, talkChance } from '../src/sim/combat.js';
 import { MEDBAY_HEAL, MELEE_SECONDS, REPAIR_RATE, newCrewMember, spotIn } from '../src/sim/crew.js';
 import { ROLES, ROLE_IDS, SKILL_STEP, bestSkillIn, roleOf, skillFactor, skillWords } from '../src/sim/roles.js';
 import { TICK_RATE } from '../src/sim/sim.js';
@@ -64,8 +63,6 @@ test('an engineer repairs faster than anyone else', () => {
 test('security hits harder hand to hand', () => {
   const blow = (who) => {
     const sim = newCrewedSim('melee-skill');
-    go(sim, { type: 'debug.fight', enemy: 'salvager-skiff' });
-    go(sim, { type: 'fight.engage' });
     const room = sim.state.crew[who].room;
     const raider = newCrewMember(sim.layout, { id: 'raider', name: 'raider' }, room, 7, 'enemy');
     sim.state.crew.raider = raider;
@@ -101,27 +98,17 @@ test('a medic in a powered medbay heals everyone in it faster', () => {
 test('a gunner in the weapons room charges the guns faster', () => {
   const charge = (keepGunner) => {
     const sim = newCrewedSim('guns');
-    go(sim, { type: 'debug.fight', enemy: 'target-drone' });
-    if (sim.state.fight.phase === 'hail') go(sim, { type: 'fight.engage' });
     go(sim, { type: 'power.add', system: 'sensors', delta: -1 });
+    go(sim, { type: 'power.add', system: 'doors', delta: -1 });
+    go(sim, { type: 'power.add', system: 'weapons', delta: 1 });
     go(sim, { type: 'power.add', system: 'weapons', delta: 1 });
     if (!keepGunner) place(sim, 'pruitt', 'hold');
     seconds(sim, 3);
-    return sim.state.weapons[0].charge;
+    return sim.state.weapons[1].charge; // the slug thrower: point defence fills in a moment either way
   };
   const manned = charge(true);
   const empty = charge(false);
   assert.ok(manned > empty * 1.3, `${manned} against ${empty}`);
-});
-
-test('the best talker aboard makes talking likelier', () => {
-  const sim = newCrewedSim('talk');
-  go(sim, { type: 'debug.fight', enemy: 'salvager-skiff' });
-  const withVesna = talkChance(sim);
-  sim.state.crew.vesna.alive = false;
-  const without = talkChance(sim);
-  assert.ok(withVesna > without, `${withVesna} against ${without}`);
-  assert.ok(enemyOf(sim));
 });
 
 test('the content check holds a role to its skill', () => {

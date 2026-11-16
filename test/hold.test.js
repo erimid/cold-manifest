@@ -1,8 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { hashState } from '../src/engine/hash.js';
-import { whyNotCross } from '../src/sim/boarding.js';
-import { brace, enemyOf } from '../src/sim/combat.js';
 import { JOB_SECONDS, cratesIn, pickHand, roundsInHold } from '../src/sim/hold.js';
 import { validateLayout } from '../src/sim/ship.js';
 import { TICK_RATE, checkInvariants } from '../src/sim/sim.js';
@@ -168,43 +166,6 @@ test('cutting a room loose takes its crates with it', () => {
   seconds(sim, 0.1);
   assert.equal(lost.length, count);
   assert.equal(cratesIn(sim, 'hold').length, 0);
-});
-
-test('their captain sends someone for rounds when a heavy gun runs dry', () => {
-  const sim = newCrewedSim('their-ammo');
-  go(sim, { type: 'debug.fight', enemy: 'salvager-skiff' });
-  const enemy = enemyOf(sim);
-  const loaded = collect(sim, 'enemy.weapon.loaded');
-  enemy.state.weapons[1].rounds = 0;
-  until(sim, () => loaded.length > 0, 28); // inside the hail: nobody boards or fires
-  assert.equal(enemy.state.weapons[1].rounds, 3);
-  assert.equal(roundsInHold(enemy), 3);
-});
-
-test('a charged capacitor keeps the docking clamp off; a brace spends it and opens the way', () => {
-  const sim = newCrewedSim('clamp');
-  go(sim, { type: 'debug.fight', enemy: 'salvager-skiff' });
-  go(sim, { type: 'fight.engage' });
-  const enemy = enemyOf(sim);
-  enemy.state.shield.charge = 1;
-  const ours = Object.values(sim.state.crew)[1];
-  assert.match(whyNotCross(sim, enemy, ours), /capacitor/);
-  brace(enemy);
-  assert.match(whyNotCross(sim, enemy, ours), /capacitor/, 'nor through a brace');
-  seconds(sim, 3);
-  assert.equal(whyNotCross(sim, enemy, ours), null, 'spent, it leaves them open until it charges again');
-});
-
-test('a surrender of cargo comes aboard as salvage crates at the airlock by the hold', () => {
-  const sim = newCrewedSim('salvage');
-  go(sim, { type: 'debug.fight', enemy: 'salvager-skiff' });
-  go(sim, { type: 'debug.combat', action: 'surrender' });
-  sim.state.fight.offer = { kind: 'cargo', name: 'Crate of machine parts', qty: 2, expires: sim.state.tick + 200 };
-  const before = Object.keys(sim.state.crates).length;
-  go(sim, { type: 'fight.accept' });
-  const added = Object.values(sim.state.crates).slice(before);
-  assert.equal(added.length, 2);
-  assert.ok(added.every((c) => c.kind === 'salvage' && c.label === 'Crate of machine parts' && ['cargo', 'hold'].includes(c.room)));
 });
 
 test('a save in the middle of an ammo run loads and plays out the same', () => {

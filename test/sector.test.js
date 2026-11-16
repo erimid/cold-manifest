@@ -5,13 +5,16 @@ import test from 'node:test';
 
 import { createRng } from '../src/engine/rng.js';
 import { hashState } from '../src/engine/hash.js';
-import { enemyOf } from '../src/sim/combat.js';
+import { struck } from '../src/sim/encounters.js';
 import { NODE_KINDS, checkSector, cheapestRoute, distance, fewestJumps, generateSector, laneBetween, neighbours, nodeOf, whyNoCourseJump } from '../src/sim/sector.js';
 import { checkInvariants, createSim } from '../src/sim/sim.js';
 import { CATALOG, CREW, LINES, SHIP, content } from './helpers.js';
 
 const REACH = content.require('sectors', 'the-reach');
-const runSim = (seed = 'chart', run = { pursuit: false }) => createSim({ seed, ship: SHIP, crew: CREW, ...CATALOG, sector: REACH, run });
+const ENCOUNTERS = content.all('encounters');
+const runSim = (seed = 'chart', run = { pursuit: false }) => createSim({ seed, ship: SHIP, crew: CREW, ...CATALOG, sector: REACH, encounters: ENCOUNTERS, run });
+/** The ship that followed us, on the scope. */
+const pursuer = (sim) => sim.state.scope.contacts.find((contact) => contact.pursuer) ?? null;
 
 /** Plot a course to `to`, wait for the fix, and jump. Returns the events seen on the way. */
 function fly(sim, to) {
@@ -148,14 +151,14 @@ test('a pursuer kept at a distance never catches us on the straight way across',
     for (const to of route.slice(1)) {
       if (run.fuel < laneBetween(run.map, run.at, to).fuel) sim.state.run.fuel = run.fuelMax;
       fly(sim, to);
-      assert.equal(sim.state.fight, null, `seed ${i}: caught at ${run.at}`);
+      assert.equal(run.pursuit.caught, 0, `seed ${i}: caught at ${run.at}`);
       assert.ok(distance(run.map, run.pursuit.at, run.at) >= 1);
     }
     assert.ok(run.delivered);
   }
 });
 
-test('dawdling lets the pursuer catch up, and then it is a fight with the ship that followed us', () => {
+test('dawdling lets the pursuer catch up: the ship that followed us comes in on the scope, closing; the gun can end the chase', () => {
   const sim = runSim('dawdle', { pursuit: true });
   const { run } = sim.state;
   const start = run.at;
@@ -167,14 +170,17 @@ test('dawdling lets the pursuer catch up, and then it is a fight with the ship t
     fly(sim, run.at === start ? next : start);
   }
   assert.ok(caught, 'caught');
-  assert.equal(sim.state.fight.enemy.ship, REACH.pursuit.ship);
-  assert.equal(sim.state.fight.pursuer, true);
+  const contact = pursuer(sim);
+  assert.equal(contact.encounter, REACH.pursuit.encounter);
+  assert.equal(contact.state, 'closing');
   assert.equal(run.pursuit.caught, 1);
   assert.deepEqual(checkInvariants(sim), []);
-  // Beaten off, it falls back and waits; beaten, it is done.
-  sim.enqueue({ type: 'debug.combat', action: 'killCrew' });
-  sim.step();
+  // Driven off by the gun, it gives up the chase for good.
+  const ended = [];
+  sim.events.on('pursuit.ended', (event) => ended.push(event.outcome));
+  while (contact.state !== 'lost') struck(sim, contact, true);
   assert.equal(run.pursuit.done, true);
+  assert.deepEqual(ended, ['deterred']);
 });
 
 test('Margo sees the pursuer only within sight and with the sensors running', () => {
@@ -192,50 +198,11 @@ test('Margo sees the pursuer only within sight and with the sensors running', ()
   assert.deepEqual(run.pursuit.lastSeen, { node: run.pursuit.at, jump: 3 });
 });
 
-test('an escape from a fight takes the plotted course and pays for it', () => {
-  const sim = runSim('escape');
-  const { run } = sim.state;
-  const next = neighbours(run.map, run.at)[0];
-  sim.enqueue({ type: 'debug.fight', enemy: 'salvager-skiff' });
-  sim.step();
-  sim.enqueue({ type: 'course.plot', to: next });
-  sim.enqueue({ type: 'debug.combat', action: 'chargeJump' });
-  sim.step();
-  assert.match(sim.whyNot({ type: 'course.jump' }), /fight/);
-  const fuel = run.fuel;
-  const seen = [];
-  sim.events.on('*', (_, type) => seen.push(type));
-  sim.enqueue({ type: 'ship.jump' });
-  sim.step();
-  sim.step();
-  assert.equal(run.at, next);
-  assert.equal(run.fuel, fuel - laneBetween(run.map, run.map.start, next).fuel);
-  assert.equal(sim.state.fight, null);
-  assert.ok(seen.indexOf('fight.over') < seen.indexOf('sector.jumped'), 'the fight ends, then we arrive');
-});
-
-test('an escape with no course plotted leaves us where we were', () => {
-  const sim = runSim('stay');
-  const { run } = sim.state;
-  const at = run.at;
-  sim.enqueue({ type: 'debug.fight', enemy: 'salvager-skiff' });
-  sim.step();
-  sim.enqueue({ type: 'debug.combat', action: 'chargeJump' });
-  sim.step();
-  sim.enqueue({ type: 'ship.jump' });
-  sim.step();
-  sim.step();
-  assert.equal(run.at, at);
-  assert.equal(run.jumps, 0);
-  assert.equal(sim.state.fight.over.outcome, 'escaped');
-});
-
-test('the debug panel can call the pursuer alongside', () => {
+test('the debug panel can bring the pursuer in on the scope', () => {
   const sim = runSim('debug');
   sim.enqueue({ type: 'debug.run', pursuit: 'catch' });
   sim.step();
-  assert.equal(enemyOf(sim).layout.id, REACH.pursuit.ship);
-  assert.ok(sim.state.fight.pursuer);
+  assert.equal(pursuer(sim)?.encounter, REACH.pursuit.encounter);
   sim.enqueue({ type: 'debug.run', pursuit: 'off' });
   sim.step();
   assert.equal(sim.state.run.pursuit, null);

@@ -1,20 +1,23 @@
+// The hauler's two mounts, the brace and the hull (S2.1, S2.2, S2.8; H.3 retired the duel and the enemy ship).
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { validateContent } from '../src/engine/content-schema.js';
 import { hashState } from '../src/engine/hash.js';
-import { BRACE, CAPACITOR, braced, chargeOf, enemyOf, weaponsPowered } from '../src/sim/combat.js';
-import { buildLayout, validateLayout } from '../src/sim/ship.js';
+import { BRACE, CAPACITOR, DARK_STATION, FIX, braced, chargeOf, fixOf, gunSlot, pdSlot, roleOf, stationPace, weaponsPowered, whyNoJump } from '../src/sim/combat.js';
+import { DARK_WALK } from '../src/sim/crew.js';
+import { airlockRooms, nearestAirlock } from '../src/sim/boarding.js';
+import { validateLayout } from '../src/sim/ship.js';
 import { TICK_RATE, checkInvariants } from '../src/sim/sim.js';
-import { content, newCrewedSim, newSim, newTalkingSim, shipCopy } from './helpers.js';
+import { content, newCrewedSim, newSim, shipCopy } from './helpers.js';
 
 const steps = (sim, n) => {
   for (let i = 0; i < n; i++) sim.step();
   return sim;
 };
 const seconds = (sim, s) => steps(sim, Math.round(s * TICK_RATE));
-const DRONE = 'target-drone';
-const LASER = content.require('weapons', 'pulse-laser');
+const PD = content.require('weapons', 'point-defence');
 const SLUGS = content.require('weapons', 'slug-thrower');
+const LASER = content.require('weapons', 'pulse-laser');
 
 /** Move bars around so the weapons system has `bars` (dropping sensors, doors and engines as needed). */
 function powerWeapons(sim, bars) {
@@ -25,50 +28,41 @@ function powerWeapons(sim, bars) {
   assert.equal(sim.state.systems.weapons.power, bars);
 }
 
-function fight(sim, enemy = DRONE) {
-  sim.enqueue({ type: 'debug.fight', enemy });
+/** Two bars on the shields, from the sensors and the doors. */
+function powerShields(sim) {
+  sim.enqueue({ type: 'power.add', system: 'sensors', delta: -1 });
+  sim.enqueue({ type: 'power.add', system: 'doors', delta: -1 });
   sim.step();
-  // A perfect lock and a full scan, so these tests are about the guns (senses.test.js covers the sensors).
-  sim.enqueue({ type: 'debug.combat', action: 'scan' });
+  sim.enqueue({ type: 'power.add', system: 'shields', delta: 1 });
+  sim.enqueue({ type: 'power.add', system: 'shields', delta: 1 });
   sim.step();
-  return enemyOf(sim);
 }
 
-/** Take the drone's shields and engines away, so every shot is a plain hit. */
-function strip(sim) {
-  const enemy = enemyOf(sim).state;
-  enemy.systems.shields.power = 0;
-  enemy.systems.engines.power = 0;
-  enemy.shield.charge = 0;
-}
-
-test('weapons are content: three to mount and a drone\'s zap, each sound', () => {
-  assert.equal(content.count('weapons'), 4);
-  assert.deepEqual(content.all('weapons').filter((w) => w.mount === false).map((w) => w.id), ['drone-zap']);
-  const broken = { ...LASER, id: 'broken', power: 0, charge: -1, effects: { fire: 2 } };
+test('weapons are content: a hauler mounts point defence and one deterrent gun; the rest are what other ships fire', () => {
+  assert.deepEqual(content.all('weapons').filter((w) => w.mount !== false).map((w) => [w.id, w.role]), [['point-defence', 'pd'], ['slug-thrower', 'gun']]);
+  assert.deepEqual(content.all('weapons').filter((w) => w.mount === false).map((w) => w.id), ['pulse-laser', 'breaching-lance', 'drone-zap']);
+  assert.equal(SLUGS.range > 0, true, 'a gun says how far it reaches');
+  const broken = { ...LASER, id: 'broken', power: 0, charge: -1, effects: { fire: 2 }, role: 'cannon' };
   const { errors } = validateContent([{ path: 'weapons/x.json', data: { items: [broken] } }]);
-  assert.equal(errors.length, 3, errors.join('\n'));
+  assert.equal(errors.length, 4, errors.join('\n'));
+  const { errors: noRange } = validateContent([{ path: 'weapons/x.json', data: { items: [{ ...SLUGS, id: 'x', range: undefined }] } }]);
+  assert.ok(noRange.some((e) => /a gun needs a range/.test(e)), noRange.join('\n'));
 });
 
-test('a ship that fits a weapon no ship can mount is caught by the content check', () => {
-  const data = { ...shipCopy(), weapons: ['pulse-laser', 'drone-zap'] };
-  const { errors } = validateContent([
-    { path: 'ships/x.json', data: { items: [data] } },
-    { path: 'weapons/x.json', data: { items: [LASER, { ...LASER, id: 'drone-zap', mount: false }] } },
+test('a ship that fits a weapon no ship can mount, or one nobody made, is caught by the content check', () => {
+  const mounted = validateContent([
+    { path: 'ships/x.json', data: { items: [{ ...shipCopy(), weapons: ['point-defence', 'drone-zap'] }] } },
+    { path: 'weapons/x.json', data: { items: [PD, { ...LASER, id: 'drone-zap', mount: false }] } },
   ]);
-  assert.ok(errors.some((e) => /which no ship can mount/.test(e)), errors.join('\n'));
-});
-
-test('a ship that fits a weapon nobody made is caught by the content check', () => {
-  const data = { ...shipCopy(), weapons: ['pulse-laser', 'death-ray'] };
-  const { errors } = validateContent([
-    { path: 'ships/x.json', data: { items: [data] } },
-    { path: 'weapons/x.json', data: { items: [LASER] } },
+  assert.ok(mounted.errors.some((e) => /which no ship can mount/.test(e)), mounted.errors.join('\n'));
+  const missing = validateContent([
+    { path: 'ships/x.json', data: { items: [{ ...shipCopy(), weapons: ['point-defence', 'death-ray'] }] } },
+    { path: 'weapons/x.json', data: { items: [PD] } },
   ]);
-  assert.ok(errors.some((e) => /fits a weapon that does not exist: "death-ray"/.test(e)), errors.join('\n'));
+  assert.ok(missing.errors.some((e) => /fits a weapon that does not exist: "death-ray"/.test(e)), missing.errors.join('\n'));
 });
 
-test('a player ship needs hull points and 2 to 4 hardpoints; an enemy may be much less of a ship', () => {
+test('a ship needs hull points, 2 to 4 hardpoints and every system; enemy ships are no longer a kind of layout', () => {
   const data = shipCopy();
   delete data.hullPoints;
   data.hardpoints = data.hardpoints.slice(0, 1);
@@ -76,56 +70,48 @@ test('a player ship needs hull points and 2 to 4 hardpoints; an enemy may be muc
   assert.ok(problems.some((p) => /hullPoints/.test(p)));
   assert.ok(problems.some((p) => /2 to 4 hardpoints/.test(p)));
   assert.ok(validateLayout({ ...shipCopy(), weapons: ['a', 'b', 'c', 'd'] }).some((p) => /4 weapons fitted but only 3 hardpoints/.test(p)));
-
-  const drone = content.require('ships', DRONE);
-  assert.deepEqual(validateLayout(drone), []);
-  const layout = buildLayout(drone);
-  assert.equal(layout.enemy, true);
-  assert.equal(layout.facing, 'left');
-  assert.equal(layout.hasSystem('medbay'), false);
-  const { enemy, ...asPlayer } = drone;
-  assert.ok(validateLayout(asPlayer).some((p) => /no room holds the medbay system/.test(p)), 'only an enemy may leave systems out');
+  assert.ok(validateLayout({ ...shipCopy(), enemy: true }).length > 0, 'the enemy flag is gone with the duel (H.3)');
+  assert.equal(content.all('ships').length, 1, 'the only ship drawn as a ship is ours');
 });
 
-test('the Margin of Error starts with two weapons, a whole hull, and no fight', () => {
+test('the Margin of Error starts with point defence and the slug thrower, a whole hull, and the gun loaded', () => {
   const sim = newSim();
   assert.deepEqual(sim.state.hull, { points: 20, max: 20 });
-  assert.deepEqual(sim.state.weapons.map((w) => w.id), ['pulse-laser', 'slug-thrower']);
-  assert.equal(sim.state.fight, null);
-  assert.equal(enemyOf(sim), null);
+  assert.deepEqual(sim.state.weapons.map((w) => w.id), ['point-defence', 'slug-thrower']);
+  assert.deepEqual([pdSlot(sim), gunSlot(sim), roleOf(sim, 0), roleOf(sim, 1)], [0, 1, 'pd', 'gun']);
+  assert.equal(sim.state.fight, undefined, 'there is no fight state any more');
   assert.deepEqual(sim.state.shield, { charge: 0, field: 0, until: 0 });
-  assert.deepEqual(sim.state.weapons.map((w) => w.rounds), [null, SLUGS.ammo.magazine], 'the laser needs no rounds; the slug thrower starts loaded');
+  assert.deepEqual(sim.state.weapons.map((w) => w.rounds), [null, SLUGS.ammo.magazine], 'point defence needs no rounds; the slug thrower starts loaded');
+  assert.deepEqual(sim.state.shots, []);
 });
 
 test('weapons take the system\'s bars in hardpoint order, charge with power and drain without', () => {
   const sim = newSim();
   assert.deepEqual(weaponsPowered(sim), [false, false]);
   powerWeapons(sim, 1);
-  assert.deepEqual(weaponsPowered(sim), [true, false], 'one bar runs the laser but not the two-bar slug thrower');
-  seconds(sim, LASER.charge / 2);
-  assert.ok(Math.abs(chargeOf(sim, 0) - 0.5) < 0.02);
-  assert.equal(chargeOf(sim, 1), 0);
+  assert.deepEqual(weaponsPowered(sim), [true, false], 'one bar runs point defence, which is first on the hardpoints');
+  sim.enqueue({ type: 'power.add', system: 'doors', delta: -1 });
+  sim.step();
+  sim.enqueue({ type: 'power.add', system: 'weapons', delta: 1 });
+  sim.step();
+  assert.deepEqual(weaponsPowered(sim), [true, true]);
   const ready = [];
   sim.events.on('weapon.ready', (e) => ready.push(e.slot));
-  seconds(sim, LASER.charge);
-  assert.equal(chargeOf(sim, 0), 1, 'a charged weapon with no target holds its charge');
-  assert.deepEqual(ready, [0]);
+  seconds(sim, SLUGS.charge / 2);
+  assert.ok(Math.abs(chargeOf(sim, 1) - 0.5) < 0.03, `${chargeOf(sim, 1)}`);
+  seconds(sim, SLUGS.charge);
+  assert.equal(chargeOf(sim, 1), 1, 'a charged gun with nothing to lay on holds its charge');
+  assert.equal(chargeOf(sim, 0), 1, 'and so does point defence with nothing coming');
+  assert.deepEqual(ready, [1], 'only the gun says it is ready');
   sim.enqueue({ type: 'power.add', system: 'weapons', delta: -1 });
-  seconds(sim, LASER.charge / 4);
-  assert.ok(chargeOf(sim, 0) < 0.6 && chargeOf(sim, 0) > 0.4, 'charge drains twice as fast as it built');
-  seconds(sim, LASER.charge);
-  assert.equal(chargeOf(sim, 0), 0);
+  seconds(sim, SLUGS.charge / 4);
+  assert.ok(chargeOf(sim, 1) < 0.6 && chargeOf(sim, 1) > 0.4, 'charge drains twice as fast as it built');
   assert.deepEqual(checkInvariants(sim), []);
 });
 
 test('the shield capacitor charges from its bars, a unit a bar, and holds no more than they give', () => {
   const sim = newSim();
-  sim.enqueue({ type: 'power.add', system: 'sensors', delta: -1 });
-  sim.enqueue({ type: 'power.add', system: 'doors', delta: -1 });
-  sim.step();
-  sim.enqueue({ type: 'power.add', system: 'shields', delta: 1 });
-  sim.enqueue({ type: 'power.add', system: 'shields', delta: 1 });
-  sim.step();
+  powerShields(sim);
   assert.ok(sim.state.shield.charge < 0.1);
   seconds(sim, CAPACITOR.seconds / 2);
   assert.ok(Math.abs(sim.state.shield.charge - 1) < 0.05, `two bars put in a unit in half the time: ${sim.state.shield.charge}`);
@@ -137,82 +123,19 @@ test('the shield capacitor charges from its bars, a unit a bar, and holds no mor
   assert.equal(sim.state.shield.charge, 1, 'losing a bar loses what it held at once');
 });
 
-test('a fight brings a whole second ship alongside, and it runs on the same clock', () => {
+test('a brace works any time, soaks what lands for a few seconds, costs more against a gun that pierces, and lights the ship up', () => {
   const sim = newSim();
-  assert.equal(sim.whyNot({ type: 'weapon.target', slot: 0, room: 'reactor' }), 'there is nothing to shoot at');
-  assert.throws(() => sim.enqueue({ type: 'debug.fight', enemy: 'margin-of-error' }), /no enemy ship/);
-  const heard = [];
-  sim.events.on('*', (e, type) => (type.startsWith('fight.') || type.startsWith('enemy.')) && heard.push(type));
-  const enemy = fight(sim);
-  assert.deepEqual(heard, ['fight.started']);
-  assert.equal(enemy.layout.name, 'Gunnery drone');
-  assert.equal(Object.keys(enemy.state.rooms).length, 5);
-  assert.deepEqual(enemy.state.hull, { points: 8, max: 8 });
-  assert.equal(enemy.state.shield.charge, 1, 'its capacitor starts charged');
-  assert.equal(enemy.state.systems.medbay.absent, true);
-  assert.throws(() => sim.enqueue({ type: 'debug.fight', enemy: DRONE }), /already in a fight/);
-
-  // The Stage 1 hazard code runs aboard the enemy, announced apart from the player's ship.
-  enemy.state.rooms.reactor.fire = 0.5;
-  seconds(sim, 3);
-  assert.equal(enemy.state.tick, sim.state.tick);
-  assert.ok(enemy.state.rooms.reactor.fire > 0.5, 'fire grows there as it does here');
-  assert.ok(heard.includes('enemy.fire.started'));
-  assert.ok(!heard.includes('fire.started'));
-  assert.deepEqual(checkInvariants(sim), []);
-
-  sim.enqueue({ type: 'debug.fight', enemy: null });
-  sim.step();
-  assert.equal(sim.state.fight, null);
-  assert.equal(heard.at(-1), 'fight.ended');
-});
-
-test('a charged weapon with a target fires, the shot flies, and a brace stops it', () => {
-  const sim = newSim();
-  powerWeapons(sim, 1);
-  const enemy = fight(sim);
-  enemy.state.systems.engines.power = 0; // hold still
-  const log = [];
-  sim.events.on('weapon.fired', (e) => log.push(`fired ${e.weapon} at ${e.room}`));
-  sim.events.on('shot.resolved', (e) => log.push(`${e.result} ${e.damage}`));
-  sim.events.on('enemy.ship.braced', (e) => log.push(`braced ${e.field}`));
-  assert.throws(() => sim.enqueue({ type: 'weapon.target', slot: 0, room: 'bridge' }), /no room "bridge" on their ship/);
-  assert.throws(() => sim.enqueue({ type: 'weapon.target', slot: 5, room: 'reactor' }), /no weapon in slot 5/);
-  sim.enqueue({ type: 'weapon.target', slot: 0, room: 'reactor' });
-  seconds(sim, LASER.charge + 0.1);
-  assert.equal(log[0], 'fired pulse-laser at reactor');
-  assert.equal(sim.state.fight.shots.length, 1);
-  assert.equal(sim.state.weapons[0].charge < 1, true, 'it starts charging again at once');
-  seconds(sim, LASER.flight + 0.1);
-  // The drone's point defence braces on a coin toss: either it braced and the shot was stopped, or it was hit.
-  const braced = log.includes('braced 1');
-  assert.deepEqual(log.slice(1), braced ? ['braced 1', 'shield 0'] : ['hit 1']);
-  assert.equal(enemy.state.hull.points, braced ? 8 : 7);
-  assert.equal(enemy.state.shield.charge, braced ? 0 : 1, 'a brace dumps the whole capacitor');
-  assert.deepEqual(checkInvariants(sim), []);
-});
-
-test('a brace soaks a volley for a few seconds, costs more against a gun that pierces, and lights the ship up', () => {
-  const sim = newSim();
-  const enemy = fight(sim);
-  enemy.state.systems.engines.power = 0;
   assert.match(sim.whyNot({ type: 'ship.brace' }), /no power/);
-  sim.enqueue({ type: 'power.add', system: 'sensors', delta: -1 });
-  sim.enqueue({ type: 'power.add', system: 'doors', delta: -1 });
-  sim.step();
-  sim.enqueue({ type: 'power.add', system: 'shields', delta: 1 });
-  sim.enqueue({ type: 'power.add', system: 'shields', delta: 1 });
-  sim.step();
+  powerShields(sim);
   sim.state.shield.charge = 0.6;
   assert.match(sim.whyNot({ type: 'ship.brace' }), /capacitor is at 30%/);
   sim.state.shield.charge = 2;
-  Object.assign(enemy.state.contact, { lock: 1, locked: true, pinned: true }); // their gunners cannot miss
   const flare = sim.state.flare;
   const resolved = [];
   sim.events.on('shot.resolved', (e) => resolved.push(e.result));
   sim.enqueue({ type: 'ship.brace' });
   sim.step();
-  assert.equal(braced(sim), true);
+  assert.equal(braced(sim), true, 'no fight needed: the brace is ours to use whenever');
   assert.equal(sim.state.shield.field, 2);
   assert.equal(sim.state.shield.charge, 0);
   assert.ok(sim.state.flare >= flare + BRACE.flare - 0.01, 'the field going up shows for a long way');
@@ -233,102 +156,99 @@ test('a brace soaks a volley for a few seconds, costs more against a gun that pi
   assert.deepEqual(checkInvariants(sim), []);
 });
 
-test('a heavy gun fires its magazine, then waits charged until someone loads it', () => {
+test('debug.hit lands only on us: there is no other ship to hit', () => {
   const sim = newSim();
-  powerWeapons(sim, 3);
-  const enemy = fight(sim);
-  strip(sim);
-  enemy.state.hull.points = 99;
-  enemy.state.hull.max = 99;
-  const empty = [];
-  sim.events.on('weapon.empty', (e) => empty.push(e.slot));
-  sim.enqueue({ type: 'weapon.target', slot: 1, room: 'engines' });
-  seconds(sim, SLUGS.charge * SLUGS.ammo.magazine + 2);
-  assert.equal(sim.state.weapons[1].rounds, 0);
-  seconds(sim, SLUGS.charge + 1);
-  assert.deepEqual(empty, [1], 'it says so once');
-  assert.equal(chargeOf(sim, 1), 1, 'charged and waiting');
-  assert.equal(enemy.state.hull.points, 99 - SLUGS.damage * SLUGS.ammo.magazine);
-  sim.state.weapons[1].rounds = 1;
-  seconds(sim, 0.2);
-  assert.equal(sim.state.weapons[1].rounds, 0, 'a round in the breech goes at once');
-  assert.deepEqual(checkInvariants(sim), []);
+  assert.match(sim.whyNot({ type: 'debug.hit', at: 'them', room: null, weapon: 'pulse-laser' }), /no other ship/);
+  assert.match(sim.whyNot({ type: 'debug.hit', at: 'us', room: 'nowhere', weapon: 'pulse-laser' }), /no room/);
+  assert.equal(sim.whyNot({ type: 'debug.hit', room: null, weapon: 'pulse-laser' }), null);
 });
 
-test('with shields down a hit takes hull points and marks the room; at zero the fight is decided', () => {
+test('a hit that takes the last hull point wrecks the ship, and the run ends with it', () => {
   const sim = newSim();
-  powerWeapons(sim, 3);
-  fight(sim);
-  strip(sim);
-  const results = [];
-  let over = null;
-  sim.events.on('shot.resolved', (e) => results.push(`${e.weapon} ${e.result}`));
-  sim.events.on('fight.over', (e) => (over = e));
-  sim.enqueue({ type: 'weapon.target', slot: 0, room: 'weapons' });
-  sim.enqueue({ type: 'weapon.target', slot: 1, room: 'engines' });
-  seconds(sim, SLUGS.charge + SLUGS.flight + 0.2);
-  const enemy = enemyOf(sim).state;
-  assert.deepEqual(results, ['pulse-laser hit', 'slug-thrower hit']);
-  assert.equal(enemy.hull.points, 8 - LASER.damage - SLUGS.damage);
-  assert.ok(enemy.rooms.engines.hull < enemy.rooms.weapons.hull && enemy.rooms.weapons.hull < 1);
-  seconds(sim, 60);
-  assert.equal(enemy.hull.points, 0);
-  assert.equal(over.outcome, 'destroyed');
-  assert.equal(sim.state.fight.over.outcome, 'destroyed');
-  assert.deepEqual(sim.state.fight.shots, []);
-  assert.deepEqual(sim.state.weapons.map((w) => w.target), [null, null], 'the guns stop when there is nothing left to shoot');
-  assert.equal(sim.whyNot({ type: 'weapon.target', slot: 0, room: 'reactor' }), 'there is nothing to shoot at');
-  const shots = results.length;
-  seconds(sim, 30);
-  assert.equal(results.length, shots);
-  assert.deepEqual(checkInvariants(sim), []);
-});
-
-test('nothing in a fight moves while the clock is stopped, and orders given then wait', () => {
-  const sim = newSim();
-  powerWeapons(sim, 1);
-  fight(sim);
-  seconds(sim, 2);
-  const before = hashState(sim.snapshot().state.fight);
-  const charge = sim.state.weapons[0].charge;
-  sim.enqueue({ type: 'weapon.target', slot: 0, room: 'shields' }); // "paused": no step is taken
-  assert.equal(hashState(sim.snapshot().state.fight), before);
-  assert.equal(sim.state.weapons[0].charge, charge);
-  assert.equal(sim.state.weapons[0].target, null);
+  sim.state.hull.points = 1;
+  let wrecked = 0;
+  sim.events.on('ship.wrecked', () => (wrecked += 1));
+  sim.enqueue({ type: 'debug.hit', at: 'us', room: 'cargo', weapon: 'pulse-laser', force: true });
   sim.step();
-  assert.equal(sim.state.weapons[0].target, 'shields');
+  assert.equal(sim.state.hull.points, 0);
+  assert.equal(wrecked, 1);
+  seconds(sim, 1);
+  assert.deepEqual(sim.state.weapons.map((w) => w.powered), [false, false], 'a wreck fires nothing');
+  assert.equal(sim.whyNot({ type: 'ship.brace' }), 'the shields have no power');
 });
 
-test('a fight saves and loads mid-shot and plays out the same', () => {
-  const play = (sim) => {
-    powerWeapons(sim, 3);
-    fight(sim);
-    sim.enqueue({ type: 'weapon.target', slot: 0, room: 'shields' });
-    sim.enqueue({ type: 'weapon.target', slot: 1, room: 'reactor' });
-    return seconds(sim, LASER.charge + 0.2);
+test('nothing in the guns moves while the clock is stopped, and orders given then wait', () => {
+  const sim = newSim();
+  powerWeapons(sim, 2);
+  seconds(sim, 2);
+  const before = hashState({ weapons: sim.state.weapons, shield: sim.state.shield, shots: sim.state.shots });
+  sim.enqueue({ type: 'power.add', system: 'weapons', delta: -1 }); // "paused": no step is taken
+  assert.equal(hashState({ weapons: sim.state.weapons, shield: sim.state.shield, shots: sim.state.shots }), before);
+  sim.step();
+  assert.equal(sim.state.systems.weapons.power, 1);
+});
+
+test('a jump needs a sensor fix, a pilot at the helm and a bar on the engines; a hit shakes the fix', () => {
+  // The fix itself builds while a course is plotted (sector.test.js); here, what a jump asks of the ship.
+  const sim = newCrewedSim('fix');
+  const go = (command) => {
+    sim.enqueue(command);
+    sim.step();
   };
-  const sim = play(newSim('save-fight'));
-  assert.equal(sim.state.fight.shots.length, 1, 'a shot is in the air');
-  const saved = JSON.parse(JSON.stringify(sim.snapshot()));
-  seconds(sim, 90);
-  const loaded = newSim('save-fight');
-  loaded.restore(saved);
-  assert.equal(enemyOf(loaded).layout.id, DRONE);
-  seconds(loaded, 90);
-  assert.equal(hashState(loaded.snapshot()), hashState(sim.snapshot()));
-  assert.equal(sim.state.fight.over?.outcome, 'destroyed');
+  assert.match(whyNoJump(sim), /sensor fix is at 0%/);
+  sim.state.fix = 1;
+  assert.equal(whyNoJump(sim), null);
+  const pilot = Object.values(sim.state.crew).find((m) => m.room === 'bridge');
+  go({ type: 'crew.move', crew: pilot.id, room: 'medbay' });
+  seconds(sim, 6);
+  assert.match(whyNoJump(sim), /nobody is at the helm/);
+  go({ type: 'crew.move', crew: pilot.id, room: 'bridge' });
+  seconds(sim, 10);
+  go({ type: 'power.add', system: 'engines', delta: -1 });
+  assert.match(whyNoJump(sim), /engines have no power/);
+  go({ type: 'power.add', system: 'engines', delta: 1 });
+  go({ type: 'debug.hit', at: 'us', room: 'cargo', weapon: 'pulse-laser', force: true });
+  assert.ok(Math.abs(fixOf(sim) - (1 - FIX.hit)) < 0.01, 'a hit on us costs a quarter of it');
+  sim.state.fix = 0;
+  go({ type: 'power.add', system: 'sensors', delta: -1 });
+  assert.match(whyNoJump(sim), /sensors have no power to take a fix/);
 });
 
-test('Margo remarks when a fight starts and when it is over', () => {
-  const sim = newTalkingSim('fight-talk');
-  seconds(sim, 12); // let the greeting finish
-  powerWeapons(sim, 3);
-  fight(sim);
-  strip(sim);
-  sim.enqueue({ type: 'weapon.target', slot: 0, room: 'core' });
-  sim.enqueue({ type: 'weapon.target', slot: 1, room: 'core' });
-  seconds(sim, 90);
-  const said = sim.state.ai.log.map((line) => line.category);
-  assert.ok(said.includes('combat_start'), said.join(','));
-  assert.ok(said.includes('combat_end'), said.join(','));
+test('running dark costs: a gun on a dark gun deck charges slower, and crew feel their way through an unlit room', () => {
+  const charged = (dark) => {
+    const sim = newCrewedSim('dark-gun');
+    for (const system of ['sensors', 'doors']) sim.enqueue({ type: 'power.add', system, delta: -1 });
+    sim.step();
+    sim.enqueue({ type: 'power.add', system: 'weapons', delta: 1 });
+    sim.enqueue({ type: 'power.add', system: 'weapons', delta: 1 });
+    if (dark) sim.enqueue({ type: 'lights.all', on: false });
+    seconds(sim, 2);
+    assert.equal(stationPace(sim, sim.layout.roomOfSystem('weapons')), dark ? DARK_STATION : 1);
+    seconds(sim, 4);
+    return chargeOf(sim, gunSlot(sim));
+  };
+  const lit = charged(false);
+  const dark = charged(true);
+  assert.ok(dark < lit * 0.8, `lit ${lit}, dark ${dark}`);
+  const walk = (dark) => {
+    const sim = newCrewedSim('dark-walk');
+    if (dark) sim.enqueue({ type: 'lights.all', on: false });
+    seconds(sim, 2);
+    sim.enqueue({ type: 'crew.move', crew: 'okoro', room: 'fore_corridor' });
+    for (let i = 0; i < 60 * TICK_RATE; i++) {
+      sim.step();
+      if (sim.state.crew.okoro.room === 'fore_corridor' && !sim.state.crew.okoro.path.length) return i;
+    }
+    return Infinity;
+  };
+  const litWalk = walk(false);
+  const darkWalk = walk(true);
+  assert.ok(Number.isFinite(darkWalk) && darkWalk > litWalk * (1 + (1 - DARK_WALK) * 0.5), `lit ${litWalk} ticks, dark ${darkWalk}`);
+});
+
+test('every ship has an airlock, and the nearest one is found on foot (where a party comes aboard)', () => {
+  const sim = newCrewedSim();
+  assert.deepEqual(airlockRooms(sim).sort(), ['cargo', 'engines', 'hold', 'quarters']);
+  assert.equal(nearestAirlock(sim, 'bridge'), 'quarters');
+  assert.equal(nearestAirlock(sim, 'reactor'), 'engines');
 });

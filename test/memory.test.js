@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import { killCrew, harmCrew } from '../src/sim/atmosphere.js';
+import { newCrewMember } from '../src/sim/crew.js';
 import { DREAD, MEMORY_MAX, darkMemory, recall, refusalOf, remember, topMemory } from '../src/sim/memory.js';
 import { TICK_RATE, checkInvariants } from '../src/sim/sim.js';
 import { createIntercom, replyKind } from '../src/ui/intercom.js';
@@ -189,17 +190,15 @@ test('memories fade, the log is short, and a snapshot keeps them', () => {
   assert.deepEqual(checkInvariants(sim), []);
 });
 
-test('their crews have no memory and never refuse: only ours do', () => {
+test('boarders have no memory and never refuse: only ours do', () => {
   const sim = started();
-  give(sim, { type: 'debug.fight', enemy: 'salvager-skiff' });
-  const enemy = sim.state.fight.enemy;
-  const theirs = Object.values(enemy.crew)[0];
-  assert.ok(theirs, 'the skiff has crew');
+  const theirs = newCrewMember(sim.layout, { id: 'raider', name: 'Raider' }, 'cargo', 7, 'enemy');
+  sim.state.crew.raider = theirs;
   theirs.memories.push({ type: 'scare', tick: sim.state.tick, room: theirs.room, who: null, dark: true });
-  for (const room of Object.values(enemy.rooms)) Object.assign(room, { lightsOn: false, light: 0 });
+  give(sim, { type: 'lights.all', on: false });
   const heard = [];
-  sim.events.on('enemy.crew.refused', (event) => heard.push(event));
-  seconds(sim, 120);
+  sim.events.on('crew.refused', (event) => event.crew === 'raider' && heard.push(event));
+  seconds(sim, 60);
   assert.equal(heard.length, 0);
   assert.equal(theirs.dread, 0, 'and the dark does not wear on them');
 });
