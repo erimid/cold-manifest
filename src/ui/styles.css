@@ -1,0 +1,284 @@
+/* Cold Manifest UI: a cheap company ship terminal (brief §17).
+   Warm amber and sodium orange on cold blue-black. Red for alarms, sickly
+   green for the creature. No purple neon. */
+
+:root {
+  --space: #070b12;
+  --space-2: #0c121c;
+  --hull: #1a1f27;
+  --hull-edge: #39414d;
+  --amber: #ffb347;
+  --amber-dim: #a8742c;
+  --sodium: #ff8a2b;
+  --paper: #e9dcc3;
+  --alarm: #ff4136;
+  --infect: #9bd15a;
+  --mono: ui-monospace, 'SF Mono', Menlo, Consolas, 'Liberation Mono', 'Courier New', monospace;
+  --tap: 44px; /* minimum touch target (brief §4) */
+  --text-scale: 1;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  background: var(--space);
+  color: var(--paper);
+  font-family: var(--mono);
+  font-size: calc(16px * var(--text-scale));
+  overflow: hidden;
+  overscroll-behavior: none;
+  -webkit-text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: manipulation;
+}
+
+#backdrop {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+#screen {
+  position: fixed;
+  inset: 0;
+  padding: max(20px, env(safe-area-inset-top)) max(28px, env(safe-area-inset-right)) max(20px, env(safe-area-inset-bottom))
+    max(28px, env(safe-area-inset-left));
+  display: flex;
+}
+
+/* ---------- shared pieces ---------- */
+
+.btn {
+  min-height: var(--tap);
+  min-width: 220px;
+  padding: 12px 22px;
+  font: inherit;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  text-align: left;
+  color: var(--amber);
+  background: linear-gradient(180deg, #252b35, #171c24);
+  border: 2px solid var(--hull-edge);
+  border-left: 8px solid var(--amber);
+  border-radius: 3px;
+  box-shadow: 0 3px 0 #05070b;
+  cursor: pointer;
+}
+
+.btn:hover,
+.btn:focus-visible {
+  border-color: var(--amber);
+  outline: none;
+}
+
+.btn:active {
+  transform: translateY(2px);
+  box-shadow: 0 1px 0 #05070b;
+}
+
+.btn[disabled] {
+  color: #6a7180;
+  border-left-color: #4a515d;
+  cursor: default;
+}
+
+.btn small {
+  display: block;
+  margin-top: 3px;
+  font-weight: 400;
+  letter-spacing: 0.04em;
+  text-transform: none;
+  color: #8b93a1;
+}
+
+.panel {
+  background: linear-gradient(180deg, rgba(26, 31, 39, 0.94), rgba(14, 18, 25, 0.94));
+  border: 2px solid var(--hull-edge);
+  border-radius: 4px;
+}
+
+.stencil {
+  font-weight: 700;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: var(--amber-dim);
+}
+
+/* ---------- title screen ---------- */
+
+.title {
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(300px, 0.9fr);
+  grid-template-rows: 1fr auto;
+  gap: 24px 40px;
+  align-items: center;
+  max-width: 1280px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.title__mark h1 {
+  margin: 10px 0 14px;
+  font-size: clamp(44px, 8.4vw, 112px);
+  line-height: 0.92;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--amber);
+  text-shadow: 0 0 28px rgba(255, 138, 43, 0.28);
+}
+
+.title__mark h1 span {
+  display: block;
+  color: var(--paper);
+}
+
+.title__tag {
+  max-width: 34ch;
+  margin: 0;
+  line-height: 1.5;
+  color: #aab2bf;
+}
+
+.title__side {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.title__menu {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.margo {
+  padding: 14px 16px;
+  min-height: 104px;
+}
+
+.margo__who {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+  font-size: 0.75em;
+}
+
+.margo__line {
+  margin: 0;
+  line-height: 1.5;
+  color: var(--amber);
+}
+
+.margo__line::after {
+  content: '▌';
+  margin-left: 2px;
+  animation: blink 1.1s steps(1) infinite;
+}
+
+.title__foot {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px 24px;
+  padding-top: 12px;
+  border-top: 2px dashed var(--hull-edge);
+  font-size: 0.75em;
+  color: #7d8593;
+}
+
+/* ---------- stub screens ---------- */
+
+.stub {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 18px;
+  max-width: 720px;
+  margin: 0 auto;
+}
+
+.stub h2 {
+  margin: 0;
+  font-size: clamp(26px, 4vw, 44px);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--amber);
+}
+
+.stub p {
+  margin: 0;
+  line-height: 1.6;
+  color: #aab2bf;
+}
+
+/* ---------- debug overlay (?debug=1) ---------- */
+
+.debug {
+  position: fixed;
+  top: max(8px, env(safe-area-inset-top));
+  right: max(8px, env(safe-area-inset-right));
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre;
+  color: var(--infect);
+  background: rgba(5, 7, 11, 0.86);
+  border: 1px solid #2f4a1c;
+  pointer-events: none;
+}
+
+/* ---------- portrait hint ---------- */
+
+#rotate-hint {
+  display: none;
+  position: fixed;
+  inset: 0;
+  padding: 32px;
+  place-content: center;
+  text-align: center;
+  line-height: 1.7;
+  color: var(--amber);
+  background: var(--space);
+}
+
+@media (orientation: portrait) and (max-width: 900px) {
+  #rotate-hint {
+    display: grid;
+  }
+}
+
+@media (max-height: 520px) {
+  .title {
+    gap: 12px 28px;
+  }
+  .title__tag {
+    display: none;
+  }
+}
+
+@keyframes blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .margo__line::after {
+    animation: none;
+  }
+}

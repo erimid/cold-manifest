@@ -1,0 +1,13 @@
+{
+  "note": "Stage 1 placeholder lines (DECISIONS DF-01). They do not count toward coverage and are all removed by the end of Stage 5.",
+  "items": [
+    { "id": "ph.greeting.001", "category": "greeting", "placeholder": true, "text": "Systems up. Mostly. Good morning, Captain." },
+    { "id": "ph.greeting.002", "category": "greeting", "placeholder": true, "text": "Manifest is empty, tanks are not. That won't last." },
+    { "id": "ph.greeting.003", "category": "greeting", "placeholder": true, "text": "I've checked the hull twice. I'd rather not check it a third time." },
+    { "id": "ph.greeting.004", "category": "greeting", "placeholder": true, "text": "Awake. Auditing. Try not to give me anything to write down." },
+    { "id": "ph.idle.001", "category": "idle", "placeholder": true, "text": "Quiet. I don't trust it, but I'll take it." },
+    { "id": "ph.idle.002", "category": "idle", "placeholder": true, "text": "The reactor is humming a little flat today. Nothing to worry about. Probably." },
+    { "id": "ph.hazard.001", "category": "hazard", "placeholder": true, "text": "That's a fire. I'd like it noted that I mentioned it first." },
+    { "id": "ph.order_confirm.001", "category": "order_confirm", "placeholder": true, "text": "{crew_name} is on the way." }
+  ]
+}

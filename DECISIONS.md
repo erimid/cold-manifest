@@ -21,6 +21,9 @@ Items here are known shortcuts. Each names the stage that must clear it.
 | DF-04 | Faction and port names are provisional (see D-012). | Stage 7 (S7.4) | Open |
 | DF-05 | Vent graph is data only, not used by anything, until the creature exists. | Stage 6 (S6.1) | Open |
 | DF-06 | Pre-fight talk/bribe uses a placeholder negotiation value until crew skills exist. | Stage 4 (S4.1) | Open |
+| DF-07 | `src/sim/sim.js` is a stub (tick counter and `reactorDrift`); see D-018. | S1.2 (clock), S1.4 (remove `reactorDrift`) | Open |
+| DF-08 | GitHub Pages must be switched on once in the repo settings (source: `gh-pages` branch) before preview links work (D-014). | Stage 1 | Open |
+| DF-09 | No Playwright touch tests in CI yet. | S1.2 | Open |
 
 ---
 
@@ -79,13 +82,37 @@ Items here are known shortcuts. Each names the stage that must clear it.
 **What:** One PR per session, each passing the green gate (see PLAN.md §0). Stage notes and autoplay reports at the end of each stage.
 **Why:** Small reviewable steps that are always playable.
 
-### D-014 Preview deploys on Cloudflare Pages (Stage 1)
-**What:** The repo is connected to Cloudflare Pages (build `npm run build`, output `dist/`). Every PR gets its own preview URL, and `main` deploys to production. PR descriptions link the preview so Eric can test on his iPad.
-**Why:** Eric tests on a real iPad (brief §4, §22). The brief already names Cloudflare Pages as the target host, and its Git integration gives per-PR previews with no secrets in the repo.
-**Note:** Connecting the repo is a one-time step in Eric's Cloudflare account (S1.1).
+### D-014 Preview deploys on GitHub Pages (Stage 1; departs from brief §4)
+**What:** The game is published to GitHub Pages from a `gh-pages` branch that `.github/workflows/pages.yml` maintains. `main` goes to `https://erimid.github.io/cold-manifest/` and each pull request goes to `https://erimid.github.io/cold-manifest/pr/<number>/` (removed when the PR closes). PR descriptions link the preview so Eric can test on his iPad.
+**Why:** Eric asked for github.io instead of Cloudflare on 2026-11-15. The brief names Cloudflare Pages as an example and requires only static output that works on any static host; the Vite build uses a relative base, so it still deploys to Cloudflare or anywhere else unchanged.
+**Note:** GitHub Pages has no built-in per-PR previews, so the workflow builds them as subfolders. Pages must be switched on once in the repo settings (source: `gh-pages` branch, root folder).
+
+### D-015 Content file shape (S1.1)
+**What:** Every content file is `{ "items": [ { "id": ... }, ... ] }` in the folder for its type (`content/ai-lines/`, `content/events/`, ...). Ids are lowercase with `.`, `_` or `-` separators and are unique per type. AI lines carry `category`, `text`, and optional `weight`, `conditions`, `placeholder`. Category ids and targets live in `src/ai/categories.js`.
+**Why:** One shape for every type keeps the loader and checker simple. Extra top-level keys such as `note` are allowed for comments, since JSON has none.
+
+### D-016 Coverage is reported, not enforced, until Stage 10 (S1.1)
+**What:** `npm run check` fails on invalid content and on any `Math.random` in `src/` or `tools/`. Coverage below target is printed but does not fail. `npm run check -- --strict` also fails on missed targets and leftover placeholder lines.
+**Why:** The brief requires the checker to pass at the end of every stage, long before the library reaches its targets. `--strict` becomes the CI default at the end of Stage 10.
+
+### D-017 Exact-wording duplicates are checked now; near-duplicates in S5.1 (S1.1)
+**What:** The checker already rejects AI lines whose wording matches after slots, case and punctuation are stripped. Fuzzy near-duplicate detection is built in S5.1 with the real library.
+**Why:** The exact check is cheap and enforces the "slots add context, not count" rule from the first line written. Fuzzy thresholds need real lines to tune.
+
+### D-018 The sim is a stub until S1.2 (S1.1)
+**What:** `src/sim/sim.js` only has a tick counter and one seeded drifting value (`reactorDrift`). Autoplay checks no crashes, invariants, and exact replay from the seed, with no bot decisions.
+**Why:** S1.1 is about proving the pipeline end to end. S1.2 replaces the stepping with the real clock, pause and command queue; `reactorDrift` goes when the reactor exists (S1.4).
+
+### D-019 Node 22 and DOM buttons (S1.1)
+**What:** Node 22 or newer is required (`.node-version`), because `node --test` with a glob needs it. Menu buttons use ordinary DOM click events for now.
+**Why:** S1.2 builds the input module and decides how DOM UI and canvas taps are routed through it; nothing in S1.1 touches the canvas.
 
 ---
 
 ## Stage notes
 
 _None yet. Stage 1 note goes here when Stage 1 is done._
+
+### Session log
+
+- **S1.1 (2026-11-15):** Vite scaffold, folder layout, seeded RNG with substreams, content registry with browser and Node loaders, content checker, autoplay skeleton, title screen with stub screens, debug overlay, CI. 30 unit tests. GitHub Pages deploy workflow with per-PR previews. Known gap: DF-08 (Pages must be switched on in repo settings).

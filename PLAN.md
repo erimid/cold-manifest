@@ -25,7 +25,7 @@ npm run autoplay -- --runs <N>   # tools/autoplay.js: headless seeded runs, no c
 npm run build        # static output in dist/, deployable to any static host
 ```
 - Update `DECISIONS.md`: new decisions, new deferrals (with the stage that must revisit them), cleared deferrals.
-- Open a PR. The PR description lists what's playable now, how to try it (URL flags, debug commands), and the Cloudflare Pages preview link for testing on iPad.
+- Open a PR. The PR description lists what's playable now, how to try it (URL flags, debug commands), and the GitHub Pages preview link (`/pr/<number>/`) for testing on iPad.
 
 **End of stage (in addition to the green gate)**
 - A stage note in `DECISIONS.md`: what was built, what changed and why, known issues.
@@ -59,7 +59,7 @@ Session counts are estimates. A stage is done when its exit checks pass, not whe
 
 | Session | Work | Done when |
 |---|---|---|
-| S1.1 Scaffold | Vite project, folder layout from brief §4, `index.html`, `main.js` state machine stub, seeded RNG with substreams (+ tests), content loader (browser + Node), `tools/content-check.js` skeleton (schema check for files that exist, ID uniqueness, `Math.random` lint), `tools/autoplay.js` skeleton, GitHub Actions running the green gate on every PR. Cloudflare Pages preview deploys (Eric connects the repo once; see D-014). | `npm run dev` shows a title screen; all four gate commands run in CI; the PR has a working preview link that opens on Eric's iPad. |
+| S1.1 Scaffold | Vite project, folder layout from brief §4, `index.html`, `main.js` state machine stub, seeded RNG with substreams (+ tests), content loader (browser + Node), `tools/content-check.js` skeleton (schema check for files that exist, ID uniqueness, `Math.random` lint), `tools/autoplay.js` skeleton, GitHub Actions running the green gate on every PR. GitHub Pages deploys with a preview per PR (see D-014). | `npm run dev` shows a title screen; all four gate commands run in CI; the PR has a working preview link that opens on Eric's iPad. |
 | S1.2 Clock and input | Fixed-timestep sim clock, pause/resume, command queue, render interpolation. Input module (Pointer Events, DOM-first routing, tap/drag threshold, padded hit areas, long-press). Keyboard map (space = pause). | Unit test: 1,000 ticks paused leaves the sim state hash unchanged. Playwright test with iPad touch emulation: tap on a panel never hits the canvas under it; long-press opens info. |
 | S1.3 Ship model and renderer | Ship layout format (`content/ships/`): 12 to 16 rooms, doors, corridors, vent graph (data only for now), system placement. The *Margin of Error* layout. Room state (O2, temp, light, noise, door state, hull, fire, breach). Canvas cutaway renderer with per-room lighting, pre-rendered offscreen layers, landscape fit. Tap a room to see its status. | Ship renders crisply at 1024×768, 1366×1024 and 1920×1080. Room status panel works by tap and click. |
 | S1.4 Power and systems | Reactor power pool, power routing panel (bottom of screen, chunky buttons + number keys), system levels and damage, lights as a power draw, door system (remote control with power, by hand without), life support, AI core damage level (stub value). | Routing works with mouse, touch and keyboard. Unit tests: power never exceeds supply; unpowered doors need a crew member present. |

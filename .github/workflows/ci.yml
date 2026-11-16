@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  green-gate:
+    name: Tests, content check, autoplay, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - run: npm ci
+      - name: Unit tests
+        run: npm test
+      - name: Content check
+        run: npm run check
+      - name: Autoplay (100 seeded runs)
+        run: npm run autoplay -- --runs 100
+      - name: Build
+        run: npm run build
