@@ -1280,7 +1280,15 @@ async function chartTests(browser) {
     const to = r.map.lanes.filter((l) => l.a === r.at || l.b === r.at).map((l) => (l.a === r.at ? l.b : l.a))[0];
     const nodeBox = await pd.locator(`#node-${to}`).boundingBox();
     assert.ok(nodeBox.x >= box.x && nodeBox.x + nodeBox.width <= box.x + box.width, 'point inside the chart');
-    await pd.click(`#node-${to}`);
+    // Two points a lane apart can overlap at this size: click a part of ours that nothing covers.
+    const spot = await pd.evaluate((id) => {
+      const node = document.querySelector(`#node-${id}`);
+      const r = node.getBoundingClientRect();
+      for (let y = r.top + 4; y < r.bottom; y += 6) for (let x = r.left + 4; x < r.right; x += 6) if (node.contains(document.elementFromPoint(x, y))) return { x, y };
+      return null;
+    }, to);
+    assert.ok(spot, 'some part of the point can be clicked');
+    await pd.mouse.click(spot.x, spot.y);
     await pd.click('#btn-plot');
     await game(pd, () => window.coldManifest.sim.enqueue({ type: 'debug.run', fix: true }));
     await pd.waitForFunction(() => !document.querySelector('#btn-chart-jump').disabled, null, { timeout: 3000 });
