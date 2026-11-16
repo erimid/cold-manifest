@@ -1,7 +1,7 @@
 // The screens around the ship (S3.2, brief §18): records hub, contract board, port,
 // event view, scene view and run summary. Each is a plain function that fills `root`
-// and calls back; main.js owns which one is up. All of them are working stubs: real
-// content arrives with S3.4 (contracts, ports) and Stage 4 (scenes). The event view is real since S3.3.
+// and calls back; main.js owns which one is up. The event view is real since S3.3, and the
+// contract board and the port since S3.4; scenes arrive in Stage 4.
 
 import { el } from './dom.js';
 
@@ -44,26 +44,27 @@ export function renderHub(root, { history, wall, onBack }) {
   );
 }
 
-/** The contract board: pick one and the run starts. */
-export function renderContracts(root, { contracts, onAccept, onBack }) {
+/** The contract board (S3.4): one contract of each type from content; take one and the run starts. `offers` come from runflow.boardOffers. */
+export function renderContracts(root, { offers, onAccept, onBack }) {
   root.replaceChildren(
     screen(
       'board',
       tag('Contract board'),
       el('h2', {}, 'Contracts'),
-      el('p', {}, 'Three on the board. Real ones arrive in S3.4; these are stand-ins with the right shape.'),
+      el('p', {}, 'Three jobs on the board. The advance is paid when you sign, and comes off the fee at the drop.'),
       el(
         'div',
         { class: 'cards' },
-        contracts.map((contract) =>
+        offers.map((offer) =>
           el(
             'div',
-            { class: 'panel card', id: `contract-${contract.id}` },
-            tag(contract.type),
-            el('h3', {}, contract.title),
-            table([['Client', contract.client], ['Cargo', contract.cargo], ['Pay', contract.pay]]),
-            el('p', { class: 'dim' }, contract.note),
-            el('button', { class: 'btn', type: 'button', id: `accept-${contract.id}`, press: () => onAccept(contract) }, 'Take it'),
+            { class: 'panel card', id: `contract-${offer.type}` },
+            tag(offer.typeName),
+            el('h3', {}, offer.title),
+            el('p', {}, offer.text),
+            table([['Client', offer.client], ['Contact', offer.contact], ['Cargo', offer.cargo], ['Pay', `${offer.pay} (${offer.advance} up front)`], ['Deadline', offer.deadline]]),
+            el('p', { class: 'dim' }, offer.followed ? `${offer.note} Margo: somebody is already asking where this cargo is going.` : offer.note),
+            el('button', { class: 'btn', type: 'button', id: `accept-${offer.type}`, press: () => onAccept(offer) }, 'Take it'),
           ),
         ),
       ),
@@ -72,30 +73,36 @@ export function renderContracts(root, { contracts, onAccept, onBack }) {
   );
 }
 
-/** A port: services as stubs, the bar (a scene), and leaving. At the drop, handing over the cargo ends the run. */
-export function renderPort(root, { node, fuel, fuelMax, isDrop, onRefuel, onBar, onDepart, onHandOver, onRetire }) {
-  const full = fuel >= fuelMax;
+/**
+ * A port (S3.4): what is here and what it costs, the bar (a scene), and leaving. `view` comes from
+ * runflow.portView; every service is a button that says what it would buy, or why it cannot.
+ * At the drop, handing over the cargo ends the run.
+ */
+export function renderPort(root, { view, onService, onHandOver, onBar, onDepart, onRetire }) {
+  const service = (one) =>
+    el('button', { class: `btn${one.danger ? ' btn--danger' : ''}`, type: 'button', id: `btn-${one.id}`, disabled: Boolean(one.why), press: () => onService(one) }, one.label, el('small', {}, one.why ? capital(one.why) : one.detail));
   root.replaceChildren(
     screen(
       'port',
-      tag(isDrop ? 'The drop' : 'Port'),
-      el('h2', {}, node.name),
-      el('p', {}, isDrop ? 'The consignee is waiting at the dock.' : 'A company dock with a fuel line, a repair gang that is never on shift, and a bar.'),
-      table([['Fuel', `${fuel} of ${fuelMax}`]], 'port-facts'),
+      tag(view.isDrop ? 'The drop' : 'Port'),
+      el('h2', {}, view.name),
+      el('p', {}, view.text),
+      table(view.facts, 'port-facts'),
       el(
         'div',
         { class: 'menu' },
-        isDrop && el('button', { class: 'btn', type: 'button', id: 'btn-handover', press: onHandOver }, 'Hand over the cargo'),
-        el('button', { class: 'btn', type: 'button', id: 'btn-refuel', disabled: full, press: onRefuel }, 'Refuel', el('small', {}, full ? 'The tanks are full' : 'Free for now')),
-        el('button', { class: 'btn', type: 'button', id: 'btn-repair', disabled: true }, 'Repairs', el('small', {}, 'Arrive in S3.4')),
+        view.deliver && el('button', { class: 'btn', type: 'button', id: 'btn-handover', disabled: Boolean(view.deliver.why), press: onHandOver }, 'Hand over the cargo', el('small', {}, capital(view.deliver.detail))),
+        view.services.map(service),
         el('button', { class: 'btn', type: 'button', id: 'btn-hire', disabled: true }, 'Hire crew', el('small', {}, 'Arrives in Stage 4')),
         el('button', { class: 'btn', type: 'button', id: 'btn-bar', press: onBar }, 'The bar', el('small', {}, 'Rumours and scenes')),
         el('button', { class: 'btn', type: 'button', id: 'btn-depart', press: onDepart }, 'Back to the ship', el('small', {}, 'Open the chart')),
-        !isDrop && el('button', { class: 'btn btn--danger', type: 'button', id: 'btn-retire', press: onRetire }, 'Retire here', el('small', {}, 'End the run')),
+        view.canRetire && el('button', { class: 'btn btn--danger', type: 'button', id: 'btn-retire', press: onRetire }, 'Retire here', el('small', {}, 'End the run')),
       ),
     ),
   );
 }
+
+const capital = (text) => (text ? text[0].toUpperCase() + text.slice(1) : text);
 
 /**
  * The event view (S3.3, brief §15, §18). `view` comes from narrative/events.js eventView: the title,

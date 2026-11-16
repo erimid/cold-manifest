@@ -12,6 +12,9 @@
 //                                           only ever follows another (the "event" effect) or the debug sheet
 //     "weight": 1,                          how often, against the others that fit (default 1)
 //     "once": true,                         met at most once a run (default true)
+//     "priority": 0,                        on arriving, only the events of the highest priority that
+//                                           fit are rolled between (default 0): an inspection (S3.4)
+//                                           comes before anything else at a checkpoint
 //     "cast": { "scout": { "pick": "random" } },
 //                                           people the event is about: a crew filter each, cast in
 //                                           order ("pick": "random" or "best"). Nobody fits: no event
@@ -31,7 +34,8 @@
 // The sim opens an event when we arrive somewhere for the first time (the sector says how
 // likely, by kind of point) and keeps it in `run.events.open` until it is answered
 // (`event.choose`) and put away (`event.dismiss`). Jumping away from an event leaves it behind.
-// A sim given no events never opens one.
+// A sim given no events never opens one. A salvage claim (contracts.js) is an event too: standing at
+// the claim point opens it, every time, until the claim is worked.
 
 import { endFight } from '../sim/combat.js';
 import { NODE_KINDS, nodeOf } from '../sim/sector.js';
@@ -113,15 +117,22 @@ function onArrival(sim, arrival) {
     state.open = null;
     state.next = null;
   }
+  // The contract's claim comes before anything the dice would bring, and comes back until it is worked.
+  const claim = run.contract?.status === 'active' ? run.contract.claim : null;
+  if (claim && !claim.done && claim.node === arrival.node && openEvent(sim, claim.event, { force: true })) return;
   if (state.rolled.includes(arrival.node)) return;
   state.rolled.push(arrival.node);
   const chance = run.eventChance?.[arrival.kind] ?? EVENT_CHANCE[arrival.kind] ?? 0;
   if (!(chance > 0) || !rng(sim).chance(chance)) return;
-  const pool = sim.transit.all.filter((event) => (event.at ?? []).includes(arrival.kind) && !(event.once !== false && state.met.includes(event.id)));
-  while (pool.length) {
-    const event = rng(sim).weighted(pool);
-    if (openEvent(sim, event.id)) return;
-    pool.splice(pool.indexOf(event), 1);
+  const fits = sim.transit.all.filter((event) => (event.at ?? []).includes(arrival.kind) && !(event.once !== false && state.met.includes(event.id)));
+  // Highest priority first: the dice only fall between the events of one priority, and go down a priority when none of them can open.
+  for (const priority of [...new Set(fits.map((event) => event.priority ?? 0))].sort((a, b) => b - a)) {
+    const pool = fits.filter((event) => (event.priority ?? 0) === priority);
+    while (pool.length) {
+      const event = rng(sim).weighted(pool);
+      if (openEvent(sim, event.id)) return;
+      pool.splice(pool.indexOf(event), 1);
+    }
   }
 }
 
@@ -247,7 +258,7 @@ export function checkEventInvariants(sim) {
 
 const NAME = /^[a-z][a-z0-9_]*$/;
 const CHOICE_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
-const EVENT_KEYS = ['id', 'note', 'title', 'text', 'at', 'weight', 'once', 'cast', 'when', 'choices'];
+const EVENT_KEYS = ['id', 'note', 'title', 'text', 'at', 'weight', 'once', 'priority', 'cast', 'when', 'choices'];
 const CHOICE_KEYS = ['id', 'label', 'requires', 'hidden', 'outcomes'];
 const OUTCOME_KEYS = ['when', 'weight', 'fallback', 'text', 'effects'];
 const unknown = (item, allowed, what) => Object.keys(item).filter((key) => !allowed.includes(key)).map((key) => `${what}: unknown key "${key}"`);
@@ -265,6 +276,7 @@ export function checkEvent(item, refs = {}) {
   }
   problems.push(...weightProblem(item.weight, 'weight'));
   if (item.once !== undefined && typeof item.once !== 'boolean') problems.push('once must be true or false');
+  if (item.priority !== undefined && !Number.isInteger(item.priority)) problems.push('priority must be a whole number');
 
   if (item.cast !== undefined && !isObject(item.cast)) problems.push('cast must be an object of name: crew filter');
   for (const [name, spec] of Object.entries(isObject(item.cast) ? item.cast : {})) {

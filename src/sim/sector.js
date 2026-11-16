@@ -260,12 +260,13 @@ export function checkSector(sector, def) {
 
 /**
  * The run's state: the chart, where we are, fuel, jumps, the deadline, a plotted course and the pursuit.
- * `contract` is a stand-in until contracts are content (S3.4): it only says whether we are followed.
+ * Options: `pursuit` fixes whether we are followed (the contract board rolls it, S3.4), and `slack`
+ * replaces the sector's range of spare jumps on the deadline (a contract may set its own).
  */
-export function newRunState(def, rng, { pursuit } = {}) {
+export function newRunState(def, rng, { pursuit, slack: spare } = {}) {
   const map = generateSector(def, rng);
   const route = cheapestRoute(map, map.start, map.delivery);
-  const slack = rng.between(def.slack[0], def.slack[1]);
+  const slack = rng.between(...(spare ?? def.slack));
   const followed = pursuit ?? rng.chance(def.pursuit.chance);
   return {
     sector: def.id,
@@ -321,16 +322,6 @@ export function whyNoCourseJump(sim) {
   const lane = laneBetween(run.map, run.at, run.plot);
   if (run.fuel < lane.fuel) return `that lane takes ${lane.fuel} fuel and we have ${run.fuel}`;
   return whyNoJump(sim);
-}
-
-/** Why we cannot refuel right now, or null. Ports only, and only when the tanks are not full. */
-export function whyNoRefuel(sim) {
-  const run = sim.state.run;
-  if (!run) return 'there is no chart for this run';
-  if (nodeOf(run.map, run.at).kind !== 'port') return 'only a port has fuel to sell';
-  if (sim.state.fight && !sim.state.fight.over) return 'not in a fight';
-  if (run.fuel >= run.fuelMax) return 'the tanks are full';
-  return null;
 }
 
 /** Cross the lane to `to`: fuel, the jump count, the deadline, the pursuit, and arriving. */
@@ -437,16 +428,6 @@ export function sectorCommands(newShipState) {
       apply(sim) {
         if (sim.state.fight) endFight(sim); // a decided fight left on the screen
         travel(sim, sim.state.run.plot, 'jump', newShipState);
-      },
-    },
-    // Fill the tanks at a port. Free for now: S3.4 gives it a price.
-    'port.refuel': {
-      check: (sim) => whyNoRefuel(sim),
-      apply(sim) {
-        const run = sim.state.run;
-        const bought = run.fuelMax - run.fuel;
-        run.fuel = run.fuelMax;
-        sim.events.emit('port.refueled', { node: run.at, bought, fuel: run.fuel, tick: sim.state.tick });
       },
     },
     // Debug panel only: fuel, the sensor fix, and the pursuer (on from the origin, off, or alongside now).

@@ -65,7 +65,7 @@ export function validateCrates(crates, roomIds) {
   return problems;
 }
 
-function makeCrate(id, { kind, room, label, contents, rounds }) {
+function makeCrate(id, { kind, room, label, contents, rounds, contract = false, contraband = false }) {
   return {
     id,
     kind,
@@ -75,6 +75,8 @@ function makeCrate(id, { kind, room, label, contents, rounds }) {
     sealed: kind === 'cargo', // a company seal: only manifest crates have one
     room,
     by: null, // who is carrying it, while someone is
+    contract: Boolean(contract), // part of the run's contract cargo (contracts.js, S3.4)
+    contraband: Boolean(contraband), // what an inspection looks for
   };
 }
 

@@ -36,6 +36,8 @@ import { checkSenseInvariants, newSenseState, stepSenses } from './senses.js';
 import { HOLD_COMMANDS, checkHoldInvariants, newHoldState, stepHold } from './hold.js';
 import { attachMemory, checkMemoryInvariants, lampHolder, memoryTypes, remember, stepNerve, whyKeepLamp } from './memory.js';
 import { attachSector, checkRunInvariants, newRunState, sectorCommands, stepSector } from './sector.js';
+import { CONTRACT_COMMANDS, attachContracts, checkContractInvariants, setUpContract } from './contracts.js';
+import { PORT_COMMANDS } from './port.js';
 import { buildLayout } from './ship.js';
 
 /** Sim ticks per second (DECISIONS D-002). */
@@ -267,6 +269,8 @@ const COMMANDS = {
   ...combatCommands(newShipState),
   ...sectorCommands(newShipState),
   ...eventCommands(newShipState),
+  ...CONTRACT_COMMANDS,
+  ...PORT_COMMANDS,
 };
 
 /** Every kind of order the sim accepts, for the content checker (a risk rule names the kind it is about). */
@@ -323,8 +327,11 @@ const SYSTEMS = [...SHIP_SYSTEMS, stepEnemy, (sim) => stepCombat(sim, TICK_SECON
  *           refuse and what Margo objects to (S3.3).
  *           Without them nobody remembers, refuses or objects
  *   events  the items from content/events/: what can be met on the chart (S3.3). Without them nothing is
+ *   contract a contract template from content/contracts/ (S3.4): its cargo comes aboard, its advance is paid,
+ *           and it is what the drop pays for. Needs a sector. Without one the run has no contract
+ *   ports   the items from content/ports/: what a port's services cost (S3.4). Without them ports charge nothing
  */
-export function createSim({ seed, ship, crew = [], lines = [], weapons = [], ships = [], sector = null, run = {}, rules = {}, events = [] }) {
+export function createSim({ seed, ship, crew = [], lines = [], weapons = [], ships = [], sector = null, run = {}, rules = {}, events = [], contract = null, ports = [] }) {
   const layout = buildLayout(ship);
   const weaponById = new Map(weapons.map((item) => [item.id, item]));
   const shipById = new Map(ships.map((item) => [item.id, item]));
@@ -359,6 +366,10 @@ export function createSim({ seed, ship, crew = [], lines = [], weapons = [], shi
     rules: buildRules(rules),
     /** The transit events that can be met (`events` is the bus, so these go by another name). Content, not state. */
     transit: buildEvents(events),
+    /** The contract this run carries (content/contracts/), or null. Its progress is state: run.contract. */
+    contract,
+    /** What ports charge (content/ports/). Content, not state. */
+    ports,
     state: {
       seed: String(seed),
       ship: layout.id,
@@ -367,7 +378,8 @@ export function createSim({ seed, ship, crew = [], lines = [], weapons = [], shi
       commands: [], // orders waiting for the next tick
       ...newShipState(layout, crew, 'player', catalog),
       fight: null, // the fight in progress, enemy ship and all (combat.js)
-      money: START_MONEY, // spent on bribes for now; Stage 3 and 7 give it more uses
+      money: START_MONEY, // spent on bribes, fuel and repairs (port.js); the contract pays into it (contracts.js)
+      reputation: {}, // standing with each faction by id, -10 to 10 (contracts.js); 0 when not there
       cargo: [], // what we have been handed: { name, qty, from }; it also comes aboard as crates (hold.js). Goods become content in Stage 7
       intel: [], // things we have been told: { text, from, tick }
       ai: newVoiceState(),
@@ -438,16 +450,18 @@ export function createSim({ seed, ship, crew = [], lines = [], weapons = [], shi
     },
   };
   if (sector) {
-    sim.state.run = newRunState(sector, sim.rng.stream('map'), run);
+    sim.state.run = newRunState(sector, sim.rng.stream('map'), contract?.slack ? { ...run, slack: contract.slack } : run);
     // What the events leave behind them (narrative/events.js, effects.js): the event on the table, notes for
     // later events, and the hooks for scenes (Stage 4) and the threat (Stage 6).
-    Object.assign(sim.state.run, { events: newEventState(), eventChance: { ...EVENT_CHANCE, ...sector.events }, flags: {}, scenes: [], threat: null });
-  }
+    Object.assign(sim.state.run, { events: newEventState(), eventChance: { ...EVENT_CHANCE, ...sector.events }, flags: {}, scenes: [], threat: null, contract: null });
+    if (contract) setUpContract(sim, contract);
+  } else if (contract) throw new Error('A contract needs a sector to be flown across');
   attachVoice(sim);
   attachJudgement(sim);
   attachMemory(sim);
   attachSector(sim);
   attachEvents(sim);
+  attachContracts(sim);
   return sim;
 }
 
@@ -489,7 +503,7 @@ export function checkInvariants(sim) {
   const problems = [];
   if (!Number.isInteger(sim.state.tick) || sim.state.tick < 0) problems.push(`tick is ${sim.state.tick}`);
   const enemy = enemyOf(sim);
-  problems.push(...shipProblems(sim, enemy), ...checkVoiceInvariants(sim), ...checkJudgementInvariants(sim), ...checkFightInvariants(sim), ...checkBoardingInvariants(sim, enemy), ...checkRunInvariants(sim), ...checkEventInvariants(sim));
+  problems.push(...shipProblems(sim, enemy), ...checkVoiceInvariants(sim), ...checkJudgementInvariants(sim), ...checkFightInvariants(sim), ...checkBoardingInvariants(sim, enemy), ...checkRunInvariants(sim), ...checkEventInvariants(sim), ...checkContractInvariants(sim));
   if (enemy) problems.push(...shipProblems(enemy, sim).map((problem) => `enemy: ${problem}`));
   return problems;
 }

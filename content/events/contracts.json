@@ -1,0 +1,86 @@
+{
+  "note": "Events that belong to contracts (S3.4, D-115): the basic inspection at a checkpoint, which comes before any other checkpoint event while contraband is aboard (`priority`), and a salvage claim, which opens whenever we stand at the claim point with the claim unworked. The format is described at the top of src/narrative/events.js.",
+  "items": [
+    {
+      "id": "checkpoint.inspection",
+      "at": ["checkpoint"],
+      "once": false,
+      "priority": 1,
+      "when": { "fact": "contraband", "gte": 1 },
+      "title": "Inspection at {place}",
+      "text": "A Receivers cutter holds the lane with its lights on. The officer on the channel wants a scanner team aboard and the hold opened, and is polite about it in the way of someone who does not have to be.",
+      "choices": [
+        {
+          "id": "submit",
+          "label": "Open the hold and let them look",
+          "outcomes": [
+            { "weight": 3, "text": "They go straight to the crates you least wanted them to open, as if someone told them where to look. The crates leave on their cutter, and a fine is written up on the spot.", "effects": [{ "do": "contract.seize" }, { "do": "reputation", "faction": "receivers", "add": -2 }, { "do": "money", "add": -80 }] },
+            { "weight": 1, "text": "The scanner team is two boys and a handheld with a cracked screen. They read the stencils on the crates aloud, tick a box, and leave." }
+          ]
+        },
+        {
+          "id": "bribe",
+          "label": "Make the scanner team's afternoon easier",
+          "requires": { "fact": "money", "gte": 150, "label": "150 credits" },
+          "outcomes": [
+            { "weight": 4, "text": "The officer counts it twice, logs the ship as inspected, and wishes you a safe crossing in a voice that means it for exactly as long as the transfer takes.", "effects": [{ "do": "money", "add": -150 }] },
+            { "weight": 1, "text": "The officer takes the money, thanks you for it, and sends the scanner team anyway.", "effects": [{ "do": "money", "add": -150 }, { "do": "contract.seize" }, { "do": "reputation", "faction": "receivers", "add": -3 }] }
+          ]
+        },
+        {
+          "id": "talk",
+          "label": "Put someone on the channel who can talk",
+          "requires": { "crew": { "skill": "negotiation" }, "as": "voice" },
+          "outcomes": [
+            { "weight": 3, "text": "{voice} reads the officer a clause from the company's own transit charter, slowly. Nobody on that cutter wants to be the one who looks it up. The lane clears." },
+            { "weight": 1, "text": "{voice} talks well, and the officer listens, and sends the scanner team anyway.", "effects": [{ "do": "contract.seize" }, { "do": "reputation", "faction": "receivers", "add": -2 }] }
+          ]
+        },
+        {
+          "id": "run",
+          "label": "Burn through the line before they board",
+          "outcomes": [
+            { "weight": 1, "text": "The cutter is slow to turn. By the time it has, you are a heat trace and a name on a list.", "effects": [{ "do": "reputation", "faction": "receivers", "add": -1 }] },
+            { "weight": 2, "text": "The cutter was waiting for exactly that.", "effects": [{ "do": "reputation", "faction": "receivers", "add": -1 }, { "do": "fight", "ship": "knife-cutter" }] }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "claim.aphelion",
+      "once": false,
+      "title": "The claim at {place}",
+      "text": "The Aphelion turns slowly where the claim token says she will be, an ore tender with her lights out and her airlock cut open. The cut marks are still bright. Somebody has been here, and not long ago.",
+      "choices": [
+        {
+          "id": "strip",
+          "label": "Strip her properly, every bay",
+          "outcomes": [
+            { "weight": 3, "text": "It takes the whole watch. The crew come back black to the elbows with four crates of salvage and nothing worse than a cut hand.", "effects": [{ "do": "contract.load" }, { "do": "hurt", "crew": "random", "amount": 0.1 }] },
+            { "weight": 1, "text": "You are three crates in when a ship comes round her hull with its guns out, and a voice on the channel says the claim is theirs.", "effects": [{ "do": "contract.load", "count": 3 }, { "do": "fight", "ship": "knife-cutter" }] }
+          ]
+        },
+        {
+          "id": "cut",
+          "label": "Cut the sealed bay open",
+          "requires": { "crew": { "skill": "engineering", "min": 2 }, "as": "cutter" },
+          "outcomes": [
+            { "text": "{cutter} opens the sealed bay in twenty minutes with a cutting rig and a lot of language. Everything worth taking is in there, packed and tagged by whoever ran out of time before you.", "effects": [{ "do": "contract.load" }] }
+          ]
+        },
+        {
+          "id": "quick",
+          "label": "Take what is near the lock and go",
+          "outcomes": [
+            { "text": "Two crates from the lock bay, and you are gone before anyone else arrives. The rest of her stays where she is.", "effects": [{ "do": "contract.load", "count": 2 }] }
+          ]
+        },
+        {
+          "id": "leave",
+          "label": "Leave the claim for now",
+          "outcomes": [{ "text": "You log her position again. The claim will keep. Whoever cut that airlock may not wait as long." }]
+        }
+      ]
+    }
+  ]
+}
