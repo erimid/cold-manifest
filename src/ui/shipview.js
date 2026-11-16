@@ -25,6 +25,23 @@ const WEAPON_KEYS = 'ASDF';
 /** How long a shot's result stays on screen, in seconds of game time. */
 const IMPACT_SECONDS = 0.9;
 const IMPACT_TEXT = { hit: 'HIT', shield: 'SHIELD', miss: 'MISS' };
+/** A hit lights up the room it lands in for this long, and shakes the screen for this long when it is ours (brief §17). */
+const FLASH_SECONDS = 0.3;
+const SHAKE_SECONDS = 0.45;
+/** Pixels of shake: a base, and more per point of damage. */
+const SHAKE_BASE = 3;
+const SHAKE_PER_DAMAGE = 2.5;
+
+/** What a hit did, in a few words under the result: "FIRE  BREACH  SYS -1  CREW". */
+function effectWords(effects) {
+  if (!effects) return '';
+  const words = [];
+  if (effects.system) words.push(`SYS -${effects.system}`);
+  if (effects.fire) words.push('FIRE');
+  if (effects.breach) words.push('BREACH');
+  if (effects.crew.length) words.push(effects.crew.length > 1 ? `CREW x${effects.crew.length}` : 'CREW');
+  return words.join('  ');
+}
 /** Short task names for the crew bar, where there is no room for a sentence. */
 const CHIP_TASKS = { walking: 'Walking', waiting: 'At a door', extinguish: 'Fighting fire', patch: 'Patching hull', repair: 'Repairing', unjam: 'Freeing door', idle: 'Standing by' };
 /** Start a sentence with a capital: the sim's reasons are written to follow "because". */
@@ -46,7 +63,8 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
   let foe = null; // the enemy ship's renderer, while there is one: { id, renderer }
   let foeView = null; // where the enemy ship is drawn
   let fightBar = null; // the weapons bar's live parts
-  let impacts = []; // shots that just landed, for a moment: { side, room, result, tick }
+  let impacts = []; // shots that just landed, for a moment: { side, room, result, damage, effects, tick }
+  let shake = null; // { tick, strength } the last hit on our ship, while the screen shakes
   let roster = null; // the crew bar's live parts
   let showVents = false;
   let subscriptions = [];
@@ -63,6 +81,8 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
   // ---------- naming ----------
 
   const roomName = (id) => (id === SPACE ? 'space' : layout.room(id).name);
+  /** The hardest-hitting weapon we carry: what the debug Hit us button is struck with. */
+  const heaviestGun = () => sim.state.weapons.map((slot) => sim.catalog.weapon(slot.id)).reduce((a, b) => (b.damage > a.damage ? b : a)).id;
   const weaponOf = (slot) => sim.catalog.weapon(sim.state.weapons[slot].id);
 
   function doorName(door) {
@@ -206,6 +226,7 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
     nodes.sheet.replaceChildren(
       el('div', { class: 'stencil' }, 'Settings'),
       toggle('set-sound', 'Sound', 'sound', settings.values.sound),
+      toggle('set-shake', 'Screen shake', 'shake', settings.values.shake),
       el('div', { class: 'stencil sheet__sub' }, 'Pause the game when'),
       ...AUTO_PAUSE.map((item) => toggle(`set-pause-${item.id}`, item.label, `autoPause.${item.id}`, settings.values.autoPause[item.id])),
     );
@@ -421,16 +442,40 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
       ctx.fill();
     }
 
-    // What the last shots did: a ring where they landed and a word, so the result never rests on colour alone.
+    ctx.textAlign = 'start';
+    ctx.textBaseline = 'alphabetic';
+    ctx.lineCap = 'butt';
+  }
+
+  /** The room's rectangle in CSS pixels. */
+  const roomBox = (shipLayout, v, roomId) => {
+    const room = shipLayout.room(roomId);
+    return { x: v.ox + room.x * v.scale, y: v.oy + room.y * v.scale, w: room.w * v.scale, h: room.h * v.scale };
+  };
+
+  /**
+   * What the last shots did, on either ship: a flash over a room that was hit, a ring where
+   * each shot landed, and words for the result and what it did, so it never rests on colour alone.
+   */
+  function drawImpacts(alpha) {
+    const now = sim.state.tick - 1 + alpha;
     impacts = impacts.filter((impact) => (now - impact.tick) * TICK_SECONDS < IMPACT_SECONDS && now >= impact.tick - 1);
+    const enemy = enemyOf(sim);
     for (const impact of impacts) {
       const age = Math.max(0, ((now - impact.tick) * TICK_SECONDS) / IMPACT_SECONDS);
-      const ours = impact.side === 'player';
-      const r = ours ? foe.renderer : renderer;
+      const ours = impact.side === 'player'; // our shot, so it landed on them
+      const r = ours ? foe?.renderer : renderer;
       const v = ours ? foeView : view;
-      if (!r || !v) continue;
+      const shipLayout = ours ? enemy?.layout : layout;
+      if (!r || !v || !shipLayout?.room(impact.room)) continue;
       const at = r.roomCentre(v, impact.room);
       const colour = impact.result === 'hit' ? '255, 120, 40' : impact.result === 'shield' ? '127, 212, 255' : '233, 220, 195';
+      const flash = impact.result === 'hit' ? 1 - (age * IMPACT_SECONDS) / FLASH_SECONDS : 0;
+      if (flash > 0) {
+        const box = roomBox(shipLayout, v, impact.room);
+        ctx.fillStyle = `rgba(255, 214, 150, ${0.55 * flash})`;
+        ctx.fillRect(box.x, box.y, box.w, box.h);
+      }
       if (impact.result !== 'miss') {
         ctx.strokeStyle = `rgba(${colour}, ${1 - age})`;
         ctx.lineWidth = 3;
@@ -438,15 +483,39 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
         ctx.arc(at.x, at.y, 6 + age * v.scale * 1.4, 0, Math.PI * 2);
         ctx.stroke();
       }
-      ctx.fillStyle = `rgba(${colour}, ${1 - age * age})`;
+      const fade = 1 - age * age;
+      ctx.fillStyle = `rgba(${colour}, ${fade})`;
       ctx.font = "700 13px ui-monospace, 'SF Mono', Menlo, Consolas, monospace";
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(IMPACT_TEXT[impact.result], at.x, at.y - 14 - age * 14);
+      const rise = age * 14;
+      ctx.fillText(impact.result === 'hit' ? `${IMPACT_TEXT.hit} ${impact.damage}` : IMPACT_TEXT[impact.result], at.x, at.y - 14 - rise);
+      const words = effectWords(impact.effects);
+      if (words) {
+        ctx.font = "700 10px ui-monospace, 'SF Mono', Menlo, Consolas, monospace";
+        ctx.fillStyle = `rgba(255, 214, 150, ${fade})`;
+        ctx.fillText(words, at.x, at.y + 2 - rise, Math.max(60, v.scale * shipLayout.room(impact.room).w + 30));
+      }
+    }
+    // A hit on our ship: the edges of the screen flash red for a moment.
+    const struck = shake ? 1 - ((now - shake.tick) * TICK_SECONDS) / FLASH_SECONDS : 0;
+    if (struck > 0) {
+      ctx.strokeStyle = `rgba(214, 64, 52, ${0.6 * struck})`;
+      ctx.lineWidth = 10;
+      ctx.strokeRect(5, 5, size.w - 10, size.h - 10);
     }
     ctx.textAlign = 'start';
     ctx.textBaseline = 'alphabetic';
-    ctx.lineCap = 'butt';
+  }
+
+  /** How far to shake the screen this frame, in pixels: nothing while paused or with shake turned off. */
+  function shakeOffset(alpha) {
+    if (!shake || clock.paused || settings?.values.shake === false) return { x: 0, y: 0 };
+    const t = (sim.state.tick - 1 + alpha - shake.tick) * TICK_SECONDS;
+    if (t < 0 || t > SHAKE_SECONDS) return { x: 0, y: 0 };
+    const k = shake.strength * (1 - t / SHAKE_SECONDS) ** 2;
+    // A fixed wobble, not dice: the screen is not part of the game, and all randomness goes through the seeded generator.
+    return { x: k * Math.sin(t * 71), y: k * Math.cos(t * 53) };
   }
 
   /** Which rooms the weapons of `ship` are pointed at: Map of room id -> [slots]. */
@@ -829,6 +898,7 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
         'div',
         { class: 'shipbar__buttons' },
         debug && button('btn-dbg-step', 'Step', () => clock.stepOnce(), 'btn--debug'),
+        debug && button('btn-dbg-hit', 'Hit us', () => order({ type: 'debug.hit', at: 'us', room: selected?.kind === 'room' ? selected.id : null, weapon: heaviestGun(), force: true }), 'btn--debug'),
         debug && button('btn-dbg-fight', 'Fight', () => order({ type: 'debug.fight', enemy: sim.state.fight ? null : sim.catalog.enemies[0] }), 'btn--debug'),
         debug &&
           button('btn-vents', 'Vents', () => {
@@ -875,7 +945,10 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
         input.on('info', onInfo),
         input.on('key', onKey),
         input.on('dragstart', () => (nodes.info.hidden = true)),
-        sim.events.on('shot.resolved', (event) => impacts.push({ side: event.side, room: event.room, result: event.result, tick: event.tick })),
+        sim.events.on('shot.resolved', (event) => {
+          impacts.push({ side: event.side, room: event.room, result: event.result, damage: event.damage, effects: event.effects, tick: event.tick });
+          if (event.side === 'enemy' && event.result === 'hit') shake = { tick: event.tick, strength: SHAKE_BASE + SHAKE_PER_DAMAGE * event.damage };
+        }),
       ];
     },
     exit() {
@@ -888,7 +961,12 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
       updateFight(); // first: the weapons bar coming or going moves the space the ships are fitted to
       measure();
       const enemy = enemyOf(sim);
+      const jolt = shakeOffset(clock.alpha);
+      ctx.clearRect(0, 0, size.w, size.h);
+      ctx.save();
+      ctx.translate(jolt.x, jolt.y);
       renderer.draw(ctx, {
+        clear: false,
         view,
         width: size.w,
         height: size.h,
@@ -921,6 +999,8 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
         });
         drawFight(clock.alpha);
       }
+      drawImpacts(clock.alpha);
+      ctx.restore();
       updateClock();
       updatePanel();
       updatePower();
@@ -935,6 +1015,12 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
     debug: {
       targets: () => renderer.targets(view, sim.state.crew),
       foeTargets: () => (foe && foeView ? foe.renderer.targets(foeView, {}, { foe: true }) : []),
+      get shake() {
+        return shake;
+      },
+      get impacts() {
+        return impacts;
+      },
       get selectedWeapon() {
         return selectedWeapon;
       },

@@ -43,6 +43,8 @@ export const TRIGGERS = Object.freeze({
   'crew.died': { category: 'crew_death', priority: 5, ttl: 40, slots: crewName },
   'fight.started': { category: 'combat_start', priority: 4, ttl: 15 },
   'fight.over': { category: 'combat_end', priority: 3, ttl: 20 },
+  'hull.hit': { category: 'hazard', priority: 4, ttl: 6, cooldown: 15 },
+  'enemy.hull.hit': { category: 'combat_progress', priority: 2, ttl: 5, cooldown: 20, chance: 0.5 },
 });
 
 export function newVoiceState() {

@@ -616,7 +616,7 @@ async function voiceTests(browser) {
     await page.waitForFunction(() => window.coldManifest.sim.state.rooms.sensors.fire > 0.3, null, { timeout: 2000 });
     assert.equal(await paused(page), false, 'no pause this time');
     const saved = await game(page, () => JSON.parse(window.localStorage.getItem('cold-manifest.settings.v1')));
-    assert.deepEqual(saved.autoPause, { fire: false, breach: true, death: true });
+    assert.deepEqual(saved.autoPause, { fight: true, fire: false, breach: true, death: true });
   });
 
   await check('settings: sound off silences everything, sound on brings the hum back', async () => {
@@ -649,7 +649,7 @@ async function voiceTests(browser) {
   await check('a reload keeps the settings', async () => {
     await page.reload();
     await page.waitForFunction(() => window.coldManifest?.machine.state === 'title');
-    assert.deepEqual(await game(page, () => window.coldManifest.settings.values.autoPause), { fire: false, breach: true, death: true });
+    assert.deepEqual(await game(page, () => window.coldManifest.settings.values.autoPause), { fight: true, fire: false, breach: true, death: true });
   });
 
   await check('no page errors', async () => assert.deepEqual(errors, []));
@@ -837,6 +837,84 @@ async function fightTests(browser) {
   await desktop.close();
 }
 
+async function hitTests(browser) {
+  console.log('iPad: hits and what they do');
+  const context = await browser.newContext({ ...devices['iPad (gen 7) landscape'] });
+  const page = await context.newPage();
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  // No ?autopause: a touch device pauses by itself when a fight starts.
+  await page.goto(`http://localhost:${PORT}/?seed=E2E-HITS&debug=1`);
+  await page.waitForFunction(() => window.coldManifest?.machine.state === 'title');
+  await page.tap('#btn-ship');
+  await page.waitForFunction(() => window.coldManifest.machine.state === 'ship');
+  const resume = async () => {
+    if (await paused(page)) await page.tap('#btn-pause');
+    await page.waitForFunction(() => !window.coldManifest.clock.paused, null, { timeout: 2000 });
+  };
+
+  await check('auto-pause: a fight starting stops the clock and the pause button names the ship', async () => {
+    await resume();
+    await page.tap('#btn-dbg-fight');
+    await page.waitForFunction(() => window.coldManifest.clock.paused, null, { timeout: 2000 });
+    assert.equal(await page.textContent('#pause-note'), 'Gunnery drone alongside');
+    assert.ok(await game(page, () => window.coldManifest.sim.state.fight));
+  });
+
+  await check('Hit us on a chosen room: the hull drops, the room\'s system breaks, the screen shakes and the room flashes', async () => {
+    await resume();
+    // Turn the other auto-pauses off so a fire from the hit does not stop the clock under the test.
+    await game(page, () => {
+      for (const key of ['fire', 'breach', 'death']) window.coldManifest.settings.set(`autoPause.${key}`, false);
+    });
+    const t = await target(page, 'weapons');
+    await page.touchscreen.tap(t.mx, t.my);
+    assert.deepEqual(await selected(page), { kind: 'room', id: 'weapons' });
+    const landed = page.evaluate(() => new Promise((resolve) => window.coldManifest.sim.events.on('shot.resolved', resolve)));
+    await page.tap('#btn-dbg-hit');
+    const shot = await landed;
+    assert.equal(shot.result, 'hit');
+    assert.equal(shot.room, 'weapons');
+    assert.equal(shot.effects.system, 2);
+    assert.equal(await game(page, () => window.coldManifest.sim.state.systems.weapons.damage), 2);
+    await page.waitForFunction(() => /18\/20/.test(document.querySelector('#fight-own').textContent), null, { timeout: 2000 });
+    assert.ok(await game(page, () => window.coldManifest.shipView.debug.shake), 'the screen shook');
+    assert.ok(await game(page, () => window.coldManifest.shipView.debug.impacts.some((i) => i.result === 'hit' && i.side === 'enemy')), 'the hit is drawn on our ship');
+    // E2E_SHOTS=<folder> keeps a picture of the moment for the PR.
+    if (process.env.E2E_SHOTS) await page.screenshot({ path: `${process.env.E2E_SHOTS}/s2-2-hit-ipad.png` });
+  });
+
+  await check('hits land through the hazard code: enough of them on one room burn it or hole it', async () => {
+    const before = await game(page, () => ({ ...window.coldManifest.sim.state.rooms.cargo }));
+    for (let i = 0; i < 6; i++) {
+      await game(page, () => window.coldManifest.sim.enqueue({ type: 'debug.hit', at: 'us', room: 'cargo', weapon: 'slug-thrower', force: true }));
+      await page.waitForFunction((n) => window.coldManifest.sim.state.hull.points <= 18 - 2 * (n + 1), i, { timeout: 2000 });
+    }
+    const after = await game(page, () => ({ ...window.coldManifest.sim.state.rooms.cargo }));
+    assert.ok(after.hull < before.hull, 'the room is worn');
+    assert.ok(after.fire > 0 || after.breach > 0 || after.oxygen < before.oxygen, 'something caught or gave way');
+  });
+
+  await check('settings: screen shake can be turned off, and the choice is kept', async () => {
+    await page.tap('#btn-settings');
+    assert.equal(await page.getAttribute('#set-shake', 'aria-pressed'), 'true');
+    assert.equal(await page.getAttribute('#set-pause-fight', 'aria-pressed'), 'true');
+    await page.tap('#set-shake');
+    assert.equal(await page.getAttribute('#set-shake', 'aria-pressed'), 'false');
+    await page.tap('#btn-settings');
+    const saved = await game(page, () => JSON.parse(window.localStorage.getItem('cold-manifest.settings.v1')));
+    assert.equal(saved.shake, false);
+  });
+
+  await check('every control is at least 44px tall and wide with the debug Hit us button in the bar', async () => {
+    const small = await page.$$eval('.ship .btn', (nodes) => nodes.map((n) => ({ id: n.id, r: n.getBoundingClientRect() })).filter((n) => n.r.width > 0 && (n.r.width < 44 || n.r.height < 44)).map((n) => `${n.id} ${Math.round(n.r.width)}x${Math.round(n.r.height)}`));
+    assert.deepEqual(small, []);
+  });
+
+  await check('no page errors', async () => assert.deepEqual(errors, []));
+  await context.close();
+}
+
 const server = await startServer();
 const browser = await chromium.launch(process.env.PW_CHROMIUM ? { executablePath: process.env.PW_CHROMIUM } : {});
 try {
@@ -844,6 +922,7 @@ try {
   await desktopTests(browser);
   await voiceTests(browser);
   await fightTests(browser);
+  await hitTests(browser);
 } finally {
   await browser.close();
   server.kill();

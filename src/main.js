@@ -18,7 +18,7 @@ import { AUTO_PAUSE, createSettings } from './ui/settings.js';
 import { createShipView } from './ui/shipview.js';
 import { renderStub, renderTitle } from './ui/title.js';
 
-const VERSION = '0.8.0';
+const VERSION = '0.9.0';
 
 const params = new URLSearchParams(window.location.search);
 const flags = {
@@ -90,6 +90,7 @@ const shipView = createShipView({ canvas: viewCanvas, root, input, sim, clock, a
 
 // Auto-pause (brief §7): stop the clock the moment something goes badly wrong, and say what.
 const AUTO_PAUSE_TEXT = {
+  fight: (event) => `${event.name} alongside`,
   fire: (event) => `Fire in ${sim.layout.room(event.room).name}`,
   breach: (event) => `Breach in ${sim.layout.room(event.room).name}`,
   death: (event) => `${sim.state.crew[event.crew].name} is dead`,

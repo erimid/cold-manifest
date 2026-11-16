@@ -6,11 +6,12 @@ const KEY = 'cold-manifest.settings.v1';
 
 /** Auto-pause is on by default on touch screens, where a slip of the finger costs more (brief §7). */
 export function defaultSettings({ touch = false } = {}) {
-  return { sound: true, autoPause: { fire: touch, breach: touch, death: touch } };
+  return { sound: true, shake: true, autoPause: { fight: touch, fire: touch, breach: touch, death: touch } };
 }
 
 /** What each auto-pause setting is called, and which game event trips it. */
 export const AUTO_PAUSE = Object.freeze([
+  { id: 'fight', label: 'A fight starts', event: 'fight.started' },
   { id: 'fire', label: 'A fire starts', event: 'fire.started' },
   { id: 'breach', label: 'The hull is breached', event: 'breach.opened' },
   { id: 'death', label: 'A crew member dies', event: 'crew.died' },
@@ -20,7 +21,7 @@ export const AUTO_PAUSE = Object.freeze([
 export function mergeSettings(defaults, saved) {
   const out = structuredClone(defaults);
   if (!saved || typeof saved !== 'object') return out;
-  if (typeof saved.sound === 'boolean') out.sound = saved.sound;
+  for (const key of ['sound', 'shake']) if (typeof saved[key] === 'boolean') out[key] = saved[key];
   for (const key of Object.keys(out.autoPause)) {
     if (typeof saved.autoPause?.[key] === 'boolean') out.autoPause[key] = saved.autoPause[key];
   }

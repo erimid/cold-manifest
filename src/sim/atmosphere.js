@@ -200,11 +200,21 @@ function stepCrewHazards(sim, seconds) {
       cause = 'fire';
     }
     if (cause === null) continue;
-    const before = member.health ?? 1;
-    member.health = Math.max(0, health);
-    if (before >= 0.5 && member.health < 0.5 && member.health > 0) sim.events.emit('crew.hurt', { crew: id, room: member.room, cause, tick: sim.state.tick });
-    if (member.health === 0) killCrew(sim, id, cause);
+    harmCrew(sim, id, (member.health ?? 1) - health, cause);
   }
+}
+
+/**
+ * Take `amount` of health from a crew member: bad air, fire, a hit (S2.2).
+ * Crossing below half health is announced once; at nothing they die.
+ */
+export function harmCrew(sim, id, amount, cause) {
+  const member = sim.state.crew[id];
+  if (!member || member.alive === false || !(amount > 0)) return;
+  const before = member.health ?? 1;
+  member.health = Math.max(0, before - amount);
+  if (before >= 0.5 && member.health < 0.5 && member.health > 0) sim.events.emit('crew.hurt', { crew: id, room: member.room, cause, tick: sim.state.tick });
+  if (member.health === 0) killCrew(sim, id, cause);
 }
 
 /** One tick of air, fire, heat and what they do to people. */
