@@ -45,7 +45,7 @@ export const TEMP_RATE = 0.12;
 /** Below this much oxygen an unsuited crew member starts to suffocate. */
 export const BREATHABLE_O2 = 0.15;
 export const SUFFOCATE_SECONDS = 8; // from full health, in no air at all
-export const BURN_SECONDS = 12; // from full health, in a full-size fire
+export const BURN_SECONDS = 20; // from full health, in a full-size fire
 export const SUIT_FIRE_PROTECTION = 0.5;
 
 const clamp01 = (value) => Math.max(0, Math.min(1, value));
@@ -175,12 +175,11 @@ function stepTemperature(sim, seconds) {
 export function killCrew(sim, id, cause) {
   const member = sim.state.crew[id];
   if (!member || member.alive === false) return;
-  member.alive = false;
-  member.health = 0;
+  Object.assign(member, { alive: false, health: 0, goal: null, path: [], task: 'dead' });
   sim.events.emit('crew.died', { crew: id, room: member.room, cause, tick: sim.state.tick });
 }
 
-/** What bad air and fire do to anyone standing in them. Crew proper arrive in S1.6. */
+/** What bad air and fire do to anyone standing in them. */
 function stepCrewHazards(sim, seconds) {
   for (const [id, member] of Object.entries(sim.state.crew)) {
     if (member.alive === false) continue;

@@ -10,6 +10,7 @@
 //           wall runs up and down. `b` may be "space" for an airlock.
 //   vents   { id, a, b }: crawlspaces between rooms. Crew cannot use them.
 //   hull    the outline of the ship as a list of [x, y] points
+//   crewStart  room ids where the starting crew stand, in roster order
 //   power   { reactor, lightsPerBar, systems: { id: { level, power } } }: the
 //           reactor's bars, how many lit rooms one bar carries, and each
 //           powered system's size and starting power (see power.js)
@@ -172,6 +173,10 @@ export function validateLayout(data) {
     problems.push('needs a "hull" outline of at least three [x, y] points');
   }
 
+  // Where the crew start
+  if (!Array.isArray(data.crewStart) || !data.crewStart.length) problems.push('needs a "crewStart" list of room ids');
+  else for (const id of data.crewStart) if (!rooms.has(id)) problems.push(`crewStart: no room "${id}"`);
+
   problems.push(...validatePower(data));
 
   return problems;
@@ -217,6 +222,7 @@ export function buildLayout(data) {
     doors,
     vents,
     power: Object.freeze(structuredClone(data.power)),
+    crewStart: Object.freeze([...data.crewStart]),
     room: (id) => roomById.get(id),
     door: (id) => doorById.get(id),
     exits: (roomId) => exits.get(roomId) ?? [],

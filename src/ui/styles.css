@@ -308,6 +308,98 @@ body {
   gap: 12px;
 }
 
+/* ---------- crew bar ---------- */
+
+.crewbar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+
+.btn.crewchip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 160px;
+  min-width: 0;
+  min-height: var(--tap);
+  padding: 6px 10px 6px 8px;
+  border-left-width: 2px;
+  border-left-color: var(--hull-edge);
+  letter-spacing: 0.06em;
+  text-transform: none;
+}
+
+.crewchip__num {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  color: #05070b;
+  font-weight: 700;
+}
+
+.crewchip__body {
+  display: grid;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.crewchip__name {
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+
+.crewchip__task {
+  font-size: 0.68em;
+  font-weight: 400;
+  color: #8b93a1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.crewchip__bar {
+  display: block;
+  height: 4px;
+  background: #05070b;
+  border-radius: 2px;
+}
+
+.crewchip__health {
+  display: block;
+  height: 100%;
+  background: #8be28b;
+  border-radius: 2px;
+}
+
+.crewchip.is-hurt .crewchip__health {
+  background: var(--alarm);
+}
+
+.crewchip.is-selected {
+  border-color: var(--paper);
+  box-shadow: 0 0 0 2px var(--paper), 0 3px 0 #05070b;
+}
+
+.crewchip.is-dead {
+  color: #6a7180;
+}
+
+.crewchip.is-dead .crewchip__num {
+  background: #3a404b !important;
+}
+
+.status__hint--inline {
+  align-self: center;
+  font-size: 0.85em;
+}
+
 /* ---------- power panel ---------- */
 
 .power {

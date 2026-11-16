@@ -30,13 +30,16 @@ Items here are known shortcuts. Each names the stage that must clear it.
 | DF-13 | Hull damage, heat and cold have no visual of their own beyond fire glow and breach frost; temperature only shows in the status panel and has no effect on crew or systems. No smoke or sparks yet. | S11.1 (look pass) | Open |
 | ~~DF-14~~ | ~~Doors open by remote from anywhere with no power or crew needed.~~ | S1.4 | Done in S1.4: doors need door control power or hands at the door (D-031) |
 | DF-15 | Autoplay takes about 35 s for 100 runs because invariants and stuck checks run every tick. Fine for now; sample them if it grows. | Stage 3 | Open |
-| DF-16 | "Hands at the door" reads `state.crew`, which is empty until crew exist, so an unpowered door cannot be moved at all in play yet. | S1.6 (crew; working a door by hand becomes a crew task) | Open |
+| ~~DF-16~~ | ~~"Hands at the door" read an empty crew list, so an unpowered door could not be moved in play.~~ | S1.6 | Done in S1.6: crew exist. A crew member in a room on either side counts as hands; walking crew open doors themselves (D-039) |
 | ~~DF-17~~ | ~~Life support is a flat rate on every room with no flow between rooms.~~ | S1.5 | Done in S1.5: air flows through doors, airlocks and breaches (D-034). Crew still do not breathe air down (S1.6) |
 | DF-18 | Shields, engines, weapons, sensors and medbay take power but do nothing with it yet. AI core power and damage only feed `aiCoreStatus()`. Damage comes only from the debug command, and nothing repairs it in play. | Stage 2 (combat systems), S1.6 (repairs), Stage 5 (AI degradation) | Open |
 | DF-19 | Power panel tiles show system codes (SHD, ENG...) with no on-screen legend on touch; the codes match the stencils on the room floors. | S11.4 (tutorial), S11.5 (touch polish) | Open |
-| DF-20 | Crew hazards (suffocation, burns, death by jettison) act on bare `state.crew` entries that only tests create. | S1.6 (real crew, suits as equipment) | Open |
+| ~~DF-20~~ | ~~Crew hazards acted on bare crew entries that only tests created.~~ | S1.6 | Done in S1.6 |
 | DF-21 | Jettison has no cost beyond the room: no cargo loss, no hull or handling penalty, no AI argument first, and the vent graph still lists vents into the missing room. | Stage 3 (cargo), Stage 5 (AI argues before risky orders), Stage 6 (vents) | Open |
-| DF-22 | Nothing puts a fire out except starving or venting it, and nothing patches a breach except the debug command. | S1.6 (extinguish and patch tasks) | Open |
+| DF-23 | The three starting crew (Ilse, Dace, Okoro) are placeholders in `content/crew/placeholder.json` with no skills, traits, needs or stress; everyone works at the same rate. | S4.1 (crew generation, skills, traits) | Open |
+| DF-24 | Suits are a free, instant toggle with endless air. Crew do not use up a room's oxygen. Crew never refuse an order or flee danger by themselves. | Stage 4 (traits, refusal), Stage 9 (equipment) | Open |
+| DF-25 | Crew walk in straight lines between doors and pass through each other. Routes count doors, not distance. The crew bar is sized for three and will wrap with eight. | S11.5 (touch polish), Stage 4 (bigger rosters) | Open |
+| ~~DF-22~~ | ~~Nothing put a fire out except starving or venting it, and nothing patched a breach.~~ | S1.6 | Done in S1.6: crew extinguish, patch, repair and unjam (D-040) |
 
 ---
 
@@ -192,6 +195,22 @@ Items here are known shortcuts. Each names the stage that must clear it.
 **What:** Each tick runs orders, then air and fire, then power, then doors, then lights.
 **Why:** Fire can break a system mid-tick, so power must settle after it or a broken system would hold power for a tick. The autoplay bot caught this.
 
+### D-038 Crew model for Stage 1 (S1.6)
+**What:** A crew member is an object in `state.crew` with a room, a position in tiles, health, a suit flag, a goal room, a list of waypoints and a current task. The roster comes from content (`content/crew/`) and the ship data says where they start (`crewStart`). Stage 4 adds skills, traits, needs, stress and memory to the same objects.
+**Why:** Brief §8 starts every run with three crew. Keeping them plain data means saves, replays and the bot work with no extra code.
+
+### D-039 Movement and doors (S1.6)
+**What:** `crew.move` sends someone to a room. The route is the fewest doors through the room graph, never through an airlock, a locked or sealed door, or a door jammed shut. Crew open shut doors themselves and close behind them only the doors they opened; a door the player left open stays open. With door control unpowered they still get through, at the slow hand-worked speed. If a door on the way is locked while they walk, they go round, or stop and raise `crew.blocked` if there is no other way. A move with no route is refused up front with the reason. Walking speed is 3 tiles a second, 0.7 of that in a suit.
+**Why:** Brief §6 and §18. Closing doors behind them keeps crew from spreading fire and bleeding air by walking around, which would make door control pointless.
+
+### D-040 Crew work without being told (S1.6)
+**What:** Someone standing in a room with nowhere to be deals with the worst thing in it: fire, then a breach, then the room's damaged system, then a jammed door on one of its walls. With nothing to fix, a powered medbay heals whoever is in it. More hands are faster. Work is slower when hurt, in a suit (0.75) or in the dark (0.5, except firefighting). The rates are constants at the top of `src/sim/crew.js`.
+**Why:** One tap on a crew member and one on a room is the whole order on a touch screen; a second menu to pick the job would be slower in exactly the moments that are already frantic. Stage 4 traits can override the priority.
+
+### D-041 Selecting crew (S1.6)
+**What:** Tap a crew member on the ship or in the crew bar, or press their number key, to select them; do the same again or press Escape to let go. While someone is selected, tapping a room sends them there and they stay selected. Doors still toggle on a tap. With nobody selected, tapping a room shows its status as before. Crew sit above doors and rooms in hit-test priority.
+**Why:** Brief §18. Keeping the selection after an order lets the player redirect quickly; room status is one Escape away.
+
 ---
 
 ## Stage notes
@@ -205,3 +224,4 @@ _None yet. Stage 1 note goes here when Stage 1 is done._
 - **S1.3 (2026-11-15):** Ship layout format and validation, the *Margin of Error* (15 rooms, 21 doors, 9 vents), room and door state in the sim, door and light orders, debug room/door commands, cutaway renderer with per-room lighting, fire, frost and alarms, ship view with status panel. Test bay and probes removed. 76 unit tests, 25 browser checks.
 - **S1.4 (2026-11-15):** Reactor power pool, system levels and damage, one-bar routing orders, lights as a power draw, brownout shedding, door control (remote with power, by hand without, electric locks), flat-rate life support, AI core status stub, power panel with touch buttons and Q-row keys, refusal messages. 91 unit tests, 30 browser checks. DF-14 cleared.
 - **S1.5 (2026-11-15):** Oxygen flow through doors, airlocks and breaches; fire that grows, starves, spreads, heats, and breaks systems; temperature; hazards to crew (suffocation, burns); emergency jettison with a two-press control; jettisoned rooms and sealed doors in the renderer and panels; `hazard` RNG stream. 106 unit tests, 33 browser checks. DF-17 cleared.
+- **S1.6 (2026-11-15):** Three placeholder crew from content; pathfinding on the room and door graph; move and suit orders; crew open and close doors, by hand when door control is dark; automatic extinguish, patch, repair and unjam work; medbay healing; crew bar, crew panel, selection by tap and number keys, path preview. Autoplay bot runs a crew and checks nobody gets stuck on a path. 123 unit tests, 38 browser checks. DF-16, DF-20, DF-22 cleared.

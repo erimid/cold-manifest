@@ -5,7 +5,7 @@ import { BREATHABLE_O2, FIRE_MIN_O2, isExposed, whyNotJettison } from '../src/si
 import { free, litRooms } from '../src/sim/power.js';
 import { validateLayout } from '../src/sim/ship.js';
 import { TICK_RATE, checkInvariants } from '../src/sim/sim.js';
-import { newSim, shipCopy } from './helpers.js';
+import { newSim, putCrew, shipCopy } from './helpers.js';
 
 const seconds = (sim, s) => {
   for (let i = 0; i < Math.round(s * TICK_RATE); i++) sim.step();
@@ -112,9 +112,9 @@ test('venting through an outer door puts a fire out', () => {
 test('venting kills unsuited crew', () => {
   const sim = newSim();
   const deaths = listen(sim, 'crew.died');
-  sim.state.crew.bare = { room: 'cargo', health: 1, suit: false, alive: true };
-  sim.state.crew.suited = { room: 'cargo', health: 1, suit: true, alive: true };
-  sim.state.crew.elsewhere = { room: 'bridge', health: 1, suit: false, alive: true };
+  putCrew(sim, 'bare', 'cargo');
+  putCrew(sim, 'suited', 'cargo', { suit: true });
+  putCrew(sim, 'elsewhere', 'bridge');
   give(sim, { type: 'door.set', door: 'airlock_cargo', state: 'open' });
   seconds(sim, 20);
   assert.equal(sim.state.crew.bare.alive, false);
@@ -127,8 +127,8 @@ test('venting kills unsuited crew', () => {
 
 test('fire hurts everyone in the room, a suit only halves it', () => {
   const sim = newSim();
-  sim.state.crew.bare = { room: 'weapons', health: 1, suit: false, alive: true };
-  sim.state.crew.suited = { room: 'weapons', health: 1, suit: true, alive: true };
+  putCrew(sim, 'bare', 'weapons');
+  putCrew(sim, 'suited', 'weapons', { suit: true });
   give(sim, { type: 'debug.room', room: 'weapons', set: { fire: 0.8 } });
   seconds(sim, 5);
   const { bare, suited } = sim.state.crew;
@@ -185,8 +185,8 @@ test('jettison removes the section and everything in it', () => {
   const sim = newSim();
   const gone = listen(sim, 'room.jettisoned');
   const deaths = listen(sim, 'crew.died');
-  sim.state.crew.inside = { room: 'shields', health: 1, suit: true, alive: true };
-  sim.state.crew.outside = { room: 'fore_corridor', health: 1, suit: false, alive: true };
+  putCrew(sim, 'inside', 'shields', { suit: true });
+  putCrew(sim, 'outside', 'fore_corridor');
   give(sim, { type: 'power.add', system: 'sensors', delta: -1 });
   give(sim, { type: 'power.add', system: 'shields', delta: 1 }, { type: 'debug.room', room: 'shields', set: { fire: 0.8, breach: 0.5 } });
   give(sim, { type: 'room.jettison', room: 'shields' });

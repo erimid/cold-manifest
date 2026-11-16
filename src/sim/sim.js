@@ -12,11 +12,13 @@
 // systems, lights draw from the same pool, and doors need the door control
 // system or a pair of hands. It has air (atmosphere.js): oxygen flows through
 // doors, fire burns it, breaches and airlocks lose it, and a sealed room can
-// be jettisoned. Crew are S1.6.
+// be jettisoned. It has crew (crew.js): they walk the room and door graph and
+// fight fires, patch breaches and repair systems where they stand.
 
 import { createEventBus } from '../engine/events.js';
 import { createRngSet } from '../engine/rng.js';
 import { ATMOSPHERE_COMMANDS, checkAtmosphereInvariants, stepAtmosphere } from './atmosphere.js';
+import { CREW_COMMANDS, checkCrewInvariants, newCrewState, stepCrew } from './crew.js';
 import { POWER_COMMANDS, checkPowerInvariants, isPowered, lightsNeedPower, newSystemsState, stepPower } from './power.js';
 import { buildLayout } from './ship.js';
 
@@ -66,7 +68,7 @@ function newDoorState() {
   };
 }
 
-/** Is anyone standing on either side of this door, able to work it by hand? Crew arrive in S1.6. */
+/** Is anyone standing on either side of this door, able to work it by hand? */
 export function handsAt(sim, doorId) {
   const door = sim.layout.door(doorId);
   return Object.values(sim.state.crew).some((member) => member.alive !== false && (member.room === door.a || member.room === door.b));
@@ -149,6 +151,7 @@ const COMMANDS = {
   },
   ...POWER_COMMANDS,
   ...ATMOSPHERE_COMMANDS,
+  ...CREW_COMMANDS,
 };
 
 function stepDoors(sim) {
@@ -172,15 +175,17 @@ function stepLights(sim) {
 }
 
 /** Everything that happens each tick, in order. Later sessions add systems here. */
-// Order matters: fire can break a system, so power is settled after the air and before anything reads it.
-const SYSTEMS = [(sim) => stepAtmosphere(sim, TICK_SECONDS), stepPower, stepDoors, stepLights];
+// Order matters: crew act on the world as it stood, then fire can break a system, so power is settled
+// after the air and before anything reads it.
+const SYSTEMS = [(sim) => stepCrew(sim, TICK_SECONDS), (sim) => stepAtmosphere(sim, TICK_SECONDS), stepPower, stepDoors, stepLights];
 
 /**
  * Create a simulation.
  *   seed    the run seed
  *   ship    a ship layout item from content/ships/
+ *   crew    the starting roster: [{ id, name }], placed in the ship's crewStart rooms
  */
-export function createSim({ seed, ship }) {
+export function createSim({ seed, ship, crew = [] }) {
   const layout = buildLayout(ship);
   const sim = {
     /** The ship's fixed shape: rooms, doors, vents. Never changes during a run. */
@@ -194,7 +199,7 @@ export function createSim({ seed, ship }) {
       rooms: Object.fromEntries(layout.rooms.map((room) => [room.id, newRoomState()])),
       doors: Object.fromEntries(layout.doors.map((door) => [door.id, newDoorState()])),
       systems: newSystemsState(layout.power),
-      crew: {}, // S1.6
+      crew: newCrewState(layout, crew),
     },
     rng: createRngSet(seed),
     events: createEventBus(),
@@ -286,7 +291,7 @@ export function checkInvariants(sim) {
     if (!['open', 'closed', 'locked', 'jammed'].includes(d.state)) problems.push(`${door.id}.state is ${d.state}`);
     if (!in01(d.openness)) problems.push(`${door.id}.openness is ${d.openness}`);
   }
-  problems.push(...checkPowerInvariants(sim), ...checkAtmosphereInvariants(sim));
+  problems.push(...checkPowerInvariants(sim), ...checkAtmosphereInvariants(sim), ...checkCrewInvariants(sim));
   if (Object.keys(state.rooms).length !== layout.rooms.length) problems.push('room states do not match the layout');
   if (Object.keys(state.doors).length !== layout.doors.length) problems.push('door states do not match the layout');
   return problems;

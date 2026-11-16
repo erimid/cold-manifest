@@ -15,7 +15,7 @@ import { el, setPressBinder } from './ui/dom.js';
 import { createShipView } from './ui/shipview.js';
 import { renderStub, renderTitle } from './ui/title.js';
 
-const VERSION = '0.5.0';
+const VERSION = '0.6.0';
 
 const params = new URLSearchParams(window.location.search);
 const flags = {
@@ -34,7 +34,9 @@ const input = createInput({ canvas: viewCanvas });
 setPressBinder(input.press);
 
 // The simulation and the one clock that drives it.
-const sim = createSim({ seed: flags.seed, ship: content.require('ships', 'margin-of-error') });
+// Placeholder crew until Stage 4 generates them (DECISIONS DF-03, DF-23).
+const crew = content.all('crew').map(({ id, name }) => ({ id, name }));
+const sim = createSim({ seed: flags.seed, ship: content.require('ships', 'margin-of-error'), crew });
 const clock = createClock({ sim, tickSeconds: TICK_SECONDS });
 
 /** Screens where the sim is live. Everywhere else the clock does not run. */

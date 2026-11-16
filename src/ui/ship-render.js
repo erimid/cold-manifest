@@ -33,6 +33,10 @@ const C = {
 const DOOR_THICKNESS = 0.3;
 const AIRLOCK_THICKNESS = 0.42;
 
+/** Crew are drawn as numbered discs this many tiles across (radius). */
+const CREW_RADIUS = 0.42;
+const CREW_COLOURS = ['#5ec8ff', '#ffd166', '#ef7bbf', '#8be28b', '#c9a0ff', '#ff9f5e', '#7fe3d0', '#e6e6e6'];
+
 export function createShipRenderer(layout) {
   let cache = null; // { canvas, key }
   const roomArt = new Map(
@@ -74,9 +78,17 @@ export function createShipRenderer(layout) {
     };
   }
 
-  /** Everything tappable, in CSS pixels. Doors sit above rooms. */
-  function targets(view) {
+  /** Where a crew member is drawn, in tile units, `alpha` of the way through the current tick. */
+  function crewAt(member, alpha = 1) {
+    return { x: member.px + (member.x - member.px) * alpha, y: member.py + (member.y - member.py) * alpha };
+  }
+
+  /** Everything tappable, in CSS pixels. Crew sit above doors, doors above rooms. */
+  function targets(view, crew = {}) {
     const out = [];
+    for (const member of Object.values(crew)) {
+      out.push({ id: member.id, kind: 'crew', cx: view.ox + member.x * view.scale, cy: view.oy + member.y * view.scale, r: CREW_RADIUS * view.scale, priority: 3 });
+    }
     for (const room of layout.rooms) {
       out.push({ id: room.id, kind: 'room', x: view.ox + room.x * view.scale, y: view.oy + room.y * view.scale, w: room.w * view.scale, h: room.h * view.scale, priority: 1 });
     }
@@ -464,6 +476,60 @@ export function createShipRenderer(layout) {
     }
   }
 
+  function drawCrew(ctx, view, member, alpha, selected) {
+    const s = view.scale;
+    const at = crewAt(member, alpha);
+    const cx = view.ox + at.x * s;
+    const cy = view.oy + at.y * s;
+    const r = CREW_RADIUS * s;
+    const colour = CREW_COLOURS[member.index % CREW_COLOURS.length];
+
+    if (selected) {
+      // Where they are headed.
+      if (member.path.length) {
+        ctx.strokeStyle = 'rgba(233, 220, 195, 0.7)';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([4, 6]);
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        for (const p of member.path) ctx.lineTo(view.ox + p.x * s, view.oy + p.y * s);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+      ctx.strokeStyle = C.paper;
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.arc(cx, cy, r + 5, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fillStyle = member.alive ? colour : '#3a404b';
+    ctx.fill();
+    ctx.lineWidth = member.suit ? 3.5 : 2;
+    ctx.strokeStyle = member.suit && member.alive ? '#f4f7fb' : '#05070b';
+    ctx.stroke();
+
+    // Their number, or a cross for the dead. Never colour alone (brief §17).
+    ctx.fillStyle = member.alive ? '#05070b' : '#8b93a1';
+    ctx.font = `700 ${Math.max(10, r * 1.15)}px ui-monospace, Menlo, Consolas, monospace`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(member.alive ? String(member.index + 1) : '×', cx, cy + 1);
+    ctx.textAlign = 'start';
+    ctx.textBaseline = 'alphabetic';
+
+    // Health, once it is not full: a bar under their feet.
+    if (member.alive && member.health < 1) {
+      const w = r * 2.2;
+      ctx.fillStyle = '#05070b';
+      ctx.fillRect(cx - w / 2 - 1, cy + r + 3, w + 2, 6);
+      ctx.fillStyle = member.health < 0.35 ? C.alarm : '#8be28b';
+      ctx.fillRect(cx - w / 2, cy + r + 4, w * member.health, 4);
+    }
+  }
+
   /**
    * Draw one frame.
    *   view       from fit()
@@ -472,7 +538,7 @@ export function createShipRenderer(layout) {
    *   time       animation time in seconds (game time, so it freezes on pause)
    *   selected   { kind, id } or null
    */
-  function draw(ctx, { view, width, height, dpr, state, time, selected, showVents = false, reduceFlicker = false }) {
+  function draw(ctx, { view, width, height, dpr, state, time, alpha = 1, selected, selectedCrew = null, showVents = false, reduceFlicker = false }) {
     ctx.clearRect(0, 0, width, height);
     ctx.drawImage(staticLayer(view, width, height, dpr), 0, 0, width, height);
     const s = view.scale;
@@ -495,6 +561,11 @@ export function createShipRenderer(layout) {
       ctx.setLineDash([]);
     }
 
+    // The dead first, so the living are drawn over them.
+    const crew = Object.values(state.crew);
+    for (const member of crew) if (!member.alive) drawCrew(ctx, view, member, alpha, member.id === selectedCrew);
+    for (const member of crew) if (member.alive) drawCrew(ctx, view, member, alpha, member.id === selectedCrew);
+
     if (selected) {
       ctx.strokeStyle = C.paper;
       ctx.lineWidth = 2.5;
@@ -508,5 +579,5 @@ export function createShipRenderer(layout) {
     }
   }
 
-  return { fit, targets, draw, doorRect };
+  return { fit, targets, draw, doorRect, crewColour: (index) => CREW_COLOURS[index % CREW_COLOURS.length] };
 }
