@@ -70,6 +70,17 @@
         { "id": "c_weapons_lift", "a": "weapons", "b": "lift", "creature": true },
         { "id": "c_brig_hold", "a": "brig", "b": "hold", "creature": true }
       ],
+      "crates": [
+        { "kind": "ammo", "room": "cargo", "count": 4, "label": "Ordnance crate" },
+        { "kind": "cargo", "room": "cargo", "label": "Manifest 7731-A · Hydroponic stock", "contents": "Seed trays in cold gel, every tray tagged and accounted for." },
+        { "kind": "cargo", "room": "cargo", "label": "Manifest 7731-B · Medical", "contents": "Saline, sutures and a crate of company-brand painkillers. Two blister packs short of the manifest." },
+        { "kind": "cargo", "room": "hold", "label": "Manifest 7731-C · Machine parts", "contents": "Pump seals and bearings, greased and wrapped. Exactly what it says." },
+        { "kind": "cargo", "room": "hold", "label": "Manifest 7731-D · Machine parts", "contents": "Bearings on top. Underneath, packed in foam, a set of surgical tools with the serial numbers ground off." },
+        { "kind": "cargo", "room": "hold", "label": "Manifest 7731-E · Textiles", "contents": "Bolts of grey work cloth. It smells of someone else's ship." },
+        { "kind": "cargo", "room": "hold", "label": "Manifest 7731-F · Personal effects", "contents": "A dead miner's belongings, going home: boots, a pressed flower, letters nobody opened." },
+        { "kind": "cargo", "room": "hold", "label": "Manifest 7731-G · Sealed sample", "contents": "A cold-case canister under a biohazard seal, warmer than it should be. The manifest says soil." },
+        { "kind": "cargo", "room": "hold", "label": "Manifest 7731-H · Rations", "contents": "Company rations, eighteen months past the date stamped on the lid." }
+      ],
       "crewStart": ["bridge", "reactor", "quarters"],
       "hullPoints": 20,
       "hardpoints": [

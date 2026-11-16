@@ -200,9 +200,10 @@ test('debug.hit lands a shot at once on either ship; force makes it a hit throug
   assert.equal(resolved[0].side, 'enemy', 'a shot at us is theirs');
   assert.equal(resolved[0].damage, 2);
   assert.equal(resolved[0].effects.system, 2);
-  assert.equal(sim.state.shield.charge, 2, 'a forced hit leaves the shield alone');
+  assert.equal(sim.state.shield.charge, 2, 'a forced hit leaves the capacitor alone');
   assert.equal(sim.state.hull.points, sim.state.hull.max - 2);
-  // Unforced, the shield takes it, and nothing else happens.
+  // Unforced into a brace, the brace takes it, and nothing else happens.
+  Object.assign(sim.state.shield, { field: 2, until: sim.state.tick + 40 });
   sim.enqueue({ type: 'debug.hit', at: 'us', room: 'weapons', weapon: 'slug-thrower' });
   sim.step();
   assert.ok(['shield', 'miss'].includes(resolved[1].result));

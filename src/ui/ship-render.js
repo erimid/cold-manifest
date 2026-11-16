@@ -60,7 +60,15 @@ const STENCILS = {
   shields: ['SHIELDING', 'HIGH VOLTAGE'],
   weapons: ['DEFENCE', 'SAFETY ON WHEN DOCKED'],
 };
-const CRATE_MARKS = ['THIS WAY UP', 'FRAGILE', 'ORE', 'COMPANY', 'NO HOOKS', ''];
+/** How each kind of crate in the hold looks (hold.js, S2.8): colour, size in tiles, and the word stencilled on it. */
+const CRATE_LOOK = {
+  ammo: { colour: '#3e4a32', w: 1.0, h: 0.7, mark: 'ORDNANCE', stripe: '#c9a63a' },
+  cargo: { colour: '#4a3f2c', w: 1.2, h: 0.9, mark: 'MANIFEST', stripe: null },
+  salvage: { colour: '#3a424c', w: 1.15, h: 0.8, mark: 'SALVAGE', stripe: null },
+};
+/** A crate's place along a room's floor, and how many may stand on each other there. */
+const CRATE_STEP = 1.45;
+const CRATE_STACK = 3;
 const AIRLOCK_THICKNESS = 0.42;
 
 /** Crew are drawn as numbered discs this many tiles across (radius). */
@@ -100,29 +108,48 @@ export function createShipRenderer(layout, { sensor = false } = {}) {
     const s = Math.floor(ticks / 20);
     return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
   };
-  /** Places along the floor that must stay clear of crates: ladders, doorways and crawlway hatches. */
-  const clearOf = (room) => {
-    const xs = [];
-    for (const door of layout.doors) if (door.a === room.id || door.b === room.id) xs.push(door.x);
-    for (const way of layout.crawlways ?? []) if (way.hatches?.[room.id]) xs.push(way.hatches[room.id].x);
-    return xs;
-  };
-  const crateArt = (room, rng) => {
-    if (room.kind !== 'hold' && room.kind !== 'cargo') return [];
-    const crates = [];
-    const avoid = clearOf(room);
-    for (let x = 0.5; x + 1.3 < room.w - 0.4; x += 1.45) {
-      const left = room.x + x;
-      if (avoid.some((ax) => ax > left - 0.9 && ax < left + 1.3 + 0.9)) continue;
-      if (rng.next() < 0.25) continue;
-      const w = rng.range(1.0, 1.3);
-      const h = rng.range(0.7, 1.0);
-      const colour = ['#4a3f2c', '#3e4636', '#4b3a33', '#3a424c'][rng.int(4)];
-      crates.push({ x, w, h, lift: 0, colour, mark: CRATE_MARKS[rng.int(CRATE_MARKS.length)] });
-      if (rng.next() < 0.45) crates.push({ x: x + 0.1, w: w - 0.2, h: rng.range(0.6, 0.85), lift: h, colour, mark: '' });
+  /** Places along each room's floor where a crate can stand, clear of ladders, doorways and hatches: x offsets in tiles. */
+  const crateSpots = new Map(
+    layout.rooms.map((room) => {
+      // What must stay clear on this floor: ladders (any hatch above or below), doorways at floor level, and the spot under a crawlway hatch.
+      const floor = room.y + room.h;
+      const avoid = [];
+      for (const door of layout.doors) if ((door.a === room.id || door.b === room.id) && (!door.vertical || Math.abs(door.y - floor) < 1)) avoid.push(door.x);
+      for (const way of layout.crawlways ?? []) if (way.hatches?.[room.id]) avoid.push(way.hatches[room.id].x);
+      const spots = [];
+      for (let x = 0.3; x + 1.3 < room.w - 0.2; ) {
+        const left = room.x + x;
+        const blocked = avoid.find((ax) => ax > left - 0.45 && ax < left + 1.3 + 0.45);
+        if (blocked === undefined) {
+          spots.push(x);
+          x += CRATE_STEP;
+        } else x = Math.max(x + 0.1, blocked + 0.45 - room.x); // step past whatever is in the way
+      }
+      return [room.id, spots.length ? spots : [Math.max(0.2, room.w / 2 - 0.6)]];
+    }),
+  );
+  /**
+   * Where every crate sitting in a room is drawn, in tiles: { id, crate, x, y, w, h }.
+   * Each room fills its spots along the floor first, then stacks, as the stencil says, no higher than three.
+   */
+  function crateBoxes(state) {
+    const boxes = [];
+    const counts = new Map();
+    for (const crate of Object.values(state.crates ?? {})) {
+      if (crate.room === null) continue;
+      const room = layout.room(crate.room);
+      const spots = crateSpots.get(room.id);
+      const n = counts.get(room.id) ?? 0;
+      counts.set(room.id, n + 1);
+      const look = CRATE_LOOK[crate.kind];
+      const level = Math.min(CRATE_STACK - 1, Math.floor(n / spots.length));
+      const spot = spots[n % spots.length] + (n >= spots.length * CRATE_STACK ? 0.25 : 0);
+      const x = room.x + spot + (1.3 - look.w) / 2;
+      const y = room.y + room.h - FLOOR - look.h - level * 0.9;
+      boxes.push({ id: crate.id, crate, x, y, w: look.w, h: look.h });
     }
-    return crates;
-  };
+    return boxes;
+  }
   const roomArt = new Map(
     layout.rooms.map((room) => {
       const rng = createRng(`ship-art:${layout.id}:${room.id}`);
@@ -135,7 +162,6 @@ export function createShipRenderer(layout, { sensor = false } = {}) {
           crack: { side: rng.int(4), at: rng.range(0.25, 0.75), kinks: Array.from({ length: 6 }, () => rng.range(-1, 1)) },
           scuffs: Array.from({ length: 2 + rng.int(3) }, () => ({ x: rng.next(), y: rng.next(), w: rng.range(0.1, 0.4), h: rng.range(0.03, 0.08), a: rng.range(0.05, 0.14) })),
           pipes: Array.from({ length: 1 + rng.int(2) }, () => ({ colour: ['#3f4854', '#4d4436', '#3a4a44'][rng.int(3)], width: rng.range(0.07, 0.12) })),
-          crates: crateArt(room, rng),
         },
       ];
     }),
@@ -186,7 +212,7 @@ export function createShipRenderer(layout, { sensor = false } = {}) {
   }
 
   /** Everything tappable, in CSS pixels. Crew sit above doors, doors above rooms. */
-  function targets(view, crew = {}, { foe = false } = {}) {
+  function targets(view, crew = {}, { foe = false, crates = null } = {}) {
     const out = [];
     for (const member of Object.values(crew)) {
       out.push({ id: member.id, kind: 'crew', cx: view.ox + member.x * view.scale, cy: view.oy + member.y * view.scale, r: CREW_RADIUS * view.scale, priority: 3 });
@@ -200,6 +226,10 @@ export function createShipRenderer(layout, { sensor = false } = {}) {
     }
     for (const room of layout.rooms) {
       out.push({ id: room.id, kind: 'room', x: view.ox + room.x * view.scale, y: view.oy + room.y * view.scale, w: room.w * view.scale, h: room.h * view.scale, priority: 1 });
+    }
+    // Crates sit on the floor clear of ladders and doorways, so they never hide a door; crew still win.
+    if (crates) {
+      for (const box of crateBoxes({ crates })) out.push({ id: box.id, kind: 'crate', x: view.ox + box.x * view.scale, y: view.oy + box.y * view.scale, w: box.w * view.scale, h: box.h * view.scale, priority: 2 });
     }
     for (const door of layout.doors) {
       // A little fatter than drawn, so a fingertip can find it.
@@ -352,8 +382,6 @@ export function createShipRenderer(layout, { sensor = false } = {}) {
       ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
       for (let x = 0.7; x < room.w; x += 1.6) ctx.fillRect(room.x + x, room.y + 0.06, 0.06, 0.42);
 
-      // Cargo: crates stacked against the back wall, clear of ladders and hatches.
-      for (const crate of art.crates) drawCrate(ctx, room, crate, px);
 
       // The old owners' stencils, faded into the paint.
       const stencil = STENCILS[room.id] ?? (room.system && STENCILS[room.system]) ?? null;
@@ -603,28 +631,67 @@ export function createShipRenderer(layout, { sensor = false } = {}) {
     ctx.stroke();
   }
 
-  function drawCrate(ctx, room, crate, px) {
-    const x = room.x + crate.x;
-    const y = room.y + room.h - FLOOR - crate.h - crate.lift;
-    ctx.fillStyle = crate.colour;
-    ctx.fillRect(x, y, crate.w, crate.h);
-    ctx.strokeStyle = 'rgba(0, 0, 0, 0.5)';
+  /** One crate, in tile space: its kind's colour and stencil, a hazard stripe on ordnance, and the lid off once its seal is broken. */
+  function drawCrate(ctx, crate, x, y, w, h, px, chosen) {
+    const look = CRATE_LOOK[crate.kind];
+    ctx.fillStyle = look.colour;
+    ctx.fillRect(x, y, w, h);
+    if (look.stripe) {
+      ctx.fillStyle = look.stripe;
+      ctx.fillRect(x, y + h * 0.12, w, h * 0.12);
+    }
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.55)';
     ctx.lineWidth = 1.5 * px;
-    ctx.strokeRect(x, y, crate.w, crate.h);
+    ctx.strokeRect(x, y, w, h);
     ctx.beginPath();
-    ctx.moveTo(x, y);
-    ctx.lineTo(x + crate.w, y + crate.h);
-    ctx.moveTo(x + crate.w, y);
-    ctx.lineTo(x, y + crate.h);
+    ctx.moveTo(x, y + h * 0.3);
+    ctx.lineTo(x + w, y + h);
+    ctx.moveTo(x + w, y + h * 0.3);
+    ctx.lineTo(x, y + h);
     ctx.strokeStyle = 'rgba(0, 0, 0, 0.22)';
     ctx.stroke();
-    if (crate.mark) {
-      ctx.fillStyle = 'rgba(233, 220, 195, 0.18)';
-      ctx.font = `700 ${crate.h * 0.24}px ${MONO}`;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(crate.mark, x + crate.w / 2, y + crate.h / 2);
+    if (!crate.sealed && crate.kind !== 'ammo') {
+      // The lid, prised up and left askew.
+      ctx.strokeStyle = 'rgba(233, 220, 195, 0.55)';
+      ctx.lineWidth = 2 * px;
+      ctx.beginPath();
+      ctx.moveTo(x - 0.05, y - 0.02);
+      ctx.lineTo(x + w * 0.9, y - 0.18);
+      ctx.stroke();
+    } else if (crate.sealed) {
+      // The company seal: a red tag on the front.
+      ctx.fillStyle = 'rgba(179, 55, 47, 0.85)';
+      ctx.fillRect(x + w * 0.42, y + h * 0.55, w * 0.16, h * 0.18);
     }
+    ctx.fillStyle = 'rgba(233, 220, 195, 0.32)';
+    ctx.font = `700 ${h * 0.2}px ${MONO}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(look.mark, x + w / 2, y + h * 0.42, w * 0.92);
+    if (chosen) {
+      ctx.strokeStyle = C.paper;
+      ctx.lineWidth = 2.5 * px;
+      ctx.strokeRect(x - 0.08, y - 0.08, w + 0.16, h + 0.16);
+    }
+  }
+
+  /** Every crate aboard: on the floor where it sits, or in the arms of whoever carries it. */
+  function drawCrates(ctx, view, state, alpha, chosen) {
+    if (sensor || !state.crates) return;
+    ctx.save();
+    ctx.translate(view.ox, view.oy);
+    ctx.scale(view.scale, view.scale);
+    const px = 1 / view.scale;
+    for (const box of crateBoxes(state)) drawCrate(ctx, box.crate, box.x, box.y, box.w, box.h, px, chosen === box.id);
+    for (const crate of Object.values(state.crates)) {
+      const member = crate.by ? state.crew[crate.by] : null;
+      if (!member) continue;
+      const at = crewAt(member, alpha);
+      drawCrate(ctx, crate, at.x - 0.42, at.y - CREW_RADIUS - 0.62, 0.84, 0.58, px, chosen === crate.id);
+    }
+    ctx.textAlign = 'start';
+    ctx.textBaseline = 'alphabetic';
+    ctx.restore();
   }
 
   function staticLayer(view, width, height, dpr) {
@@ -993,33 +1060,40 @@ export function createShipRenderer(layout, { sensor = false } = {}) {
    *   time       animation time in seconds (game time, so it freezes on pause)
    *   selected   { kind, id } or null
    */
-  /** Shield layers: a glow hugging the hull, one band per layer that is up, and a ghost of the one recharging. */
+  /**
+   * The shield (D-075): a faint glow on the hull as the capacitor charges, and
+   * a bright field hugging it while a brace is up, thicker the more it holds.
+   */
   function drawShield(ctx, view, shield, time, reduceFlicker) {
-    const layers = Math.floor(shield.charge + 1e-9);
-    const partial = shield.charge - layers;
-    if (layers === 0 && partial <= 0) return;
+    const charge = Math.min(2, shield.charge);
+    const field = Math.min(3, shield.field ?? 0);
+    if (charge <= 0.02 && field <= 0) return;
     ctx.save();
     ctx.translate(view.ox, view.oy);
     ctx.scale(view.scale, view.scale);
     const px = 1 / view.scale;
     ctx.lineJoin = 'round';
-    const shimmer = reduceFlicker ? 0 : 0.06 * Math.sin(time * 3);
-    // Each layer reaches a little further out: fat strokes on the hull outline, stacked, so the inside glows brightest.
-    for (let i = layers; i >= 0; i--) {
-      const up = i < layers;
-      if (!up && partial <= 0.02) continue;
+    const shimmer = reduceFlicker ? 0 : 0.06 * Math.sin(time * (field > 0 ? 9 : 3));
+    if (field > 0) {
+      for (let i = Math.ceil(field); i >= 1; i--) {
+        hullPath(ctx);
+        ctx.lineWidth = (8 + i * 8) * 2 * px;
+        ctx.strokeStyle = `rgba(127, 212, 255, ${0.2 + shimmer})`;
+        ctx.stroke();
+      }
       hullPath(ctx);
-      ctx.lineWidth = (8 + i * 8) * 2 * px;
-      ctx.strokeStyle = up ? `rgba(127, 212, 255, ${0.14 + shimmer})` : `rgba(127, 212, 255, ${0.07 * partial})`;
+      ctx.lineWidth = 2.5 * px;
+      ctx.strokeStyle = `rgba(210, 242, 255, ${0.9 + shimmer})`;
       ctx.stroke();
-    }
-    if (layers > 0) {
+    } else {
+      // Charging: a thin line on the hull, brighter as the capacitor fills. It stops nothing yet.
       hullPath(ctx);
+      ctx.setLineDash([6 * px, 6 * px]);
       ctx.lineWidth = 2 * px;
-      ctx.strokeStyle = `rgba(190, 235, 255, ${0.75 + shimmer})`;
+      ctx.strokeStyle = `rgba(127, 212, 255, ${0.12 + 0.22 * Math.min(1, charge)})`;
       ctx.stroke();
+      ctx.setLineDash([]);
     }
-    ctx.setLineDash([]);
     ctx.restore();
   }
 
@@ -1142,7 +1216,7 @@ export function createShipRenderer(layout, { sensor = false } = {}) {
    * Crew are drawn by whose they are: the enemy's in alarm red with an initial,
    * wherever they stand. Anyone in the docking tube is drawn faded.
    */
-  function draw(ctx, { view, width, height, dpr, state, time, alpha = 1, selected, selectedCrew = null, showCrawlways = false, reduceFlicker = false, clear = true, charges = [], chosenWeapon = null, aimed = null, inviting = false, rooms = null, contact = null }) {
+  function draw(ctx, { view, width, height, dpr, state, time, alpha = 1, selected, selectedCrew = null, selectedCrate = null, showCrawlways = false, reduceFlicker = false, clear = true, charges = [], chosenWeapon = null, aimed = null, inviting = false, rooms = null, contact = null }) {
     if (clear) ctx.clearRect(0, 0, width, height);
     ctx.drawImage(staticLayer(view, width, height, dpr), 0, 0, width, height);
     const s = view.scale;
@@ -1173,6 +1247,7 @@ export function createShipRenderer(layout, { sensor = false } = {}) {
     // The dead first, so the living are drawn over them. The other side's people only show where we can see.
     const crew = Object.values(state.crew).filter((member) => member.owner !== 'enemy' || !unseen.has(member.room));
     for (const member of crew) if (!member.alive) drawCrew(ctx, view, member, alpha, member.id === selectedCrew);
+    drawCrates(ctx, view, state, alpha, selectedCrate);
     for (const member of crew) {
       if (!member.alive) continue;
       if (member.task === 'crossing') ctx.globalAlpha = 0.45;
@@ -1200,5 +1275,5 @@ export function createShipRenderer(layout, { sensor = false } = {}) {
     }
   }
 
-  return { fit, targets, draw, doorRect, roomCentre, hardpointAt, crewColour: (index) => CREW_COLOURS[index % CREW_COLOURS.length] };
+  return { fit, targets, draw, doorRect, roomCentre, hardpointAt, crateBoxes, crewColour: (index) => CREW_COLOURS[index % CREW_COLOURS.length] };
 }

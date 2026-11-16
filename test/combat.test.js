@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { validateContent } from '../src/engine/content-schema.js';
 import { hashState } from '../src/engine/hash.js';
-import { SHIELD_RECHARGE_SECONDS, chargeOf, enemyOf, shieldLayers, weaponsPowered } from '../src/sim/combat.js';
+import { BRACE, CAPACITOR, braced, chargeOf, enemyOf, weaponsPowered } from '../src/sim/combat.js';
 import { buildLayout, validateLayout } from '../src/sim/ship.js';
 import { TICK_RATE, checkInvariants } from '../src/sim/sim.js';
 import { content, newCrewedSim, newSim, newTalkingSim, shipCopy } from './helpers.js';
@@ -83,7 +83,8 @@ test('the Margin of Error starts with two weapons, a whole hull, and no fight', 
   assert.deepEqual(sim.state.weapons.map((w) => w.id), ['pulse-laser', 'slug-thrower']);
   assert.equal(sim.state.fight, null);
   assert.equal(enemyOf(sim), null);
-  assert.equal(shieldLayers(sim), 0);
+  assert.deepEqual(sim.state.shield, { charge: 0, field: 0, until: 0 });
+  assert.deepEqual(sim.state.weapons.map((w) => w.rounds), [null, SLUGS.ammo.magazine], 'the laser needs no rounds; the slug thrower starts loaded');
 });
 
 test('weapons take the system\'s bars in hardpoint order, charge with power and drain without', () => {
@@ -107,7 +108,7 @@ test('weapons take the system\'s bars in hardpoint order, charge with power and 
   assert.deepEqual(checkInvariants(sim), []);
 });
 
-test('shields come up one layer at a time, as many as the bars routed to them', () => {
+test('the shield capacitor charges from its bars, a unit a bar, and holds no more than they give', () => {
   const sim = newSim();
   sim.enqueue({ type: 'power.add', system: 'sensors', delta: -1 });
   sim.enqueue({ type: 'power.add', system: 'doors', delta: -1 });
@@ -115,14 +116,15 @@ test('shields come up one layer at a time, as many as the bars routed to them', 
   sim.enqueue({ type: 'power.add', system: 'shields', delta: 1 });
   sim.enqueue({ type: 'power.add', system: 'shields', delta: 1 });
   sim.step();
-  assert.equal(shieldLayers(sim), 0);
-  seconds(sim, SHIELD_RECHARGE_SECONDS + 0.2);
-  assert.equal(shieldLayers(sim), 1);
-  seconds(sim, SHIELD_RECHARGE_SECONDS * 3);
-  assert.equal(shieldLayers(sim), 2, 'never more than the power routed');
+  assert.ok(sim.state.shield.charge < 0.1);
+  seconds(sim, CAPACITOR.seconds / 2);
+  assert.ok(Math.abs(sim.state.shield.charge - 1) < 0.05, `two bars put in a unit in half the time: ${sim.state.shield.charge}`);
+  seconds(sim, CAPACITOR.seconds * 3);
+  assert.equal(sim.state.shield.charge, 2, 'never more than the power routed');
+  assert.equal(braced(sim), false, 'charge alone stops nothing');
   sim.enqueue({ type: 'power.add', system: 'shields', delta: -1 });
   steps(sim, 2);
-  assert.equal(shieldLayers(sim), 1, 'losing power drops the layer at once');
+  assert.equal(sim.state.shield.charge, 1, 'losing a bar loses what it held at once');
 });
 
 test('a fight brings a whole second ship alongside, and it runs on the same clock', () => {
@@ -136,7 +138,7 @@ test('a fight brings a whole second ship alongside, and it runs on the same cloc
   assert.equal(enemy.layout.name, 'Gunnery drone');
   assert.equal(Object.keys(enemy.state.rooms).length, 5);
   assert.deepEqual(enemy.state.hull, { points: 8, max: 8 });
-  assert.equal(shieldLayers(enemy), 1, 'its shields start up');
+  assert.equal(enemy.state.shield.charge, 1, 'its capacitor starts charged');
   assert.equal(enemy.state.systems.medbay.absent, true);
   assert.throws(() => sim.enqueue({ type: 'debug.fight', enemy: DRONE }), /already in a fight/);
 
@@ -155,7 +157,7 @@ test('a fight brings a whole second ship alongside, and it runs on the same cloc
   assert.equal(heard.at(-1), 'fight.ended');
 });
 
-test('a charged weapon with a target fires, the shot flies, and a shield layer stops it', () => {
+test('a charged weapon with a target fires, the shot flies, and a brace stops it', () => {
   const sim = newSim();
   powerWeapons(sim, 1);
   const enemy = fight(sim);
@@ -163,20 +165,83 @@ test('a charged weapon with a target fires, the shot flies, and a shield layer s
   const log = [];
   sim.events.on('weapon.fired', (e) => log.push(`fired ${e.weapon} at ${e.room}`));
   sim.events.on('shot.resolved', (e) => log.push(`${e.result} ${e.damage}`));
+  sim.events.on('enemy.ship.braced', (e) => log.push(`braced ${e.field}`));
   assert.throws(() => sim.enqueue({ type: 'weapon.target', slot: 0, room: 'bridge' }), /no room "bridge" on their ship/);
   assert.throws(() => sim.enqueue({ type: 'weapon.target', slot: 5, room: 'reactor' }), /no weapon in slot 5/);
   sim.enqueue({ type: 'weapon.target', slot: 0, room: 'reactor' });
   seconds(sim, LASER.charge + 0.1);
-  assert.deepEqual(log, ['fired pulse-laser at reactor']);
+  assert.equal(log[0], 'fired pulse-laser at reactor');
   assert.equal(sim.state.fight.shots.length, 1);
   assert.equal(sim.state.weapons[0].charge < 1, true, 'it starts charging again at once');
   seconds(sim, LASER.flight + 0.1);
-  assert.deepEqual(log, ['fired pulse-laser at reactor', 'shield 0']);
-  assert.equal(shieldLayers(enemy), 0);
-  assert.equal(enemy.state.hull.points, 8);
-  // The next shot arrives before the layer is back? No: the laser takes longer than the shield. It is stopped again.
-  seconds(sim, LASER.charge + LASER.flight);
-  assert.equal(log.at(-1), 'shield 0');
+  // The drone's point defence braces on a coin toss: either it braced and the shot was stopped, or it was hit.
+  const braced = log.includes('braced 1');
+  assert.deepEqual(log.slice(1), braced ? ['braced 1', 'shield 0'] : ['hit 1']);
+  assert.equal(enemy.state.hull.points, braced ? 8 : 7);
+  assert.equal(enemy.state.shield.charge, braced ? 0 : 1, 'a brace dumps the whole capacitor');
+  assert.deepEqual(checkInvariants(sim), []);
+});
+
+test('a brace soaks a volley for a few seconds, costs more against a gun that pierces, and lights the ship up', () => {
+  const sim = newSim();
+  const enemy = fight(sim);
+  enemy.state.systems.engines.power = 0;
+  assert.match(sim.whyNot({ type: 'ship.brace' }), /no power/);
+  sim.enqueue({ type: 'power.add', system: 'sensors', delta: -1 });
+  sim.enqueue({ type: 'power.add', system: 'doors', delta: -1 });
+  sim.step();
+  sim.enqueue({ type: 'power.add', system: 'shields', delta: 1 });
+  sim.enqueue({ type: 'power.add', system: 'shields', delta: 1 });
+  sim.step();
+  sim.state.shield.charge = 0.6;
+  assert.match(sim.whyNot({ type: 'ship.brace' }), /capacitor is at 30%/);
+  sim.state.shield.charge = 2;
+  Object.assign(enemy.state.contact, { lock: 1, locked: true, pinned: true }); // their gunners cannot miss
+  const flare = sim.state.flare;
+  const resolved = [];
+  sim.events.on('shot.resolved', (e) => resolved.push(e.result));
+  sim.enqueue({ type: 'ship.brace' });
+  sim.step();
+  assert.equal(braced(sim), true);
+  assert.equal(sim.state.shield.field, 2);
+  assert.equal(sim.state.shield.charge, 0);
+  assert.ok(sim.state.flare >= flare + BRACE.flare - 0.01, 'the field going up shows for a long way');
+  assert.ok(sim.state.rooms.shields.noise >= BRACE.noise - 0.05, 'and it is loud');
+  assert.match(sim.whyNot({ type: 'ship.brace' }), /already braced/);
+  // A lance (pierce 1) costs two units: the whole field.
+  sim.enqueue({ type: 'debug.hit', at: 'us', room: 'cargo', weapon: 'breaching-lance' });
+  sim.step();
+  sim.enqueue({ type: 'debug.hit', at: 'us', room: 'cargo', weapon: 'pulse-laser' });
+  sim.step();
+  assert.deepEqual(resolved, ['shield', 'hit'], 'the lance took it all, and the next shot got through');
+  // A fresh brace runs out after its time, whatever is left in it.
+  sim.state.shield.charge = 2;
+  sim.enqueue({ type: 'ship.brace' });
+  seconds(sim, BRACE.seconds + 0.2);
+  assert.equal(braced(sim), false);
+  assert.ok(sim.state.shield.charge > 0, 'and the capacitor charges again');
+  assert.deepEqual(checkInvariants(sim), []);
+});
+
+test('a heavy gun fires its magazine, then waits charged until someone loads it', () => {
+  const sim = newSim();
+  powerWeapons(sim, 3);
+  const enemy = fight(sim);
+  strip(sim);
+  enemy.state.hull.points = 99;
+  enemy.state.hull.max = 99;
+  const empty = [];
+  sim.events.on('weapon.empty', (e) => empty.push(e.slot));
+  sim.enqueue({ type: 'weapon.target', slot: 1, room: 'engines' });
+  seconds(sim, SLUGS.charge * SLUGS.ammo.magazine + 2);
+  assert.equal(sim.state.weapons[1].rounds, 0);
+  seconds(sim, SLUGS.charge + 1);
+  assert.deepEqual(empty, [1], 'it says so once');
+  assert.equal(chargeOf(sim, 1), 1, 'charged and waiting');
+  assert.equal(enemy.state.hull.points, 99 - SLUGS.damage * SLUGS.ammo.magazine);
+  sim.state.weapons[1].rounds = 1;
+  seconds(sim, 0.2);
+  assert.equal(sim.state.weapons[1].rounds, 0, 'a round in the breech goes at once');
   assert.deepEqual(checkInvariants(sim), []);
 });
 

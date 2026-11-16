@@ -1,5 +1,5 @@
 {
-  "note": "Ship weapons (brief \u00a76, \u00a77). power: bars it needs. charge: seconds to ready a shot. flight: seconds the shot is in the air. damage: hull points, and system bars from S2.2. pierce: shield layers it ignores. effects: chances of fire and breach and harm to crew in the room, used from S2.2.",
+  "note": "Ship weapons (brief \u00a76, \u00a77). power: bars it needs. charge: seconds to ready a shot. flight: seconds the shot is in the air. damage: hull points, and system bars from S2.2. pierce: extra brace units it takes to stop (S2.8, D-075). ammo: { magazine } for a heavy gun that fires rounds carried up from the hold, one round a shot (S2.8, D-076); none for a gun that needs no rounds. effects: chances of fire and breach and harm to crew in the room, used from S2.2.",
   "items": [
     {
       "id": "pulse-laser",
@@ -16,7 +16,7 @@
         "breach": 0,
         "crew": 0.15
       },
-      "blurb": "Cheap, quick, and stopped dead by a shield."
+      "blurb": "Cheap, quick, needs nothing but power. Stopped dead by a brace."
     },
     {
       "id": "slug-thrower",
@@ -28,12 +28,15 @@
       "flight": 1.1,
       "damage": 2,
       "pierce": 0,
+      "ammo": {
+        "magazine": 3
+      },
       "effects": {
         "fire": 0.1,
         "breach": 0.45,
         "crew": 0.3
       },
-      "blurb": "A mass driver salvaged from a mining rig. Slow. Makes holes."
+      "blurb": "A mass driver salvaged from a mining rig. Slow. Makes holes. Fed by hand, three slugs to a load."
     },
     {
       "id": "breaching-lance",
@@ -45,12 +48,15 @@
       "flight": 0.3,
       "damage": 2,
       "pierce": 1,
+      "ammo": {
+        "magazine": 2
+      },
       "effects": {
         "fire": 0.5,
         "breach": 0.2,
         "crew": 0.4
       },
-      "blurb": "Burns through one shield layer as if it were not there. Hungry."
+      "blurb": "Burns through a brace as if it were half there. Hungry, and every shot is a cell someone carried up from the hold."
     }
   ]
 }

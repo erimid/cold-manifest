@@ -36,6 +36,7 @@ import { findBadNumbers, hashState } from '../src/engine/hash.js';
 import { createRng } from '../src/engine/rng.js';
 import { POWERED, used, supply } from '../src/sim/power.js';
 import { BOARD_SECONDS } from '../src/sim/boarding.js';
+import { JOB_SECONDS } from '../src/sim/hold.js';
 import { DEBUG_ACTIONS, OUTCOMES, chargeOf, enemyOf, ourCrew } from '../src/sim/combat.js';
 import { resolvedRooms, signature } from '../src/sim/senses.js';
 import { MANUAL_DOOR_SECONDS, TICK_RATE, TICK_SECONDS, checkInvariants, createSim } from '../src/sim/sim.js';
@@ -157,6 +158,15 @@ function playRun(seed) {
       if (rooms.length) return order({ type: 'crew.move', crew: member.id, room: bot.pick(rooms).id, ship: there === sim ? 'us' : 'them' });
     }
     if (aboard !== sim) return;
+    // Now and then a crate job (S2.8): open one, carry it somewhere, throw it out, or fetch rounds for a gun.
+    const crates = Object.keys(sim.state.crates);
+    if (crates.length && bot.chance(0.25)) {
+      const crate = bot.pick(crates);
+      const kind = bot.pick(['crate.open', 'crate.move', 'crate.move', 'crate.jettison', 'weapon.load', 'weapon.load']);
+      if (kind === 'weapon.load') return order({ type: kind, crew: member.id, slot: bot.between(0, sim.state.weapons.length) });
+      if (kind === 'crate.move') return order({ type: kind, crew: member.id, crate, room: bot.pick(sim.layout.rooms).id });
+      return order({ type: kind, crew: member.id, crate });
+    }
     const room = troubleSpot();
     if (sim.state.rooms[room.id].breach > 0 && !member.suit) order({ type: 'crew.suit', crew: member.id, on: true });
     order({ type: 'crew.move', crew: member.id, room: room.id });
@@ -170,7 +180,8 @@ function playRun(seed) {
     const roll = bot.next();
     const enemyRooms = Object.keys(fight.enemy.rooms);
     if (roll < 0.7) return order({ type: 'weapon.target', slot: bot.between(0, sim.state.weapons.length), room: bot.chance(0.85) ? bot.pick(enemyRooms) : null });
-    if (roll < 0.9) return order({ type: 'power.add', system: bot.pick(['weapons', 'shields', 'engines']), delta: 1 });
+    if (roll < 0.85) return order({ type: 'power.add', system: bot.pick(['weapons', 'shields', 'engines']), delta: 1 });
+    if (roll < 0.9) return order({ type: 'ship.brace' });
     if (roll < 0.93) {
       // Answer whatever is being asked, push toward an ending, or try to leave.
       const pick = bot.pick(['fight.talk', 'fight.bribe', 'fight.engage', 'fight.accept', 'fight.refuse', 'ship.jump', 'debug.combat', 'debug.combat']);
@@ -406,7 +417,8 @@ function playScenario(seed, { incoming = false } = {}) {
   };
 }
 
-const DUEL_MINUTES = 8;
+// Braces (S2.8) make some fights a long grind; the stalemate rule still ends every one, but slowly (each hull point lost buys up to 90 s).
+const DUEL_MINUTES = 12;
 
 /**
  * A duel: one enemy alongside, and a bot that fights it. It answers a hail
@@ -427,7 +439,17 @@ function playDuel(seed, enemyId, { boarding = false, dark = false } = {}) {
   const bot = createRng(`duel:${boarding ? 'board:' : ''}${dark ? 'dark:' : ''}${enemyId}:${seed}`);
   const end = DUEL_MINUTES * 60 * TICK_RATE;
   const watch = stuckWatch(sim);
-  const tally = { shots: 0, hit: 0, shield: 0, miss: 0, incoming: 0, incomingHits: 0, incomingWide: 0, incomingBlind: 0, lockLost: 0, lockTicks: 0, signature: 0, battleTicks: 0, offers: 0, hail: null, boarded: 0, boardedUs: 0, killedAboard: 0, lostAboard: 0, captured: 0 };
+  const tally = { shots: 0, hit: 0, shield: 0, miss: 0, incoming: 0, incomingHits: 0, incomingWide: 0, incomingBlind: 0, incomingBraced: 0, lockLost: 0, lockTicks: 0, signature: 0, battleTicks: 0, offers: 0, hail: null, boarded: 0, boardedUs: 0, killedAboard: 0, lostAboard: 0, captured: 0, braces: 0, theirBraces: 0, ammoRuns: 0, theirAmmoRuns: 0, dryTicks: 0 };
+  sim.events.on('ship.braced', () => (tally.braces += 1));
+  sim.events.on('enemy.ship.braced', () => (tally.theirBraces += 1));
+  sim.events.on('weapon.loaded', () => (tally.ammoRuns += 1));
+  sim.events.on('enemy.weapon.loaded', () => (tally.theirAmmoRuns += 1));
+  // A crate job that ran out of time is someone stuck on an ammo run: that is a failure.
+  const slow = ({ reason, crew }) => {
+    if (reason === 'slow') throw new Error(`${crew} gave up a crate job after ${JOB_SECONDS}s at tick ${sim.state.tick}`);
+  };
+  sim.events.on('crew.blocked', slow);
+  sim.events.on('enemy.crew.blocked', slow);
   sim.events.on('enemy.lock.lost', () => (tally.lockLost += 1));
   sim.events.on('crew.boarded', ({ onto }) => onto === 'enemy' && (tally.boarded += 1));
   sim.events.on('enemy.crew.boarded', ({ onto }) => onto === 'player' && (tally.boardedUs += 1));
@@ -439,6 +461,7 @@ function playDuel(seed, enemyId, { boarding = false, dark = false } = {}) {
     else {
       tally.incoming += 1;
       if (result === 'hit') tally.incomingHits += 1;
+      if (result === 'shield') tally.incomingBraced += 1;
       if (result === 'miss') tally.incomingWide += 1;
       if (blind) tally.incomingBlind += 1;
     }
@@ -458,6 +481,9 @@ function playDuel(seed, enemyId, { boarding = false, dark = false } = {}) {
     const { tick } = sim.state;
     if (tick === TICK_RATE) order({ type: 'debug.fight', enemy: enemyId });
     const fight = sim.state.fight;
+    // Brace timing (S2.8): the moment a volley of theirs is in the air, dump the capacitor into it.
+    if (fight?.phase === 'battle' && fight.shots.some((shot) => shot.side === 'enemy') && !sim.whyNot({ type: 'ship.brace' })) order({ type: 'ship.brace' });
+    if (fight?.phase === 'battle' && sim.state.weapons.some((slot) => slot.powered && slot.rounds === 0)) tally.dryTicks += 1;
     if (fight && tick % TICK_RATE === 0) {
       const enemy = sim.state.fight.enemy;
       if (fight.phase === 'hail' && tick > 2 * TICK_RATE) {
@@ -502,12 +528,19 @@ function playDuel(seed, enemyId, { boarding = false, dark = false } = {}) {
       if (running) order({ type: 'ship.jump' });
       // Crew: the first stays at the helm, the others go to the worst trouble: boarders first.
       const crew = ourCrew(sim).filter(({ member }) => member.alive);
+      // Ammo runs (S2.8): a heavy gun that is empty or nearly sends the last of the crew (never the pilot) for rounds.
+      sim.state.weapons.forEach((slot, index) => {
+        if (slot.rounds === null || slot.rounds > 1 || !slot.powered) return;
+        if (crew.some(({ member }) => member.job?.kind === 'load')) return;
+        const runner = [...crew].reverse().find(({ member, ship: aboard }, at) => aboard === sim && at < crew.length - 1 && !member.board && !member.job && !sim.whyNot({ type: 'weapon.load', crew: member.id, slot: index }));
+        if (runner) order({ type: 'weapon.load', crew: runner.member.id, slot: index });
+      });
       const spots = sim.layout.rooms.filter((room) => trouble(room) > 0).sort((a, b) => trouble(b) - trouble(a));
       const theirs = enemyOf(sim);
-      const theirShieldsDown = theirs && theirs.state.shield.charge < 1 && fight.phase === 'battle';
+      const theirShieldsDown = theirs && theirs.state.shield.charge < 1 && !(theirs.state.shield.field > 0) && fight.phase === 'battle';
       const repelling = Object.values(sim.state.crew).some((m) => m.alive && m.owner === 'enemy');
       crew.forEach(({ member, ship: aboard }, index) => {
-        if (member.path.length || member.board) return;
+        if (member.path.length || member.board || member.job) return;
         if (aboard !== sim) {
           // Aboard them: home when hurt, or when we are being boarded; otherwise to wherever their crew are.
           if (member.health < 0.35 || repelling) return order({ type: 'crew.move', crew: member.id, room: 'medbay', ship: 'us' });
@@ -635,7 +668,7 @@ out.push(`  hazards per run:   ${per(totals.fires)} fires lit, ${per(totals.spre
 out.push(`  crew per run:      ${per(totals.moves)} sent, ${per(totals.arrivals)} arrived, ${per(totals.blocked)} blocked, ${per(totals.deaths)} of ${roster.length} died`);
 out.push(`  crew work per run: ${per(totals.firesFought)} fires put out, ${per(totals.patches)} breaches patched, ${per(totals.repairs)} system bars repaired`);
 out.push(`  air:               rooms were unbreathable ${((100 * totals.airlessTicks) / (runs * ticks * ship.rooms.length)).toFixed(0)}% of room-time`);
-out.push(`  fights per run:    ${per(totals.fights)} started, ${per(totals.shots)} shots fired (${per(totals.hits)} hit, ${per(totals.absorbed)} stopped by shields, ${per(totals.missed)} missed), ${per(totals.kills)} enemies destroyed`);
+out.push(`  fights per run:    ${per(totals.fights)} started, ${per(totals.shots)} shots fired (${per(totals.hits)} hit, ${per(totals.absorbed)} stopped by a brace, ${per(totals.missed)} missed), ${per(totals.kills)} enemies destroyed`);
 out.push(`  boarding per run:  ${per(totals.boarded)} of ours crossed, ${per(totals.boardedUs)} of theirs crossed, ${per(totals.melee)} killed hand to hand, ${per(totals.captured)} captured`);
 out.push(`  fight endings:     ${Object.keys(OUTCOMES).map((k) => `${OUTCOMES[k].toLowerCase()} ${chaosEndings[k] ?? 0}`).join(', ')}`);
 out.push(`  AI lines per run:  ${per(totals.said)} (about one every ${totals.said ? Math.round((runs * minutes * 60) / totals.said) : 0} seconds)`);
@@ -676,7 +709,9 @@ for (const [enemyId, boarding] of enemyIds.flatMap((id) => (crewedIds.includes(i
   out.push(`  ${name}: ${mine.length} fights`);
   out.push(`    endings:        ${Object.entries(counts).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${OUTCOMES[k].toLowerCase()} ${n}`).join(', ')}`);
   out.push(`    length:         median ${times.length ? Math.round(times[Math.floor(times.length / 2)]) : 'n/a'}s, longest ${times.length ? Math.round(times.at(-1)) : 'n/a'}s`);
-  out.push(`    our shots:      ${mean(mine.map((d) => d.shots)).toFixed(1)} per fight; ${pct(mine.reduce((n, d) => n + d.hit, 0), fired)} hit, ${pct(mine.reduce((n, d) => n + d.shield, 0), fired)} stopped by shields, ${pct(mine.reduce((n, d) => n + d.miss, 0), fired)} missed`);
+  out.push(`    our shots:      ${mean(mine.map((d) => d.shots)).toFixed(1)} per fight; ${pct(mine.reduce((n, d) => n + d.hit, 0), fired)} hit, ${pct(mine.reduce((n, d) => n + d.shield, 0), fired)} stopped by a brace, ${pct(mine.reduce((n, d) => n + d.miss, 0), fired)} missed`);
+  out.push(`    braces:         we braced ${mean(mine.map((d) => d.braces)).toFixed(1)} times a fight and stopped ${pct(mine.reduce((n, d) => n + d.incomingBraced, 0), mine.reduce((n, d) => n + d.incoming, 0))} of their shots; they braced ${mean(mine.map((d) => d.theirBraces)).toFixed(1)} times`);
+  out.push(`    ammo:           ${mean(mine.map((d) => d.ammoRuns)).toFixed(1)} runs to the hold per fight (theirs ${mean(mine.map((d) => d.theirAmmoRuns)).toFixed(1)}); a heavy gun of ours sat empty ${pct(mine.reduce((n, d) => n + d.dryTicks, 0), mine.reduce((n, d) => n + d.seconds * TICK_RATE, 0))} of the fight`);
   out.push(`    their shots:    ${mean(mine.map((d) => d.incoming)).toFixed(1)} per fight, ${mean(mine.map((d) => d.incomingHits)).toFixed(1)} hit; our hull at the end ${mean(mine.map((d) => d.ourHull)).toFixed(1)} of ${ship.hullPoints}, crew alive ${mean(mine.map((d) => d.alive)).toFixed(2)} of ${roster.length}`);
   if (crewedIds.includes(enemyId)) out.push(`    boarding:       ${mean(mine.map((d) => d.boardedUs)).toFixed(1)} of theirs crossed to us, ${mean(mine.map((d) => d.boarded)).toFixed(1)} of ours to them per fight; ${mine.reduce((n, d) => n + d.killedAboard, 0)} of theirs and ${mine.reduce((n, d) => n + d.lostAboard, 0)} of ours killed hand to hand, ${mine.reduce((n, d) => n + d.captured, 0)} captured`);
   if (Object.keys(hails).length) out.push(`    hails answered: ${Object.entries(hails).map(([k, n]) => `${k} ${n}`).join(', ')}; ${mine.reduce((n, d) => n + d.offers, 0)} surrender offers made`);

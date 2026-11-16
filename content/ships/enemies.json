@@ -338,6 +338,7 @@
           "name": "Teague"
         }
       ],
+      "crates": [{ "kind": "ammo", "room": "engines", "count": 2, "rounds": 3, "label": "Slug crate" }],
       "crewStart": [
         "bridge",
         "weapons",

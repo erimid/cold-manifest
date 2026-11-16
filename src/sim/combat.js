@@ -7,17 +7,21 @@
 //
 // Each ship has:
 //   hull     { points, max }: at 0 the ship breaks up
-//   shield   { charge }: whole numbers are layers that are up. Each layer
-//            stops one shot, then recharges. The most a ship can hold is the
-//            power routed to its shields system.
-//   weapons  one per fitted hardpoint: { id, charge, target, powered }.
+//   shield   a capacitor (D-075, S2.8): { charge, field, until }. Power in the
+//            shields system charges it, up to one unit a bar. Nothing stops a
+//            shot until the crew BRACE: the whole charge is dumped into a field
+//            that lasts BRACE.seconds, and each shot that lands in it costs a
+//            unit (more for a gun that pierces). Bracing lights the ship up.
+//   weapons  one per fitted hardpoint: { id, charge, target, powered, rounds }.
 //            The weapons system's bars go to weapons in hardpoint order; a
 //            weapon with its bars charges, one without loses its charge.
+//            Heavy guns fire rounds that crew carry up from the hold (D-076,
+//            hold.js); `rounds` is what is loaded, null for a gun that needs none.
 //
 // A charged weapon with a target fires by itself and starts charging again.
 // The shot is in the air for the weapon's flight time, then lands: it misses
-// (the shooter's lock was poor: senses.js, D-074), is stopped by a shield
-// layer, or hits. A gun fired with no lock at all goes wide: it is aimed at
+// (the shooter's lock was poor: senses.js, D-074), is stopped by a brace, or
+// hits. A heavy gun with no rounds loaded holds its charge and waits. A gun fired with no lock at all goes wide: it is aimed at
 // nothing, and comes down wherever it comes down. Firing lights the ship up
 // for a few seconds, which is what the other side locks on to.
 //
@@ -53,12 +57,19 @@
 
 import { FIRE_CATCH_O2, FIRE_START, harmCrew, killCrew } from './atmosphere.js';
 import { airlockRooms, everyone, moveAboard, sendAcross, stepBoarding, whyNotCross } from './boarding.js';
+import { addCrate } from './hold.js';
 import { CREW_COMMANDS, isHome } from './crew.js';
 import { stepPower } from './power.js';
 import { FLARE, NOISE, bang, contactView, flare, missChance, newContact, stepContact } from './senses.js';
-import { THINK_SECONDS, planOf, think } from './tactics.js';
+import { THINK_SECONDS, braceAgainst, planOf, think } from './tactics.js';
 
-export const SHIELD_RECHARGE_SECONDS = 6;
+/** The shield capacitor (D-075): each bar routed to shields puts one unit in over `seconds`, and holds one unit. */
+export const CAPACITOR = Object.freeze({ seconds: 8 });
+/**
+ * A brace: needs at least `min` units, dumps them all into a field that lasts `seconds`,
+ * and lights the ship up (`flare`) and rings the shields room (`noise`). A shot costs 1 + its pierce to stop.
+ */
+export const BRACE = Object.freeze({ min: 1, seconds: 2.5, flare: 0.35, noise: 0.8 });
 /** An unpowered weapon loses charge this many times faster than it gained it. */
 export const DISCHARGE_RATE = 2;
 /** How much of a room's hull integrity one point of damage takes. */
@@ -101,10 +112,21 @@ const EPS = 1e-9;
 
 // ---------- reading a ship ----------
 
-/** Shield layers that are up right now. */
-export const shieldLayers = (ship) => Math.floor(ship.state.shield.charge + EPS);
-/** The most layers the ship can hold: one per bar routed to shields. */
-export const shieldMax = (ship) => ship.state.systems.shields.power;
+/** The most the capacitor can hold: one unit per bar routed to shields (none on a wreck). */
+export const capacity = (ship) => (ship.state.hull.points === 0 ? 0 : ship.state.systems.shields.power);
+/** The capacitor as a fraction of what it can hold, 0 to 1. */
+export const capacitorOf = (ship) => (capacity(ship) > 0 ? Math.min(1, ship.state.shield.charge / capacity(ship)) : 0);
+/** Is a brace up? */
+export const braced = (ship) => ship.state.shield.field > EPS;
+/** Why this ship cannot brace now, or null. */
+export function whyNoBrace(ship) {
+  if (braced(ship)) return 'already braced';
+  if (capacity(ship) === 0) return 'the shields have no power';
+  if (ship.state.shield.charge < BRACE.min - EPS) return `the capacitor is at ${Math.floor(capacitorOf(ship) * 100)}%: a brace needs a full bar`;
+  return null;
+}
+/** Loaded and ready to go: a gun that needs no rounds always is. */
+export const hasRounds = (ship, slot) => ship.state.weapons[slot].rounds === null || ship.state.weapons[slot].rounds > 0;
 
 /** Is one of the ship's own crew alive at the helm? A boarder standing there flies nothing. */
 export function hasPilot(ship) {
@@ -172,11 +194,12 @@ export const chargeOf = (ship, slot) => Math.min(1, ship.state.weapons[slot].cha
 // ---------- state ----------
 
 /** The fighting part of a new ship's state. */
-export function newCombatState(layout, systems) {
+export function newCombatState(layout, systems, catalog) {
   return {
     hull: { points: layout.hullPoints, max: layout.hullPoints },
-    shield: { charge: systems.shields.power }, // a ship that starts with shields powered starts with them up
-    weapons: layout.weapons.map((id) => ({ id, charge: 0, target: null, powered: false })),
+    shield: { charge: systems.shields.power, field: 0, until: 0 }, // a ship that starts with shields powered starts with the capacitor full
+    // Heavy guns start with a full magazine; what is in the hold is for after.
+    weapons: layout.weapons.map((id) => ({ id, charge: 0, target: null, powered: false, rounds: catalog.weapon(id).ammo?.magazine ?? null })),
     fix: 0, // the sensor fix a jump needs, 0 to 1 (FIX)
   };
 }
@@ -224,7 +247,7 @@ export function startFight(sim, enemyId, newShipState) {
   // Their people may share an id with ours; two ships' crews can mix, so theirs give way.
   const roster = layout.crew.map((person) => (sim.state.crew[person.id] ? { ...person, id: `foe-${person.id}` } : person));
   sim.state.fight = {
-    enemy: { ship: layout.id, tick, ...newShipState(layout, roster, 'enemy') },
+    enemy: { ship: layout.id, tick, ...newShipState(layout, roster, 'enemy', sim.catalog) },
     shots: [], // in the air: { id, side, slot, weapon, room, born, lands }
     nextShot: 1,
     started: tick,
@@ -332,7 +355,12 @@ function makeOffer(sim) {
 /** What an accepted offer puts in our hands. */
 function collect(sim, offer) {
   if (offer.kind === 'money') sim.state.money += offer.amount;
-  if (offer.kind === 'cargo') sim.state.cargo.push({ name: offer.name, qty: offer.qty, from: sim.state.fight.enemy.ship });
+  if (offer.kind === 'cargo') {
+    sim.state.cargo.push({ name: offer.name, qty: offer.qty, from: sim.state.fight.enemy.ship });
+    // It comes across as crates, set down at the airlock nearest the hold, for someone to stow.
+    const dock = airlockRooms(sim).find((id) => sim.layout.room(id).kind === 'hold' || sim.layout.room(id).system === 'cargo') ?? airlockRooms(sim)[0] ?? sim.layout.rooms[0].id;
+    for (let i = 0; i < offer.qty; i++) addCrate(sim, { kind: 'salvage', room: dock, label: offer.name, contents: `${offer.name}, handed over by the ${sim.catalog.layout(sim.state.fight.enemy.ship).name}` });
+  }
   if (offer.kind === 'info') sim.state.intel.push({ text: offer.text, from: sim.state.fight.enemy.ship, tick: sim.state.tick });
 }
 
@@ -418,6 +446,15 @@ export function combatCommands(newShipState) {
         slot.target = cmd.room;
         sim.events.emit('weapon.targeted', { slot: cmd.slot, weapon: slot.id, room: cmd.room, tick: sim.state.tick });
       },
+    },
+    // Dump the shield capacitor into a brace: it soaks what lands in the next BRACE.seconds, and lights us up.
+    'ship.brace': {
+      check(sim) {
+        const fight = sim.state.fight;
+        if (!fight || fight.over) return 'there is nothing to brace against';
+        return whyNoBrace(sim);
+      },
+      apply: (sim) => brace(sim),
     },
     // Before shooting starts: try talking them out of it. One go.
     'fight.talk': {
@@ -543,8 +580,8 @@ export function combatCommands(newShipState) {
         const enemy = enemyOf(sim);
         const { tick } = sim.state;
         if (cmd.action === 'money') sim.state.money += 100;
-        if (cmd.action === 'cripple') Object.assign(enemy.state, { hull: { ...enemy.state.hull, points: 1 }, shield: { charge: 0 } });
-        if (cmd.action === 'sinkUs') Object.assign(sim.state, { hull: { ...sim.state.hull, points: 1 }, shield: { charge: 0 } });
+        if (cmd.action === 'cripple') Object.assign(enemy.state, { hull: { ...enemy.state.hull, points: 1 }, shield: { charge: 0, field: 0, until: 0 } });
+        if (cmd.action === 'sinkUs') Object.assign(sim.state, { hull: { ...sim.state.hull, points: 1 }, shield: { charge: 0, field: 0, until: 0 } });
         if (cmd.action === 'killCrew') for (const { member, ship } of crewLeft(sim, 'enemy')) killCrew(ship, member.id, 'debug');
         if (cmd.action === 'boardUs') {
           // Everyone but their first crew member comes straight through our nearest airlock to the helm, or wherever they can.
@@ -596,10 +633,31 @@ export function combatCommands(newShipState) {
 
 // ---------- each tick ----------
 
+/** Dump the capacitor into a brace. Check whyNoBrace first. */
+export function brace(ship) {
+  const { shield } = ship.state;
+  const { tick } = ship.state;
+  shield.field = shield.charge;
+  shield.charge = 0;
+  shield.until = tick + Math.round(BRACE.seconds * 20);
+  // A field going up is the brightest thing for a long way: the other side's sensors see it.
+  flare(ship, BRACE.flare);
+  const room = ship.layout.roomOfSystem('shields');
+  if (room) bang(ship, room.id, BRACE.noise);
+  ship.events.emit('ship.braced', { field: shield.field, until: shield.until, tick });
+}
+
+/** The capacitor charges while no brace is up; a brace runs its time and is gone. */
 function stepShield(ship, dt) {
   const { shield } = ship.state;
-  const max = ship.state.hull.points === 0 ? 0 : shieldMax(ship); // a wreck holds no shield
-  shield.charge = shield.charge >= max ? max : Math.min(max, shield.charge + dt / SHIELD_RECHARGE_SECONDS);
+  const { tick } = ship.state;
+  const max = capacity(ship);
+  if (shield.field > 0 && (tick >= shield.until || max === 0)) {
+    ship.events.emit('brace.ended', { left: shield.field, tick });
+    shield.field = 0;
+  }
+  if (shield.field > 0) shield.charge = Math.min(shield.charge, max);
+  else shield.charge = shield.charge >= max ? max : Math.min(max, shield.charge + (dt * ship.state.systems.shields.power) / CAPACITOR.seconds);
 }
 
 function stepWeapons(sim, ship, side, dt) {
@@ -615,6 +673,16 @@ function stepWeapons(sim, ship, side, dt) {
     if (!ready || slot.target === null || !fight || fight.over || fight.shots.length >= MAX_SHOTS) return;
     // Nobody fires while they talk, and they hold their fire while offering to give up.
     if (fight.phase !== 'battle' || (side === 'enemy' && fight.offer)) return;
+    // A heavy gun with nothing in the breech waits, charged, for someone to bring rounds up from the hold.
+    if (slot.rounds !== null && slot.rounds < 1) {
+      if (!slot.dry) {
+        slot.dry = true;
+        ship.events.emit('weapon.empty', { slot: index, weapon: slot.id, tick: sim.state.tick });
+      }
+      return;
+    }
+    slot.dry = false;
+    if (slot.rounds !== null) slot.rounds -= 1;
     slot.charge = 0;
     // With no lock the gun is aimed at nothing: the shot goes wherever it goes. The dice are thrown either way.
     const foe = side === 'player' ? enemyOf(sim) : sim;
@@ -628,8 +696,9 @@ function stepWeapons(sim, ship, side, dt) {
     if (gunRoom) bang(ship, gunRoom.id, NOISE.gun);
     flare(ship, FLARE.perBar * weapon.power);
     ship.state.fix = Math.max(0, ship.state.fix - FIX.shot);
-    sim.events.emit('weapon.fired', { ...shot, tick: sim.state.tick });
+    sim.events.emit('weapon.fired', { ...shot, rounds: slot.rounds, tick: sim.state.tick });
     if (side === 'enemy') slot.target = null; // their captain picks a fresh room for every shot
+    else if (braceAgainst(foe)) brace(foe); // they see it coming, and may brace
   });
 }
 
@@ -698,11 +767,16 @@ function land(sim, shot, { force = false } = {}) {
   let effects = null;
   const shooter = shot.side === 'player' ? sim : enemyOf(sim);
   const wide = sim.rng.stream('combat').chance(shooter ? missChance(shooter) : 0); // a debug shot with nobody alongside has no gunner to miss
+  const { shield } = target.state;
+  const cost = 1 + weapon.pierce; // a gun made to pierce takes more of a brace to stop
   if (!room || room.jettisoned || (wide && !force)) result = 'miss';
-  else if (shieldLayers(target) > weapon.pierce && !force) {
+  else if (shield.field >= cost - EPS && !force) {
     result = 'shield';
-    target.state.shield.charge = Math.max(0, target.state.shield.charge - 1);
-  } else effects = applyHit(sim, target, shot.room, weapon);
+    shield.field = Math.max(0, shield.field - cost);
+  } else {
+    if (!force) shield.field = 0; // what is left of a brace is not enough: it gives way, and the shot gets through
+    effects = applyHit(sim, target, shot.room, weapon);
+  }
   sim.events.emit('shot.resolved', { id: shot.id, side: shot.side, slot: shot.slot, weapon: shot.weapon, room: shot.room, blind: Boolean(shot.blind), result, damage: result === 'hit' ? weapon.damage : 0, effects, tick: sim.state.tick });
   if (fight && target.state.hull.points === 0) decide(sim, shot.side === 'player' ? 'destroyed' : 'lost');
 }
@@ -778,6 +852,8 @@ export function checkCombatInvariants(ship, foe = null) {
   const { hull, shield, weapons, systems } = ship.state;
   if (!Number.isInteger(hull.points) || hull.points < 0 || hull.points > hull.max) problems.push(`hull is ${hull.points} of ${hull.max}`);
   if (!(shield.charge >= 0 && shield.charge <= systems.shields.level + EPS)) problems.push(`shield charge is ${shield.charge} with a level ${systems.shields.level} system`);
+  if (!(shield.field >= 0 && shield.field <= systems.shields.level + EPS)) problems.push(`brace field is ${shield.field} with a level ${systems.shields.level} system`);
+  if (shield.field > 0 && ship.state.tick > shield.until) problems.push(`a brace is still up after tick ${shield.until}`);
   if (!(ship.state.fix >= 0 && ship.state.fix <= 1 + EPS)) problems.push(`the sensor fix is ${ship.state.fix}`);
   if (weapons.length > ship.layout.hardpoints.length) problems.push(`${weapons.length} weapons on ${ship.layout.hardpoints.length} hardpoints`);
   weapons.forEach((slot, index) => {

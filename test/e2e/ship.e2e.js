@@ -770,12 +770,12 @@ async function fightTests(browser) {
     assert.match(await infoText(page), /Gunnery drone: Engines/);
   });
 
-  await check('the laser fires by itself when charged, and the drone\'s shield stops the shot', async () => {
+  await check('the laser fires by itself when charged, and lands or is stopped by the drone\'s brace', async () => {
     const result = await page.evaluate(() => new Promise((resolve) => window.coldManifest.sim.events.on('shot.resolved', resolve)));
     assert.equal(result.weapon, 'pulse-laser');
     assert.equal(result.room, 'shields');
-    assert.ok(['shield', 'miss'].includes(result.result), `first shot: ${result.result}`);
-    assert.equal((await fight()).enemy.hull.points, 8);
+    assert.ok(['shield', 'miss', 'hit'].includes(result.result), `first shot: ${result.result}`);
+    assert.equal((await fight()).enemy.hull.points, result.result === 'hit' ? 7 : 8);
     assert.ok((await game(page, () => window.coldManifest.audio.stats.played.shot ?? 0)) > 0, 'the shot was heard');
   });
 
@@ -1244,11 +1244,118 @@ async function darkTests(browser) {
   await context.close();
 }
 
+async function holdTests(browser) {
+  console.log('iPad: the brace, rounds for the heavy guns, and the crates in the hold (S2.8)');
+  const context = await browser.newContext({ ...devices['iPad (gen 7) landscape'] });
+  const page = await context.newPage();
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  await page.goto(`http://localhost:${PORT}/?seed=E2E-HOLD&autopause=0&debug=1`);
+  await page.waitForFunction(() => window.coldManifest?.machine.state === 'title');
+  await page.tap('#btn-ship');
+  await page.waitForFunction(() => window.coldManifest.machine.state === 'ship');
+  const shots = process.env.E2E_SHOTS;
+  const settle = () => page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
+  const crateTargets = () => game(page, () => window.coldManifest.shipView.debug.targets().filter((x) => x.kind === 'crate'));
+  const crate = (id) => game(page, (cid) => ({ ...window.coldManifest.sim.state.crates[cid] }), id);
+
+  await check('the holds show their crates, each a target of its own', async () => {
+    await settle();
+    const crates = await crateTargets();
+    const count = await game(page, () => Object.keys(window.coldManifest.sim.state.crates).length);
+    assert.equal(crates.length, count);
+    assert.ok(count >= 12);
+    for (const t of crates) assert.ok(t.w >= 18 && t.h >= 12, `${t.id} is ${Math.round(t.w)}x${Math.round(t.h)}`);
+    if (shots) await page.screenshot({ path: `${shots}/s2-8-hold-ipad.png` });
+  });
+
+  let sealed = null;
+  await check('tap a sealed crate: its panel names it, and Open sends someone to break the seal', async () => {
+    sealed = await game(page, () => Object.values(window.coldManifest.sim.state.crates).find((c) => c.sealed && c.room === 'hold').id);
+    const t = (await crateTargets()).find((x) => x.id === sealed);
+    await page.touchscreen.tap(t.x + t.w / 2, t.y + t.h / 2);
+    assert.deepEqual(await selected(page), { kind: 'crate', id: sealed });
+    assert.match(await page.textContent('#status-title'), /Manifest 7731/);
+    assert.match(await page.textContent('#status'), /sealed/);
+    await page.tap('#btn-crate-open');
+    await page.waitForFunction((cid) => Object.values(window.coldManifest.sim.state.crew).some((m) => m.job?.crate === cid), sealed, { timeout: 2000 });
+    await page.waitForFunction((cid) => !window.coldManifest.sim.state.crates[cid].sealed, sealed, { timeout: 40000 });
+    await page.waitForFunction(() => !/sealed/.test(document.querySelector('#status').textContent), null, { timeout: 2000 });
+  });
+
+  await check('Move, then tap a room: the crate is carried there and set down', async () => {
+    await page.tap('#btn-crate-move');
+    assert.equal(await game(page, () => window.coldManifest.shipView.debug.movingCrate), sealed);
+    assert.match(await page.textContent('#status'), /Tap a room of ours/);
+    const t = await target(page, 'cargo');
+    await page.touchscreen.tap(t.x + t.w * 0.75, t.y + t.h * 0.3); // high on the bulkhead, clear of the crates and the hatch
+    await page.waitForFunction((cid) => window.coldManifest.sim.state.crates[cid].by !== null, sealed, { timeout: 40000 });
+    await page.waitForFunction((cid) => window.coldManifest.sim.state.crates[cid].room === 'cargo', sealed, { timeout: 60000 });
+  });
+
+  await check('Jettison takes two presses, and the crate goes out of an airlock', async () => {
+    // Whoever set it down steps away first, so the tap finds the crate and not them.
+    await game(page, () => {
+      const sim = window.coldManifest.sim;
+      for (const m of Object.values(sim.state.crew)) if (m.room === 'cargo') sim.enqueue({ type: 'crew.move', crew: m.id, room: 'aft_corridor' });
+    });
+    await page.waitForFunction(() => Object.values(window.coldManifest.sim.state.crew).every((m) => m.room !== 'cargo' && !m.path.length), null, { timeout: 20000 });
+    await settle();
+    const t = (await crateTargets()).find((x) => x.id === sealed);
+    await page.touchscreen.tap(t.x + t.w / 2, t.y + t.h / 2);
+    assert.deepEqual(await selected(page), { kind: 'crate', id: sealed });
+    await page.tap('#btn-crate-jettison');
+    assert.equal(await page.textContent('#btn-crate-jettison'), 'Confirm jettison');
+    await page.tap('#btn-crate-jettison');
+    await page.waitForFunction((cid) => !window.coldManifest.sim.state.crates[cid], sealed, { timeout: 60000 });
+  });
+
+  await check('a fight: the Brace button counts the capacitor, and B braces', async () => {
+    await page.tap('#btn-dbg-fight');
+    await page.waitForFunction(() => window.coldManifest.sim.state.fight, null, { timeout: 2000 });
+    await scan(page);
+    await page.waitForSelector('#btn-brace', { state: 'visible', timeout: 2000 });
+    assert.equal(await page.textContent('#brace-note'), 'No power');
+    await page.tap('#btn-power-doors-minus');
+    await powerIs(page, 'doors', 0);
+    await page.tap('#btn-power-shields-plus');
+    await powerIs(page, 'shields', 1);
+    await page.waitForFunction(() => /^\d+%$/.test(document.querySelector('#brace-note').textContent), null, { timeout: 2000 });
+    await page.waitForFunction(() => window.coldManifest.sim.state.shield.charge >= 1, null, { timeout: 12000 });
+    assert.match(await page.textContent('#fight-own'), /Capacitor 100%/);
+    await page.tap('#btn-brace');
+    await page.waitForFunction(() => window.coldManifest.sim.state.shield.field > 0, null, { timeout: 2000 });
+    await page.waitForFunction(() => /Braced/.test(document.querySelector('#fight-own').textContent), null, { timeout: 2000 });
+    assert.match(await page.textContent('#brace-note'), /Up \d+s/);
+    if (shots) await page.screenshot({ path: `${shots}/s2-8-brace-ipad.png` });
+  });
+
+  await check('the slug thrower shows its rounds; empty, Fetch rounds sends someone to the hold and back', async () => {
+    await game(page, () => (window.coldManifest.sim.state.weapons[1].rounds = 0));
+    await page.tap('#weapon-1');
+    assert.equal(await page.textContent('#status-title'), 'Slug thrower');
+    await page.waitForFunction(() => /0 of 3 · 16 in the hold/.test(document.querySelector('#status').textContent), null, { timeout: 2000 }).catch(async () => assert.fail(await page.textContent('#status')));
+    await page.tap('#btn-fetch-rounds');
+    await page.waitForFunction(() => Object.values(window.coldManifest.sim.state.crew).some((m) => m.job?.kind === 'load'), null, { timeout: 2000 });
+    await page.waitForFunction(() => /fetching rounds|lifting|carrying rounds/i.test(document.querySelector('#status').textContent), null, { timeout: 8000 });
+    await page.waitForFunction(() => window.coldManifest.sim.state.weapons[1].rounds === 3, null, { timeout: 90000 });
+    await page.waitForFunction(() => /3 of 3/.test(document.querySelector('#status').textContent), null, { timeout: 2000 });
+  });
+
+  await check('every control is at least 44px tall and wide with a crate or a heavy gun picked', async () => {
+    const small = await page.$$eval('.ship .btn', (nodes) => nodes.map((n) => ({ id: n.id, r: n.getBoundingClientRect() })).filter((n) => n.r.width > 0 && (n.r.width < 44 || n.r.height < 44)).map((n) => `${n.id} ${Math.round(n.r.width)}x${Math.round(n.r.height)}`));
+    assert.deepEqual(small, []);
+  });
+
+  await check('no page errors', async () => assert.deepEqual(errors, []));
+  await context.close();
+}
+
 const server = await startServer();
 const browser = await chromium.launch(process.env.PW_CHROMIUM ? { executablePath: process.env.PW_CHROMIUM } : {});
 // E2E_ONLY=boarding (or a comma list of suite names) runs just those suites, for chasing one failure.
 const only = process.env.E2E_ONLY?.split(',');
-const suites = { touch: touchTests, desktop: desktopTests, voice: voiceTests, fight: fightTests, hit: hitTests, ending: endingTests, boarding: boardingTests, dark: darkTests };
+const suites = { touch: touchTests, desktop: desktopTests, voice: voiceTests, fight: fightTests, hit: hitTests, ending: endingTests, boarding: boardingTests, dark: darkTests, hold: holdTests };
 try {
   for (const [name, run] of Object.entries(suites)) if (!only || only.includes(name)) await run(browser);
 } finally {

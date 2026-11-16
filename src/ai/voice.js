@@ -65,6 +65,13 @@ export const TRIGGERS = Object.freeze({
   'enemy.lock.lost': { category: 'combat_progress', priority: 3, ttl: 8, cooldown: 25 },
   'lock.lost': { category: 'combat_progress', priority: 2, ttl: 8, cooldown: 40 },
   'fix.ready': { category: 'combat_progress', priority: 3, ttl: 12, cooldown: 20 },
+  // The brace, the heavy guns' rounds, and the hold (S2.8).
+  'ship.braced': { category: 'combat_progress', priority: 2, ttl: 4, cooldown: 30, chance: 0.5 },
+  'enemy.ship.braced': { category: 'combat_progress', priority: 2, ttl: 5, cooldown: 30, chance: 0.5 },
+  'weapon.empty': { category: 'combat_progress', priority: 3, ttl: 10, cooldown: 20 },
+  'weapon.loaded': { category: 'order_confirm', priority: 2, ttl: 6, cooldown: 20, chance: 0.6, slots: crewName },
+  'crate.opened': { category: 'cargo', priority: 2, ttl: 10, cooldown: 15, slots: crewName },
+  'crate.jettisoned': { category: 'cargo', priority: 2, ttl: 10, cooldown: 15 },
 });
 
 export function newVoiceState() {

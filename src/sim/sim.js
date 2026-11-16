@@ -27,6 +27,7 @@ import { START_MONEY, checkCombatInvariants, checkFightInvariants, combatCommand
 import { CREW_COMMANDS, checkCrewInvariants, newCrewState, stepCrew } from './crew.js';
 import { POWER_COMMANDS, checkPowerInvariants, isPowered, lightsNeedPower, newSystemsState, stepPower } from './power.js';
 import { checkSenseInvariants, newSenseState, stepSenses } from './senses.js';
+import { HOLD_COMMANDS, checkHoldInvariants, newHoldState, stepHold } from './hold.js';
 import { buildLayout } from './ship.js';
 
 /** Sim ticks per second (DECISIONS D-002). */
@@ -78,16 +79,18 @@ function newDoorState() {
 
 /**
  * Everything that makes up one ship's state: the player's, or an enemy's in a fight.
- * `roster` is the crew aboard: [{ id, name }], and `owner` whose crew they are.
+ * `roster` is the crew aboard: [{ id, name }], `owner` whose crew they are ('player' or 'enemy'),
+ * and `catalog` where its weapons are looked up.
  */
-export function newShipState(layout, roster, owner = 'player') {
+export function newShipState(layout, roster, owner, catalog) {
   const systems = newSystemsState(layout);
   return {
     rooms: Object.fromEntries(layout.rooms.map((room) => [room.id, newRoomState()])),
     doors: Object.fromEntries(layout.doors.map((door) => [door.id, newDoorState()])),
     systems,
     crew: newCrewState(layout, roster, owner),
-    ...newCombatState(layout, systems),
+    ...newHoldState(layout),
+    ...newCombatState(layout, systems, catalog),
     ...newSenseState(layout),
   };
 }
@@ -198,6 +201,7 @@ const COMMANDS = {
   ...POWER_COMMANDS,
   ...ATMOSPHERE_COMMANDS,
   ...CREW_COMMANDS,
+  ...HOLD_COMMANDS,
   ...combatCommands(newShipState),
 };
 
@@ -225,7 +229,7 @@ function stepLights(sim) {
 // Order matters: crew act on the world as it stood, then fire can break a system, so power is settled
 // after the air and before anything reads it.
 // In a fight the enemy ship then takes the same steps, and the shooting is settled once both ships are up to date.
-const SHIP_SYSTEMS = [(ship) => stepCrew(ship, TICK_SECONDS), (ship) => stepAtmosphere(ship, TICK_SECONDS), stepPower, stepDoors, stepLights, (ship) => stepSenses(ship, TICK_SECONDS)];
+const SHIP_SYSTEMS = [(ship) => stepCrew(ship, TICK_SECONDS), (ship) => stepHold(ship, TICK_SECONDS), (ship) => stepAtmosphere(ship, TICK_SECONDS), stepPower, stepDoors, stepLights, (ship) => stepSenses(ship, TICK_SECONDS)];
 
 function stepEnemy(sim) {
   const enemy = enemyOf(sim);
@@ -282,10 +286,10 @@ export function createSim({ seed, ship, crew = [], lines = [], weapons = [], shi
       tick: 0,
       nextCommandId: 1,
       commands: [], // orders waiting for the next tick
-      ...newShipState(layout, crew),
+      ...newShipState(layout, crew, 'player', catalog),
       fight: null, // the fight in progress, enemy ship and all (combat.js)
       money: START_MONEY, // spent on bribes for now; Stage 3 and 7 give it more uses
-      cargo: [], // what we carry: { name, qty, from }. Goods become content in Stage 7
+      cargo: [], // what we have been handed: { name, qty, from }; it also comes aboard as crates (hold.js). Goods become content in Stage 7
       intel: [], // things we have been told: { text, from, tick }
       ai: newVoiceState(),
     },
@@ -379,7 +383,7 @@ function shipProblems(ship, foe) {
     if (!['open', 'closed', 'locked', 'jammed'].includes(d.state)) problems.push(`${door.id}.state is ${d.state}`);
     if (!in01(d.openness)) problems.push(`${door.id}.openness is ${d.openness}`);
   }
-  problems.push(...checkPowerInvariants(ship), ...checkAtmosphereInvariants(ship), ...checkCrewInvariants(ship), ...checkCombatInvariants(ship, foe), ...checkSenseInvariants(ship));
+  problems.push(...checkPowerInvariants(ship), ...checkAtmosphereInvariants(ship), ...checkCrewInvariants(ship), ...checkCombatInvariants(ship, foe), ...checkSenseInvariants(ship), ...checkHoldInvariants(ship));
   if (Object.keys(state.rooms).length !== layout.rooms.length) problems.push('room states do not match the layout');
   if (Object.keys(state.doors).length !== layout.doors.length) problems.push('door states do not match the layout');
   return problems;

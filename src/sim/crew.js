@@ -29,6 +29,8 @@ export const CLIMB_SPEED = 0.4;
 export const LIFT_SPEED = 2;
 /** Seconds an engineer takes to squeeze through a service crawlway (D-072). */
 export const CRAWL_SECONDS = 2.5;
+/** Carrying a crate (hold.js) slows anyone down to this share of their pace, and nobody carries through a crawlway. */
+export const CARRY_SPEED = 0.6;
 /** Work rates, per second, for one healthy crew member in a lit room. */
 export const EXTINGUISH_RATE = 0.09; // fire intensity
 export const PATCH_RATE = 0.06; // breach size
@@ -82,6 +84,8 @@ export function newCrewMember(layout, { id, name, engineer = false }, roomId, in
     board: null, // set while heading for the other ship: { room } there to go to (boarding.js)
     crossEnds: null, // the tick they come out the other end, while crossing
     wreck: 0, // 0 to 1 progress toward breaking the next bar of the system they are sabotaging
+    carry: null, // the crate in their arms (hold.js)
+    job: null, // a crate job under way: { kind, crate, to, slot, phase, t, since } (hold.js)
   };
 }
 
@@ -93,6 +97,16 @@ export function newCrewState(layout, roster = [], owner = 'player') {
     crew[person.id] = newCrewMember(layout, person, starts[index % starts.length], index, owner);
   });
   return crew;
+}
+
+/** Put down whatever they are carrying, where they stand, and drop the job they were on. `keep` is a crate to hold on to. */
+export function letGo(sim, member, { keep = null } = {}) {
+  if (member.carry && member.carry !== keep) {
+    const crate = sim.state.crates?.[member.carry];
+    if (crate) Object.assign(crate, { room: member.room, by: null });
+    member.carry = null;
+  }
+  member.job = null;
 }
 
 /** Is this crew member aboard their own ship? */
@@ -120,7 +134,7 @@ const floorMid = (room) => ({ x: room.x + room.w / 2, y: room.y + room.h - STAND
  * The quickest way from one room to another, or null if there is no way: a list of
  * steps { door, from } or { crawlway, from }. Trips are costed in seconds on foot:
  * ladders and the lift are slower or faster than walking, and crawlways, open only
- * to an engineer (`who.engineer`), are slow.
+ * to an engineer (`who.engineer`) with empty hands, are slow.
  */
 export function findRoute(sim, from, to, who = null) {
   if (from === to) return [];
@@ -148,7 +162,7 @@ export function findRoute(sim, from, to, who = null) {
       const ride = room.kind === 'lift' || next.kind === 'lift' ? Math.abs(there.y - at.y) / (WALK_SPEED * speedIn(room.kind === 'lift' ? room : next, true)) : 0;
       edges.push({ to: exit.to, cost: walk + (room.kind === 'lift' || next.kind === 'lift' ? ride : climb), step: { door: exit.door, from: here } });
     }
-    if (who?.engineer) {
+    if (who?.engineer && !who.carry) {
       for (const exit of layout.crawlExits(here)) {
         if (exit.creature) continue;
         const there = floorMid(layout.room(exit.to));
@@ -245,6 +259,7 @@ export const CREW_COMMANDS = {
     },
     apply(sim, cmd) {
       const member = sim.state.crew[cmd.crew];
+      letGo(sim, member); // a new order: whatever they were carrying is set down here
       member.goal = cmd.room;
       member.path = planPath(sim, member, cmd.room);
       member.task = 'walking';
@@ -312,7 +327,7 @@ function legSpeed(sim, member, next) {
 function walk(sim, member, seconds) {
   // Time left this tick, spent leg by leg, as each leg has its own pace.
   let time = seconds;
-  const pace = WALK_SPEED * (member.suit ? SUIT_SPEED : 1);
+  const pace = WALK_SPEED * (member.suit ? SUIT_SPEED : 1) * (member.carry ? CARRY_SPEED : 1);
   member.task = 'walking';
   while (member.path.length) {
     const next = member.path[0];
@@ -397,6 +412,7 @@ function fight(sim, member, foes, seconds) {
 function work(sim, member, seconds) {
   const foes = hostilesBeside(sim, member);
   if (foes.length) return fight(sim, member, foes, seconds);
+  if (member.job) return; // a crate job (hold.js) comes before the room's own trouble
   const job = jobIn(sim, member);
   member.task = job ? job.type : 'idle';
   const r = sim.state.rooms[member.room];

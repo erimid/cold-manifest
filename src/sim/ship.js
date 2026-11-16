@@ -33,6 +33,7 @@
 //   crew        enemies only: who is aboard, [{ id, name }], placed in crewStart
 //   tactics     enemies only: how it fights, hails, surrenders and runs (tactics.js)
 
+import { validateCrates } from './hold.js';
 import { validatePower } from './power.js';
 import { validateTactics } from './tactics.js';
 import { SPACE, SYSTEM_IDS } from './systems.js';
@@ -280,6 +281,7 @@ export function validateLayout(data) {
     else if (fitted.length > hardpoints.length) problems.push(`${fitted.length} weapons fitted but only ${hardpoints.length} hardpoints`);
   }
   if (data.facing !== undefined && !['right', 'up', 'left'].includes(data.facing)) problems.push('"facing" must be "right", "left" or "up"');
+  problems.push(...validateCrates(data.crates, new Set(data.rooms.map((room) => room?.id))));
 
   return problems;
 }
@@ -339,6 +341,7 @@ export function buildLayout(data) {
     hullPoints: data.hullPoints,
     hardpoints: Object.freeze((data.hardpoints ?? []).map((h) => Object.freeze({ ...h }))),
     weapons: Object.freeze([...(data.weapons ?? [])]),
+    crates: Object.freeze((data.crates ?? []).map((c) => Object.freeze({ ...c }))),
     hasSystem: (system) => rooms.some((r) => r.system === system),
     room: (id) => roomById.get(id),
     door: (id) => doorById.get(id),

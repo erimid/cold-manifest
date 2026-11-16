@@ -68,7 +68,8 @@ function checkWeapon(item) {
   if (!positive(item.charge)) problems.push('charge must be seconds above 0');
   if (!positive(item.flight)) problems.push('flight must be seconds above 0');
   if (!Number.isInteger(item.damage) || item.damage < 0) problems.push('damage must be a whole number, 0 or more');
-  if (!Number.isInteger(item.pierce) || item.pierce < 0) problems.push('pierce must be a whole number of shield layers, 0 or more');
+  if (!Number.isInteger(item.pierce) || item.pierce < 0) problems.push('pierce must be a whole number, 0 or more: each point makes a brace spend one more unit to stop it');
+  if (item.ammo !== undefined && !(item.ammo && Number.isInteger(item.ammo.magazine) && item.ammo.magazine >= 1)) problems.push('ammo, if given, must be { magazine }: the rounds the gun holds, at least 1');
   const effects = item.effects;
   if (!effects || typeof effects !== 'object' || !chance(effects.fire) || !chance(effects.breach) || !chance(effects.crew)) problems.push('effects needs fire, breach and crew, each between 0 and 1');
   return problems;

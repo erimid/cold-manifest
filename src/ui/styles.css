@@ -1098,6 +1098,26 @@ body {
   border-color: var(--amber);
   color: var(--amber);
 }
+/* The brace (S2.8): blue when the capacitor can dump, bright while the field is up. */
+.btn--brace {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 70px;
+}
+.btn--brace small {
+  font-size: 0.7em;
+  opacity: 0.8;
+}
+.btn--brace.is-ready {
+  border-color: #7fd4ff;
+  color: #7fd4ff;
+}
+.btn--brace.is-active {
+  background: rgba(127, 212, 255, 0.22);
+  border-color: #d2f2ff;
+  color: #d2f2ff;
+}
 .sheet__grid {
   display: flex;
   flex-wrap: wrap;
