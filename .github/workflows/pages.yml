@@ -1,0 +1,89 @@
+name: Pages
+
+# Publishes the game to GitHub Pages from the gh-pages branch (DECISIONS D-014).
+#   main            -> https://<owner>.github.io/<repo>/
+#   pull request N  -> https://<owner>.github.io/<repo>/pr/N/   (removed when the PR closes)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, reopened, synchronize, closed]
+
+permissions:
+  contents: write
+
+# One deploy at a time: every job pushes to the same gh-pages branch.
+concurrency:
+  group: pages-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Pull requests from forks cannot push to gh-pages.
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    env:
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      PR_CLOSED: ${{ github.event_name == 'pull_request' && github.event.action == 'closed' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        if: env.PR_CLOSED != 'true'
+        with:
+          node-version-file: .node-version
+          cache: npm
+
+      - name: Build
+        if: env.PR_CLOSED != 'true'
+        run: |
+          npm ci
+          npm run build
+
+      - name: Check out the gh-pages branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git fetch origin gh-pages; then
+            git worktree add site origin/gh-pages --detach
+          else
+            git worktree add --detach site
+            git -C site checkout --orphan gh-pages
+            git -C site rm -rf --quiet .
+          fi
+
+      - name: Update the site
+        run: |
+          cd site
+          touch .nojekyll
+          if [ "$PR_CLOSED" = "true" ]; then
+            rm -rf "pr/$PR_NUMBER"
+          elif [ -n "$PR_NUMBER" ]; then
+            rm -rf "pr/$PR_NUMBER"
+            mkdir -p "pr/$PR_NUMBER"
+            cp -R ../dist/. "pr/$PR_NUMBER/"
+          else
+            # Replace the main site but keep the pull request previews.
+            find . -mindepth 1 -maxdepth 1 ! -name .git ! -name pr ! -name .nojekyll -exec rm -rf {} +
+            cp -R ../dist/. .
+          fi
+
+      - name: Publish
+        run: |
+          cd site
+          git add -A
+          if git diff --cached --quiet; then
+            echo "Nothing to publish."
+            exit 0
+          fi
+          git commit --quiet -m "Deploy ${PR_NUMBER:+PR #$PR_NUMBER }${GITHUB_SHA::7}"
+          git push origin HEAD:gh-pages
+
+      - name: Show the link
+        if: env.PR_CLOSED != 'true'
+        run: |
+          base="https://${GITHUB_REPOSITORY_OWNER}.github.io/${GITHUB_REPOSITORY#*/}/"
+          echo "Published to ${base}${PR_NUMBER:+pr/$PR_NUMBER/}" >> "$GITHUB_STEP_SUMMARY"

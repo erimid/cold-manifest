@@ -22,7 +22,7 @@ Items here are known shortcuts. Each names the stage that must clear it.
 | DF-05 | Vent graph is data only, not used by anything, until the creature exists. | Stage 6 (S6.1) | Open |
 | DF-06 | Pre-fight talk/bribe uses a placeholder negotiation value until crew skills exist. | Stage 4 (S4.1) | Open |
 | DF-07 | `src/sim/sim.js` is a stub (tick counter and `reactorDrift`); see D-018. | S1.2 (clock), S1.4 (remove `reactorDrift`) | Open |
-| DF-08 | Cloudflare Pages preview deploys are not connected yet; Eric connects the repo (D-014). | Stage 1 | Open |
+| DF-08 | GitHub Pages must be switched on once in the repo settings (source: `gh-pages` branch) before preview links work (D-014). | Stage 1 | Open |
 | DF-09 | No Playwright touch tests in CI yet. | S1.2 | Open |
 
 ---
@@ -82,10 +82,10 @@ Items here are known shortcuts. Each names the stage that must clear it.
 **What:** One PR per session, each passing the green gate (see PLAN.md §0). Stage notes and autoplay reports at the end of each stage.
 **Why:** Small reviewable steps that are always playable.
 
-### D-014 Preview deploys on Cloudflare Pages (Stage 1)
-**What:** The repo is connected to Cloudflare Pages (build `npm run build`, output `dist/`). Every PR gets its own preview URL, and `main` deploys to production. PR descriptions link the preview so Eric can test on his iPad.
-**Why:** Eric tests on a real iPad (brief §4, §22). The brief already names Cloudflare Pages as the target host, and its Git integration gives per-PR previews with no secrets in the repo.
-**Note:** Connecting the repo is a one-time step in Eric's Cloudflare account (S1.1).
+### D-014 Preview deploys on GitHub Pages (Stage 1; departs from brief §4)
+**What:** The game is published to GitHub Pages from a `gh-pages` branch that `.github/workflows/pages.yml` maintains. `main` goes to `https://erimid.github.io/cold-manifest/` and each pull request goes to `https://erimid.github.io/cold-manifest/pr/<number>/` (removed when the PR closes). PR descriptions link the preview so Eric can test on his iPad.
+**Why:** Eric asked for github.io instead of Cloudflare on 2026-11-15. The brief names Cloudflare Pages as an example and requires only static output that works on any static host; the Vite build uses a relative base, so it still deploys to Cloudflare or anywhere else unchanged.
+**Note:** GitHub Pages has no built-in per-PR previews, so the workflow builds them as subfolders. Pages must be switched on once in the repo settings (source: `gh-pages` branch, root folder).
 
 ### D-015 Content file shape (S1.1)
 **What:** Every content file is `{ "items": [ { "id": ... }, ... ] }` in the folder for its type (`content/ai-lines/`, `content/events/`, ...). Ids are lowercase with `.`, `_` or `-` separators and are unique per type. AI lines carry `category`, `text`, and optional `weight`, `conditions`, `placeholder`. Category ids and targets live in `src/ai/categories.js`.
@@ -115,4 +115,4 @@ _None yet. Stage 1 note goes here when Stage 1 is done._
 
 ### Session log
 
-- **S1.1 (2026-11-15):** Vite scaffold, folder layout, seeded RNG with substreams, content registry with browser and Node loaders, content checker, autoplay skeleton, title screen with stub screens, debug overlay, CI. 30 unit tests. Known gap: DF-08 (preview deploys need Eric's Cloudflare account).
+- **S1.1 (2026-11-15):** Vite scaffold, folder layout, seeded RNG with substreams, content registry with browser and Node loaders, content checker, autoplay skeleton, title screen with stub screens, debug overlay, CI. 30 unit tests. GitHub Pages deploy workflow with per-PR previews. Known gap: DF-08 (Pages must be switched on in repo settings).

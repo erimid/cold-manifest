@@ -17,6 +17,11 @@ npm run dev        # play at http://localhost:5173
 
 URL flags: `?debug=1` shows the debug overlay, `?seed=ABCD-EFGH` fixes the seed, `?auto=1` is reserved for the autoplay bot.
 
+## Play it online
+
+- Latest `main`: https://erimid.github.io/cold-manifest/
+- Any open pull request: `https://erimid.github.io/cold-manifest/pr/<number>/`
+
 ## The green gate
 
 Every pull request must pass all four. CI runs them automatically.
