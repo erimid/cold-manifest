@@ -2,7 +2,9 @@
 // Each stage adds the rules for the content types it introduces (PLAN.md §4).
 
 import { AI_CATEGORIES, AI_SLOTS } from '../ai/categories.js';
+import { NODE_KINDS, checkSector, generateSector } from '../sim/sector.js';
 import { validateLayout } from '../sim/ship.js';
+import { createRng } from './rng.js';
 import { CONTENT_TYPES, typeOfPath } from './content.js';
 
 const ID_PATTERN = /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/;
@@ -96,11 +98,49 @@ function checkCrew(item) {
   return problems;
 }
 
+/** Seeded charts the checker draws from every sector definition to prove they always work (S3.1). */
+export const SECTOR_SAMPLES = 200;
+
+/** Rules for one sector definition, then a few hundred charts drawn from it, each checked for soundness. */
+function checkSectorDef(item) {
+  const problems = [];
+  const range = (v, min) => Array.isArray(v) && v.length === 2 && v.every(Number.isInteger) && v[0] >= min && v[0] <= v[1];
+  const share = (v) => v === undefined || (typeof v === 'number' && v >= 0 && v <= 1);
+  if (!isNonEmptyString(item.name)) problems.push('missing name');
+  if (!range(item.nodes, 4)) problems.push('nodes must be [fewest, most], whole numbers, at least 4');
+  if (!range(item.columns, 3)) problems.push('columns must be [fewest, most], whole numbers, at least 3');
+  if (!item.kinds || typeof item.kinds !== 'object') problems.push('kinds must be an object of { weight, minimum } by kind');
+  else {
+    for (const [kind, rule] of Object.entries(item.kinds)) {
+      if (!NODE_KINDS[kind]) problems.push(`kinds: unknown kind "${kind}" (${Object.keys(NODE_KINDS).join(', ')})`);
+      if (!(typeof rule?.weight === 'number' && rule.weight >= 0)) problems.push(`kinds.${kind}: weight must be a number, 0 or more`);
+      if (rule?.minimum !== undefined && !(Number.isInteger(rule.minimum) && rule.minimum >= 0)) problems.push(`kinds.${kind}: minimum must be a whole number`);
+    }
+    if (!Object.values(item.kinds).some((rule) => rule?.weight > 0)) problems.push('kinds: at least one kind needs a weight above 0');
+  }
+  if (!Array.isArray(item.hazards) || !item.hazards.length || !item.hazards.every(isNonEmptyString)) problems.push('hazards must be a list of names');
+  if (!Array.isArray(item.designations) || item.designations.length < 2 || !item.designations.every(isNonEmptyString)) problems.push('designations must be a list of at least 2 codes');
+  for (const key of ['longLane', 'crossLanes', 'sideLanes']) if (!share(item[key])) problems.push(`${key} must be between 0 and 1`);
+  if (!(Number.isInteger(item.fuel?.start) && Number.isInteger(item.fuel?.max) && item.fuel.start >= 1 && item.fuel.start <= item.fuel.max)) problems.push('fuel must be { start, max }, whole numbers, start at least 1 and no more than max');
+  if (!range(item.slack, 0)) problems.push('slack must be [fewest, most] spare jumps on the deadline');
+  const chase = item.pursuit;
+  if (!chase || !share(chase.chance) || !isNonEmptyString(chase.ship) || !Number.isInteger(chase.lead) || chase.lead < 0 || !Number.isInteger(chase.sight) || chase.sight < 0) problems.push('pursuit must be { chance, ship, lead, sight }');
+  if (problems.length) return problems;
+  const kindsNeeded = Object.values(item.kinds).reduce((n, rule) => n + (rule.minimum ?? 0), 0);
+  if (kindsNeeded > item.nodes[0] - 2) return [`the kinds' minimums need ${kindsNeeded} points between the ends, and a chart may have only ${item.nodes[0] - 2}`];
+  for (let i = 1; i <= SECTOR_SAMPLES; i++) {
+    const found = checkSector(generateSector(item, createRng(`check:${item.id}:${i}`)), item);
+    if (found.length) return [`chart ${i} of ${SECTOR_SAMPLES}: ${found.join('; ')}`];
+  }
+  return problems;
+}
+
 const ITEM_RULES = {
   'ai-lines': checkAiLine,
   crew: checkCrew,
   ships: validateLayout,
   weapons: checkWeapon,
+  sectors: checkSectorDef,
 };
 
 /**
@@ -115,6 +155,8 @@ export function validateContent(files) {
   const seenLines = new Map();
   const fittedWeapons = []; // [label, weapon id] for every weapon a ship mounts
   const unmountable = new Set(); // weapons marked mount: false, such as a drone's zap
+  const pursuers = []; // [label, ship id] for every sector's pursuer
+  const enemyShips = new Set();
 
   for (const file of [...files].sort((a, b) => a.path.localeCompare(b.path))) {
     const { path, data, error } = file;
@@ -156,6 +198,8 @@ export function validateContent(files) {
 
       if (type === 'weapons' && item.mount === false) unmountable.add(item.id);
       if (type === 'ships' && Array.isArray(item.weapons)) for (const id of item.weapons) fittedWeapons.push([label, id]);
+      if (type === 'sectors' && isNonEmptyString(item.pursuit?.ship)) pursuers.push([label, item.pursuit.ship]);
+      if (type === 'ships' && item.enemy === true) enemyShips.add(item.id);
 
       if (type === 'ai-lines' && isNonEmptyString(item.text)) {
         const key = normalizeLine(item.text);
@@ -172,6 +216,8 @@ export function validateContent(files) {
     if (!seenIds.get('weapons').has(id)) errors.push(`${label}: fits a weapon that does not exist: "${id}"`);
     else if (unmountable.has(id)) errors.push(`${label}: fits "${id}", which no ship can mount`);
   }
+
+  for (const [label, id] of pursuers) if (!enemyShips.has(id)) errors.push(`${label}: is followed by "${id}", which is not an enemy ship`);
 
   return { errors, warnings };
 }

@@ -20,7 +20,7 @@ import { AUTO_PAUSE, createSettings } from './ui/settings.js';
 import { createShipView } from './ui/shipview.js';
 import { renderStub, renderTitle } from './ui/title.js';
 
-const VERSION = '0.17.0';
+const VERSION = '0.18.0';
 
 const params = new URLSearchParams(window.location.search);
 const flags = {
@@ -56,7 +56,8 @@ setPressBinder(input.press);
 // The simulation and the one clock that drives it.
 // Placeholder crew until Stage 4 generates them (DECISIONS DF-03, DF-23).
 const crew = content.all('crew').map(({ id, name, engineer }) => ({ id, name, engineer }));
-const sim = createSim({ seed: flags.seed, ship: content.require('ships', 'margin-of-error'), crew, lines: content.all('ai-lines'), weapons: content.all('weapons'), ships: content.all('ships') });
+// The run's chart is drawn from the seed (S3.1). Contracts choose the sector and the drop from S3.4.
+const sim = createSim({ seed: flags.seed, ship: content.require('ships', 'margin-of-error'), crew, lines: content.all('ai-lines'), weapons: content.all('weapons'), ships: content.all('ships'), sector: content.require('sectors', 'the-reach') });
 const clock = createClock({ sim, tickSeconds: TICK_SECONDS });
 
 // Sound. Nothing can play until the first touch or key press (an iOS rule, and a polite one).
@@ -121,7 +122,11 @@ const machine = createStateMachine({
         seed: flags.seed,
         version: VERSION,
         contentSummary: `${content.count('ai-lines')} lines loaded`,
-        onNewRun: () => machine.go('contracts'),
+        // Until the contract board (S3.2, S3.4), a new run is this run's chart, up on Margo's monitor.
+        onNewRun: () => {
+          machine.go('ship');
+          shipView.openChart(true);
+        },
         onShip: () => machine.go('ship'),
         onHub: () => machine.go('hub'),
       });
@@ -201,6 +206,7 @@ function frame(now) {
         `fires  ${Object.values(sim.state.rooms).filter((r) => r.fire > 0).length}`,
         `fight  ${sim.state.fight ? `${sim.state.fight.enemy.ship} ${sim.state.fight.enemy.hull.points}hp, ${sim.state.fight.shots.length} shots` : 'none'}`,
         `margo  ${sim.state.ai.said} said, ${sim.state.ai.queue.length} waiting`,
+        `chart  ${sim.state.run ? `${sim.state.run.at} fuel ${sim.state.run.fuel} jump ${sim.state.run.jumps}/${sim.state.run.deadline}${sim.state.run.pursuit ? ` chase@${sim.state.run.pursuit.at}` : ''}` : 'none'}`,
         `trust  ${Math.round(sim.state.ai.trust)}, refused ${sim.state.ai.refusals}${sim.state.ai.objection ? `, holding ${sim.state.ai.objection.command.type}` : ''}`,
         `sound  ${audio.muted ? 'off' : audio.unlocked ? 'on' : 'locked'}`,
       ].join('\n');

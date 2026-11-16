@@ -33,6 +33,7 @@ import { POWER_COMMANDS, checkPowerInvariants, isPowered, lightsNeedPower, newSy
 import { checkSenseInvariants, newSenseState, stepSenses } from './senses.js';
 import { HOLD_COMMANDS, checkHoldInvariants, newHoldState, stepHold } from './hold.js';
 import { MEMORY_TYPES, attachMemory, checkMemoryInvariants, lampHolder, remember, stepNerve, whyKeepLamp } from './memory.js';
+import { attachSector, checkRunInvariants, newRunState, sectorCommands, stepSector } from './sector.js';
 import { buildLayout } from './ship.js';
 
 /** Sim ticks per second (DECISIONS D-002). */
@@ -262,6 +263,7 @@ const COMMANDS = {
   ...CREW_COMMANDS,
   ...HOLD_COMMANDS,
   ...combatCommands(newShipState),
+  ...sectorCommands(newShipState),
 };
 
 function stepDoors(sim) {
@@ -298,7 +300,8 @@ function stepEnemy(sim) {
   for (const system of SHIP_SYSTEMS) system(enemy);
 }
 
-const SYSTEMS = [...SHIP_SYSTEMS, stepEnemy, (sim) => stepCombat(sim, TICK_SECONDS), stepJudgement, stepVoice];
+// The chart comes after the fight, so an escape decided this tick is flown before anyone hears about it.
+const SYSTEMS = [...SHIP_SYSTEMS, stepEnemy, (sim) => stepCombat(sim, TICK_SECONDS), (sim) => stepSector(sim, TICK_SECONDS, newShipState), stepJudgement, stepVoice];
 
 /**
  * Create a simulation.
@@ -308,8 +311,10 @@ const SYSTEMS = [...SHIP_SYSTEMS, stepEnemy, (sim) => stepCombat(sim, TICK_SECON
  *   lines   the AI line library from content/ai-lines/ (she is silent without it)
  *   weapons the weapon items from content/weapons/
  *   ships   every ship item from content/ships/, so enemies can be brought alongside
+ *   sector  a sector item from content/sectors/: the run's chart is drawn from it (S3.1). Without one there is no run
+ *   run     options for the run: { pursuit: true | false } to fix whether the contract is followed
  */
-export function createSim({ seed, ship, crew = [], lines = [], weapons = [], ships = [] }) {
+export function createSim({ seed, ship, crew = [], lines = [], weapons = [], ships = [], sector = null, run = {} }) {
   const layout = buildLayout(ship);
   const weaponById = new Map(weapons.map((item) => [item.id, item]));
   const shipById = new Map(ships.map((item) => [item.id, item]));
@@ -352,6 +357,7 @@ export function createSim({ seed, ship, crew = [], lines = [], weapons = [], shi
       cargo: [], // what we have been handed: { name, qty, from }; it also comes aboard as crates (hold.js). Goods become content in Stage 7
       intel: [], // things we have been told: { text, from, tick }
       ai: newVoiceState(),
+      run: null, // the chart, fuel, jumps, deadline and pursuit (sector.js); set below when there is a sector
     },
     rng: createRngSet(seed),
     events: createEventBus(),
@@ -417,9 +423,11 @@ export function createSim({ seed, ship, crew = [], lines = [], weapons = [], shi
       sim.rng.setState(snap.rng);
     },
   };
+  if (sector) sim.state.run = newRunState(sector, sim.rng.stream('map'), run);
   attachVoice(sim);
   attachJudgement(sim);
   attachMemory(sim);
+  attachSector(sim);
   return sim;
 }
 
@@ -461,7 +469,7 @@ export function checkInvariants(sim) {
   const problems = [];
   if (!Number.isInteger(sim.state.tick) || sim.state.tick < 0) problems.push(`tick is ${sim.state.tick}`);
   const enemy = enemyOf(sim);
-  problems.push(...shipProblems(sim, enemy), ...checkVoiceInvariants(sim), ...checkJudgementInvariants(sim), ...checkFightInvariants(sim), ...checkBoardingInvariants(sim, enemy));
+  problems.push(...shipProblems(sim, enemy), ...checkVoiceInvariants(sim), ...checkJudgementInvariants(sim), ...checkFightInvariants(sim), ...checkBoardingInvariants(sim, enemy), ...checkRunInvariants(sim));
   if (enemy) problems.push(...shipProblems(enemy, sim).map((problem) => `enemy: ${problem}`));
   return problems;
 }

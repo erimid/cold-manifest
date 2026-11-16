@@ -45,7 +45,7 @@ export function renderTitle(root, { greeting, seed, version, contentSummary, onN
         el(
           'nav',
           { class: 'title__menu' },
-          el('button', { class: 'btn', type: 'button', id: 'btn-new-run', press: onNewRun }, 'New run', el('small', {}, 'Take a contract into the Reach')),
+          el('button', { class: 'btn', type: 'button', id: 'btn-new-run', press: onNewRun }, 'New run', el('small', {}, 'Open the chart and cross the Reach')),
           el('button', { class: 'btn', type: 'button', id: 'btn-ship', press: onShip }, 'Walk the ship', el('small', {}, 'Three crew, power, air, fire and doors')),
           el('button', { class: 'btn', type: 'button', id: 'btn-hub', press: onHub }, 'Records', el('small', {}, 'The Wall, unlocks, past runs')),
         ),
@@ -53,7 +53,7 @@ export function renderTitle(root, { greeting, seed, version, contentSummary, onN
       el(
         'footer',
         { class: 'title__foot' },
-        el('span', {}, `Build ${version} · Stage 2, session 1`),
+        el('span', {}, `Build ${version} · Stage 3, session 1`),
         el('span', {}, contentSummary),
         el('span', {}, `Seed ${seed}`),
       ),

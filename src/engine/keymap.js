@@ -4,7 +4,8 @@
 // that slot of the power panel, Shift with the key takes one back.
 // The A row picks a weapon to aim (S2.1). B braces the shields (S2.8). P opens
 // or folds the breaker board (S2.9). O overrides an order Margo is holding,
-// and Escape stands down from it (S2.10).
+// and Escape stands down from it (S2.10). M puts the route chart up or takes it
+// down, and J jumps: down the plotted course, or out of a fight (S3.1).
 
 export const KEYMAP = Object.freeze({
   Space: 'pause',
@@ -32,4 +33,6 @@ export const KEYMAP = Object.freeze({
   KeyB: 'brace',
   KeyP: 'breakers',
   KeyO: 'override',
+  KeyM: 'chart',
+  KeyJ: 'jump',
 });

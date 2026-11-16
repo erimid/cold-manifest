@@ -532,7 +532,7 @@ export function combatCommands(newShipState) {
     'ship.jump': {
       check(sim) {
         const fight = sim.state.fight;
-        if (!fight) return 'there is nowhere to jump to yet'; // the sector map arrives in Stage 3
+        if (!fight) return sim.state.run ? 'out of a fight, plot a course on the chart and jump from there' : 'there is nowhere to jump to';
         if (fight.over) return 'the fight is over';
         const problem = whyNoJump(sim);
         if (problem) return problem;
@@ -804,12 +804,15 @@ function land(sim, shot, { force = false } = {}) {
   if (fight && target.state.hull.points === 0) decide(sim, shot.side === 'player' ? 'destroyed' : 'lost');
 }
 
-/** The sensors work on a fix while they have power and someone is at the helm; otherwise it slips away. */
-function stepFix(ship, dt) {
+/**
+ * The sensors work on a fix while they have power and someone is at the helm; otherwise it slips away.
+ * The same fix plots a course on the sector chart out of a fight (sector.js), which names its own events.
+ */
+export function stepFix(ship, dt, { ready = 'fix.ready', lost = 'fix.lost' } = {}) {
   const before = ship.state.fix;
   ship.state.fix = canFix(ship) ? Math.min(1, before + (dt * stationPace(ship, helmOf(ship)) * fixBars(ship)) / FIX.seconds) : Math.max(0, before - FIX.drain * dt);
-  if (before < 1 && ship.state.fix >= 1) ship.events.emit('fix.ready', { tick: ship.state.tick });
-  if (before >= 1 && ship.state.fix < 1) ship.events.emit('fix.lost', { tick: ship.state.tick });
+  if (before < 1 && ship.state.fix >= 1) ship.events.emit(ready, { tick: ship.state.tick });
+  if (before >= 1 && ship.state.fix < 1) ship.events.emit(lost, { tick: ship.state.tick });
 }
 
 /** The enemy captain's turn, and the rules that end a fight without a last shot. */

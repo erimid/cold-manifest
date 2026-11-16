@@ -1,0 +1,26 @@
+{
+  "note": "Sector definitions for the map generator (S3.1, D-104). A sector is a band of space crossed from an origin port on the left to a delivery port on the right, in columns. `nodes` is the range of points on the chart, `columns` the range of columns they sit in (origin and delivery are columns of their own). `kinds` weights what each point in between is; `minimum` makes sure each kind turns up at least that often. `hazards` are the names a hazard point is given. `designations` are the letter codes on Margo's company chart. `pursuit` is the chance a run's contract is followed, which ship follows, how many jumps late it sets out, and how far away Margo can see it. Port names stay as chart designations until ports become content in S3.4 and S3.5 (DF-47).",
+  "items": [
+    {
+      "id": "the-reach",
+      "name": "The Reach",
+      "nodes": [15, 25],
+      "columns": [7, 9],
+      "kinds": {
+        "port": { "weight": 3, "minimum": 2 },
+        "empty": { "weight": 4, "minimum": 2 },
+        "hazard": { "weight": 3, "minimum": 1 },
+        "derelict": { "weight": 2, "minimum": 1 },
+        "checkpoint": { "weight": 2, "minimum": 1 }
+      },
+      "hazards": ["Ion squall", "Debris shoal", "Radiation lee", "Gravity shear", "Dust tide"],
+      "designations": ["KV", "HX", "TR", "OB", "MZ", "LD", "RN", "PQ", "SV", "GE"],
+      "longLane": 0.38,
+      "crossLanes": 0.35,
+      "sideLanes": 0.25,
+      "fuel": { "start": 10, "max": 12 },
+      "slack": [2, 3],
+      "pursuit": { "chance": 0.5, "ship": "knife-cutter", "lead": 2, "sight": 2 }
+    }
+  ]
+}
