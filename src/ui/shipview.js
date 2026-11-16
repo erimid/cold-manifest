@@ -974,13 +974,15 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
       // The brace (D-075): dump the capacitor to soak the next few seconds of incoming fire. B on a keyboard.
       const braceNote = el('small', { id: 'brace-note' }, '');
       const brace = el('button', { class: 'btn btn--small btn--brace', type: 'button', id: 'btn-brace', press: () => order({ type: 'ship.brace' }) }, el('span', {}, 'Brace'), braceNote);
+      // Rounds for the gun come up from the hold by hand (S2.8): shown while its magazine is short.
+      const fetch = gun() >= 0 && magazineOf(sim, gun()) !== null ? button('btn-fetch-rounds', 'Fetch rounds', () => crateOrder({ type: 'weapon.load', slot: gun() })) : null;
       const note = el('span', { class: 'status__note' });
       nodes.status.replaceChildren(
         el('div', { class: 'status__head' }, el('div', { class: 'status__title', id: 'status-title' }, layout.name), el('div', { class: 'stencil' }, 'What we give off'), note),
         el('div', { class: 'status__stats' }, Object.values(stats).map((s) => s.node)),
-        el('div', { class: 'status__controls status__controls--row' }, dark, burn, flare, brace, el('span', { class: 'status__hint status__hint--inline' }, 'Tap crew, then a room, to send them. Tap the scope to turn the ship, or a contact on it to read it and lay the gun on it. Long-press anything to ask what it is.')),
+        el('div', { class: 'status__controls status__controls--row' }, dark, burn, flare, brace, fetch, el('span', { class: 'status__hint status__hint--inline' }, 'Tap crew, then a room, to send them. Tap the scope to turn the ship, or a contact on it to read it and lay the gun on it. Long-press anything to ask what it is.')),
       );
-      panel = { kind: 'ship', stats, dark, burn, flare, brace, braceNote, note };
+      panel = { kind: 'ship', stats, dark, burn, flare, brace, braceNote, fetch, note };
       updatePanel();
       return;
     }
@@ -1164,6 +1166,12 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
       setText(panel.braceNote, braced(sim) ? `Up ${seconds(sim.state.shield.until - sim.state.tick)}` : capacity(sim) ? percent(capacitorOf(sim)) : 'No power');
       panel.brace.classList.toggle('is-ready', !braceProblem);
       panel.brace.classList.toggle('is-active', braced(sim));
+      if (panel.fetch) {
+        const slot = sim.state.weapons[gun()];
+        const short = slot.rounds !== null && slot.rounds < magazineOf(sim, gun());
+        panel.fetch.hidden = !short;
+        panel.fetch.disabled = !roundsInHold(sim);
+      }
       setText(panel.note, ['lights.all', 'helm.burn', 'helm.heading', 'decoy.flare'].some((type) => queuedFor('type', type)) ? 'Order queued' : refusalText() || (blind ? 'Static is a room nobody can see: lamps, sensors, or someone standing in it.' : ''));
       return;
     }

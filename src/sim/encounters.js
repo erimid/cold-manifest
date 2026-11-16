@@ -1145,6 +1145,7 @@ export const ENCOUNTER_COMMANDS = {
     apply(sim, cmd) {
       if (cmd.clear) {
         Object.assign(sim.state.scope, { contacts: [], decoys: [], drones: [], pods: [] });
+        sim.state.shots = sim.state.shots.filter((shot) => shot.contact === null); // what they had in the air goes with them
         return;
       }
       spawnContact(sim, sim.encounters.byId.get(cmd.encounter), { range: cmd.range, bearing: cmd.bearing, miss: cmd.miss, state: cmd.state });

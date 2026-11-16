@@ -12,7 +12,7 @@ export function defaultSettings({ touch = false } = {}) {
 /** What each auto-pause setting is called, and which game event trips it. */
 export const AUTO_PAUSE = Object.freeze([
   // A ship opens fire on us, warning shot or not (H.3; the duel's "a fight starts" went with the duel).
-  { id: 'fired', label: 'A ship fires on us', event: 'contact.fired' },
+  { id: 'fired', label: 'We are fired on', event: 'contact.fired' },
   { id: 'boarded', label: 'Boarders get aboard', event: 'enemy.crew.boarded' },
   // A fire or a breach in a room nobody can see into pauses nothing until it is found (senses.js).
   { id: 'fire', label: 'A fire starts', event: 'fire.started', found: 'fire.found' },
