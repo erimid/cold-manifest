@@ -3,15 +3,15 @@
 // In a fight the two ships lie close enough to dock. Anyone can cross: they
 // walk to an airlock on the ship they are on, spend BOARD_SECONDS in the
 // docking tube, and come out of the other ship's airlock nearest where they
-// were sent, then walk on from there. Crossing onto a ship needs its shields
-// down; going home never does, but nobody gets into the tube with someone of
+// were sent, then walk on from there. Crossing onto a ship needs its shield
+// capacitor nearly empty and no brace up (S2.8); going home never does, but nobody gets into the tube with someone of
 // the other side in the room hanging on to them. Once aboard, a boarder fights whoever of the
 // other side shares their room and wrecks the system they stand in (crew.js).
 //
 // Every function takes two ship contexts (the sim, and enemyOf(sim)) so the
 // player's orders and the enemy captain use the same code.
 
-import { findRoute, hostilesBeside, isHome, planPath, spotIn } from './crew.js';
+import { findRoute, hostilesBeside, isHome, letGo, planPath, spotIn } from './crew.js';
 
 /** Seconds in the docking tube, either way. */
 export const BOARD_SECONDS = 5;
@@ -37,7 +37,7 @@ export function nearestAirlock(ship, from) {
 export function whyNotCross(from, to, member) {
   if (member.task === 'crossing') return `${member.name} is already in the docking tube`;
   if (hostilesBeside(from, member).length) return `${member.name} cannot get away from the fight`;
-  if (!isHome(to, member) && Math.floor(to.state.shield.charge + EPS) > 0) return 'their shields are up: the docking tube cannot get through';
+  if (!isHome(to, member) && (to.state.shield.field > 0 || to.state.shield.charge >= 1 - EPS)) return 'their shields are up: a charged capacitor throws off the docking clamp';
   if (nearestAirlock(from, member.room) === null) return 'there is no way to an airlock';
   return null;
 }
@@ -45,6 +45,7 @@ export function whyNotCross(from, to, member) {
 /** Send `member`, aboard `from`, across to `room` on `to`. Check whyNotCross first. */
 export function sendAcross(from, to, member, room) {
   const airlock = nearestAirlock(from, member.room);
+  letGo(from, member); // nobody takes a crate across
   member.board = { room };
   member.goal = airlock;
   member.path = planPath(from, member, airlock) ?? [];

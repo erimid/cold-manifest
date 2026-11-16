@@ -187,7 +187,7 @@ export function crewEmit(ship, member, type, payload) {
 export function killCrew(sim, id, cause) {
   const member = sim.state.crew[id];
   if (!member || member.alive === false) return;
-  Object.assign(member, { alive: false, health: 0, goal: null, path: [], task: 'dead', board: null, crossEnds: null });
+  Object.assign(member, { alive: false, health: 0, goal: null, path: [], task: 'dead', board: null, crossEnds: null, job: null });
   crewEmit(sim, member, 'crew.died', { crew: id, room: member.room, cause, tick: sim.state.tick });
 }
 

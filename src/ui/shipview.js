@@ -19,10 +19,16 @@
 // across to board; a tap on a room of ours brings them home. Ours aboard them
 // are drawn on their ship and say so on their chip; their boarders are drawn
 // red aboard ours and cannot be selected.
+// From S2.8 the weapons bar has a Brace button that dumps the shield capacitor
+// (D-075), heavy guns show their rounds and can send someone for more, and the
+// crates in the holds are drawn and can be tapped: open, move (then tap a
+// room), jettison, or load the guns. Each goes to the crew member selected
+// last, or the nearest free hand.
 
 import { pickTarget } from '../engine/hit.js';
-import { DEBUG_ACTIONS, OUTCOMES, OFFER_SECONDS, bribePrice, chargeOf, enemyOf, findCrew, fixOf, offerText, ourCrew, shieldLayers, shieldMax, talkChance, whyNoJump } from '../sim/combat.js';
+import { DEBUG_ACTIONS, OUTCOMES, OFFER_SECONDS, braced, bribePrice, capacitorOf, capacity, chargeOf, enemyOf, findCrew, fixOf, offerText, ourCrew, talkChance, whyNoBrace, whyNoJump } from '../sim/combat.js';
 import { describeTask } from '../sim/crew.js';
+import { describeJob, magazineOf, pickHand, roundsInHold } from '../sim/hold.js';
 import { POWERED, aiCoreStatus, free, lightsDraw, litRooms, supply, usable } from '../sim/power.js';
 import { contactView, roomView, sensorsUp, signature, unseen } from '../sim/senses.js';
 import { SPACE, SYSTEMS } from '../sim/systems.js';
@@ -55,7 +61,9 @@ function effectWords(effects) {
   return words.join('  ');
 }
 /** Short task names for the crew bar, where there is no room for a sentence. */
-const CHIP_TASKS = { walking: 'Walking', waiting: 'At a door', extinguish: 'Fighting fire', patch: 'Patching hull', repair: 'Repairing', unjam: 'Freeing door', idle: 'Standing by', fighting: 'Fighting', sabotage: 'Wrecking', crossing: 'In the tube' };
+const CHIP_TASKS = { walking: 'Walking', crawling: 'Crawling', waiting: 'At a door', extinguish: 'Fighting fire', patch: 'Patching hull', repair: 'Repairing', unjam: 'Freeing door', idle: 'Standing by', fighting: 'Fighting', sabotage: 'Wrecking', crossing: 'In the tube', lifting: 'Lifting', opening: 'Opening', loading: 'Loading gun', cycling: 'At the airlock' };
+/** What a crate is, in a few words for its panel. */
+const CRATE_KIND = { ammo: 'Ordnance · rounds for the heavy guns', cargo: 'Company manifest', salvage: 'Salvage' };
 /** Start a sentence with a capital: the sim's reasons are written to follow "because". */
 const sentence = (text) => `${text.charAt(0).toUpperCase()}${text.slice(1)}.`;
 
@@ -76,6 +84,8 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
   let selected = null; // { kind: 'room' | 'door', id }
   let selectedCrew = null; // a crew id; while set, tapping a room sends them there
   let selectedWeapon = null; // a weapon slot; while set, tapping a room on the enemy ship aims it there
+  let lastHand = null; // the crew member selected last: crate orders go to them if they can take them
+  let movingCrate = null; // a crate id; while set, tapping a room of ours has it carried there
   let foe = null; // the enemy ship's renderer, while there is one: { id, renderer }
   let foeView = null; // where the enemy ship is drawn
   let monitor = { x: 0, y: 0, w: 0, h: 0 }; // Margo's schematic screen, in CSS pixels
@@ -121,6 +131,12 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
       const room = enemy.layout.room(target.id);
       if (!contactView(sim, target.id)?.resolved) return `${enemy.layout.name}: a part of the return the sensors have not made out yet. Sensor power resolves it faster; so does anything they have lit, hot or loud.`;
       return `${enemy.layout.name}: ${room.name}. ${room.system ? SYSTEMS[room.system].blurb : 'Part of their ship.'}`;
+    }
+    if (target?.kind === 'crate') {
+      const crate = sim.state.crates[target.id];
+      if (!crate) return null;
+      if (crate.kind === 'ammo') return `${crate.label}: ${crate.rounds} rounds for the slug thrower and the lance. Tap it to load the guns.`;
+      return `${crate.label}. ${crate.sealed ? 'Under a company seal.' : crate.contents ?? 'Opened.'}`;
     }
     if (target?.kind === 'crew') {
       const { member, ship } = findCrew(sim, target.id);
@@ -173,7 +189,7 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
 
   /** Everything tappable on the canvas: our ship and our crew, and in a fight the rooms of theirs and any of ours aboard. */
   function allTargets() {
-    const own = renderer.targets(view, oursOn(sim));
+    const own = renderer.targets(view, oursOn(sim), { crates: sim.state.crates });
     const enemy = enemyOf(sim);
     return foe && foeView && enemy ? [...own, ...foe.renderer.targets(foeView, oursOn(enemy), { foe: true })] : own;
   }
@@ -357,6 +373,7 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
 
   function select(next) {
     selected = next;
+    if (next?.kind !== 'crate') movingCrate = null;
     if (next) selectedCrew = null;
     if (next) selectedWeapon = null;
     nodes.info.hidden = true;
@@ -380,6 +397,38 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
     }
     nodes.info.hidden = true;
     buildPanel();
+  }
+
+  /** Who a crate order goes to: whoever was selected last, if they can take it, else the nearest free hand. */
+  function handFor(command) {
+    if (lastHand && !sim.whyNot({ ...command, crew: lastHand })) return lastHand;
+    const room = command.crate ? (sim.state.crates[command.crate]?.room ?? null) : sim.layout.roomOfSystem('weapons')?.id;
+    const near = pickHand(sim, room ?? sim.layout.rooms[0].id);
+    if (near && !sim.whyNot({ ...command, crew: near })) return near;
+    // Anyone at all who could do it.
+    return ourCrew(sim).map(({ member }) => member.id).find((id) => !sim.whyNot({ ...command, crew: id })) ?? near ?? lastHand;
+  }
+
+  /** Give a crate order (crate.open, crate.jettison, weapon.load...) to the right pair of hands. */
+  function crateOrder(command) {
+    const crew = handFor(command);
+    if (!crew) {
+      refusal = { text: 'Nobody aboard can do that.', until: performance.now() + 2600 };
+      audio?.play('deny');
+      return false;
+    }
+    return order({ ...command, crew });
+  }
+
+  /** The heavy gun that most wants rounds: empty first, then lowest. */
+  function hungriestGun() {
+    let best = null;
+    sim.state.weapons.forEach((slot, index) => {
+      const magazine = magazineOf(sim, index);
+      if (magazine === null || slot.rounds >= magazine) return;
+      if (!best || slot.rounds < best.rounds) best = { index, rounds: slot.rounds };
+    });
+    return best?.index ?? null;
   }
 
   // ---------- the weapons bar (fights only) ----------
@@ -412,8 +461,11 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
     const jumpLabel = el('span', {}, 'Jump');
     const jumpNote = el('small', { id: 'jump-note' }, '');
     const jump = el('button', { class: 'btn btn--small btn--jump', type: 'button', id: 'btn-jump', press: () => order({ type: 'ship.jump' }) }, jumpLabel, jumpNote);
-    fightBar = { tiles, own, theirs, leave, jump, jumpNote, call: buildCall() };
-    fightBar.node = el('div', { class: 'panel fightbar', id: 'fightbar', hidden: true }, own.node, el('div', { class: 'fightbar__weapons' }, tiles.map((t) => t.node)), theirs.node, jump, leave);
+    // The brace (D-075): dump the capacitor to soak the next few seconds of fire. B on a keyboard.
+    const braceNote = el('small', { id: 'brace-note' }, '');
+    const braceBtn = el('button', { class: 'btn btn--small btn--brace', type: 'button', id: 'btn-brace', press: () => order({ type: 'ship.brace' }) }, el('span', {}, 'Brace'), braceNote);
+    fightBar = { tiles, own, theirs, leave, jump, jumpNote, brace: braceBtn, braceNote, call: buildCall() };
+    fightBar.node = el('div', { class: 'panel fightbar', id: 'fightbar', hidden: true }, own.node, el('div', { class: 'fightbar__weapons' }, tiles.map((t) => t.node)), theirs.node, braceBtn, jump, leave);
     return el('div', { class: 'fightstack' }, fightBar.call.node, fightBar.node);
   }
 
@@ -468,8 +520,17 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
     // How loud the ship is, and how good a firing solution the other side has on it (D-074).
     const watcher = ship === sim ? enemyOf(sim) : sim;
     const contact = watcher?.state.contact;
-    setText(part.line, `Shields ${shieldLayers(ship)}/${shieldMax(ship)} · Signature ${percent(signature(ship).total)}`);
     const ours = ship === sim;
+    // Their capacitor and guns are only known once the sensors have made out the rooms they are in.
+    const seen = (system) => {
+      if (ours) return true;
+      const room = ship.layout.roomOfSystem(system);
+      const view = room ? contactView(sim, room.id, ship) : null;
+      return Boolean(view?.resolved && view.live);
+    };
+    const shield = !seen('shields') ? 'Capacitor ?' : braced(ship) ? `Braced · holds ${Math.round(ship.state.shield.field * 10) / 10}` : capacity(ship) ? `Capacitor ${percent(capacitorOf(ship))}` : 'No shields';
+    const guns = !ours && ship.state.weapons.length ? ` · Guns ${seen('weapons') ? percent(Math.max(...ship.state.weapons.map((_, i) => chargeOf(ship, i)))) : '?'}` : '';
+    setText(part.line, `${shield}${guns} · Signature ${percent(signature(ship).total)}`);
     setText(part.lock, !contact || sim.state.fight?.over ? '' : contact.locked ? `${ours ? 'Their' : 'Our'} lock on ${ours ? 'us' : 'them'} ${percent(contact.lock)}` : ours ? 'They have no lock on us' : 'We have no lock on them');
     // Good news on our side is no lock; on theirs it is a lock.
     part.lock.classList.toggle('is-good', Boolean(contact) && contact.locked !== ours);
@@ -486,6 +547,13 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
     const state = sim.state.weapons[slot];
     const weapon = weaponOf(slot);
     if (!state.powered) return `No power: needs ${weapon.power}`;
+    if (state.rounds !== null && state.rounds < 1) return roundsInHold(sim) ? 'Out of rounds · fetch more' : 'Out of rounds';
+    if (state.rounds !== null) return `${weaponStatusText(slot)} · ${state.rounds} rds`;
+    return weaponStatusText(slot);
+  }
+
+  function weaponStatusText(slot) {
+    const state = sim.state.weapons[slot];
     const aim = state.target ? enemyOf(sim)?.layout.room(state.target)?.name : null;
     if (chargeOf(sim, slot) < 1) return aim ? `Charging · ${aim}` : 'Charging · no target';
     const fight = sim.state.fight;
@@ -514,6 +582,11 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
     const note = jumpNote();
     setText(fightBar.jumpNote, note);
     fightBar.jump.classList.toggle('is-ready', note === 'Ready');
+    fightBar.brace.hidden = Boolean(fight.over);
+    const braceProblem = whyNoBrace(sim);
+    setText(fightBar.braceNote, braced(sim) ? `Up ${seconds(sim.state.shield.until - sim.state.tick)}` : capacity(sim) ? percent(capacitorOf(sim)) : 'No power');
+    fightBar.brace.classList.toggle('is-ready', !braceProblem);
+    fightBar.brace.classList.toggle('is-active', braced(sim));
     updateCall(fight, enemy);
     for (const tile of fightBar.tiles) {
       const state = sim.state.weapons[tile.index];
@@ -757,6 +830,7 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
 
   function selectCrew(id) {
     selectedCrew = id;
+    if (id) lastHand = id;
     if (id) selected = null;
     if (id) selectedWeapon = null;
     nodes.info.hidden = true;
@@ -820,17 +894,20 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
     if (selectedWeapon !== null) {
       const weapon = weaponOf(selectedWeapon);
       const stats = { needs: stat('Needs'), charge: stat('Charge'), damage: stat('Damage'), target: stat('Aimed at') };
-      setText(stats.needs.value, `${weapon.power} ${weapon.power === 1 ? 'bar' : 'bars'}`);
-      setText(stats.damage.value, `${weapon.damage}${weapon.pierce ? `, ignores ${weapon.pierce} shield` : ''}`);
       const slot = selectedWeapon;
+      const fed = magazineOf(sim, slot) !== null;
+      if (fed) stats.rounds = stat('Rounds');
+      setText(stats.needs.value, `${weapon.power} ${weapon.power === 1 ? 'bar' : 'bars'}`);
+      setText(stats.damage.value, `${weapon.damage}${weapon.pierce ? `, takes ${1 + weapon.pierce} of a brace` : ''}`);
       const clear = button('btn-clear-target', 'Hold fire', () => order({ type: 'weapon.target', slot, room: null }));
+      const fetch = fed ? button('btn-fetch-rounds', 'Fetch rounds', () => crateOrder({ type: 'weapon.load', slot })) : null;
       const note = el('span', { class: 'status__note' });
       nodes.status.replaceChildren(
         el('div', { class: 'status__head' }, el('div', { class: 'status__title', id: 'status-title' }, weapon.name), el('div', { class: 'stencil' }, `Weapon ${slot + 1}`), note),
         el('div', { class: 'status__stats' }, Object.values(stats).map((s) => s.node)),
-        el('div', { class: 'status__controls' }, clear, el('span', { class: 'status__hint status__hint--inline', id: 'weapon-hint' }, 'Tap a room on their ship to aim it there.')),
+        el('div', { class: 'status__controls' }, clear, fetch, el('span', { class: 'status__hint status__hint--inline', id: 'weapon-hint' }, fed ? 'Tap a room on their ship to aim it there. Rounds are carried up from the hold by hand.' : 'Tap a room on their ship to aim it there.')),
       );
-      panel = { kind: 'weapon', slot, stats, clear, note };
+      panel = { kind: 'weapon', slot, stats, clear, fetch, note };
       updatePanel();
       return;
     }
@@ -846,6 +923,43 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
         el('p', { class: 'status__hint' }, 'Their ship. Tap a weapon, then a room here, to aim at it.'),
       );
       panel = { kind: 'foe', id: room.id, sys: room.system ?? null, stats, note, resolved };
+      updatePanel();
+      return;
+    }
+    if (selected?.kind === 'crate') {
+      const crate = sim.state.crates[selected.id];
+      if (!crate) {
+        selected = null;
+        return buildPanel();
+      }
+      const stats = { where: stat('In'), contents: stat('Contents') };
+      const id = crate.id;
+      const open = button('btn-crate-open', 'Open', () => crateOrder({ type: 'crate.open', crate: id }));
+      const move = button('btn-crate-move', 'Move', () => {
+        movingCrate = movingCrate === id ? null : id;
+      });
+      const load = button('btn-crate-load', 'Load guns', () => {
+        const slot = hungriestGun();
+        if (slot === null) {
+          refusal = { text: 'Every heavy gun is fully loaded.', until: performance.now() + 2600 };
+          return;
+        }
+        crateOrder({ type: 'weapon.load', slot, crate: id });
+      });
+      // Two presses, like a room: the first arms it, the second sends someone to the airlock with it.
+      const jettison = button('btn-crate-jettison', 'Jettison', () => {
+        if (panel.armedUntil > performance.now()) {
+          panel.armedUntil = 0;
+          crateOrder({ type: 'crate.jettison', crate: id });
+        } else panel.armedUntil = performance.now() + 4000;
+      }, 'btn--danger');
+      const note = el('span', { class: 'status__note' });
+      nodes.status.replaceChildren(
+        el('div', { class: 'status__head' }, el('div', { class: 'status__title', id: 'status-title' }, crate.label), el('div', { class: 'stencil' }, CRATE_KIND[crate.kind]), note),
+        el('div', { class: 'status__stats' }, Object.values(stats).map((s) => s.node)),
+        el('div', { class: 'status__controls' }, crate.kind === 'ammo' ? load : open, move, jettison),
+      );
+      panel = { kind: 'crate', id, stats, open, move, load, jettison, armedUntil: 0, note };
       updatePanel();
       return;
     }
@@ -949,7 +1063,41 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
       panel.stats.charge.node.classList.toggle('is-alarm', !state.powered);
       setText(panel.stats.target.value, state.target ? (enemyOf(sim)?.layout.room(state.target)?.name ?? 'nothing') : 'nothing');
       panel.clear.disabled = state.target === null;
-      setText(panel.note, queuedFor('slot', panel.slot) ? 'Order queued' : refusalText() || (state.powered ? '' : 'Route power to weapons (WPN) to charge it.'));
+      let hint = state.powered ? '' : 'Route power to weapons (WPN) to charge it.';
+      if (panel.stats.rounds) {
+        setText(panel.stats.rounds.value, `${state.rounds} of ${magazineOf(sim, panel.slot)} · ${roundsInHold(sim)} in the hold`);
+        panel.stats.rounds.node.classList.toggle('is-alarm', state.rounds < 1);
+        const runner = ourCrew(sim).find(({ member }) => member.job?.kind === 'load' && member.job.slot === panel.slot)?.member;
+        if (runner) hint = `${runner.name}: ${describeJob(sim, runner).toLowerCase()}.`;
+        else if (state.rounds < 1) hint = roundsInHold(sim) ? 'Empty. Send someone down to the hold for rounds.' : 'Empty, and there are no rounds left aboard.';
+      }
+      setText(panel.note, queuedFor('slot', panel.slot) ? 'Order queued' : refusalText() || hint);
+      return;
+    }
+    if (panel.kind === 'crate') {
+      const crate = sim.state.crates[panel.id];
+      if (!crate) {
+        // Loaded, broken down, or out of the airlock.
+        selected = null;
+        movingCrate = null;
+        return buildPanel();
+      }
+      const carrier = crate.by ? findCrew(sim, crate.by)?.member : null;
+      setText(panel.stats.where.value, carrier ? `${carrier.name}'s arms` : layout.room(crate.room).name);
+      setText(panel.stats.contents.value, crate.kind === 'ammo' ? `${crate.rounds} rounds` : crate.sealed ? 'sealed' : (crate.contents ?? 'opened'));
+      panel.open.disabled = !crate.sealed;
+      setText(panel.open, crate.sealed ? 'Open' : 'Opened');
+      panel.move.classList.toggle('is-selected', movingCrate === panel.id);
+      const armed = panel.armedUntil > performance.now();
+      setText(panel.jettison, armed ? 'Confirm jettison' : 'Jettison');
+      panel.jettison.classList.toggle('is-armed', armed);
+      const worker = ourCrew(sim).find(({ member }) => member.job?.crate === panel.id)?.member;
+      let note = refusalText();
+      if (!note && movingCrate === panel.id) note = 'Tap a room of ours to carry it there.';
+      else if (!note && armed) note = 'It goes out of the nearest airlock. Press again to confirm.';
+      else if (!note && worker) note = `${worker.name}: ${describeJob(sim, worker).toLowerCase()}.`;
+      else if (!note && crate.sealed) note = 'Breaking a company seal gets logged.';
+      setText(panel.note, queuedFor('crate', panel.id) ? 'Order queued' : note);
       return;
     }
     if (panel.kind === 'ship') {
@@ -995,7 +1143,7 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
       panel.stats.health.node.classList.toggle('is-alarm', !member.alive || member.health < 0.35);
       setText(panel.stats.where.value, ship === sim ? layout.room(member.room).name : `Their ${ship.layout.room(member.room).name.toLowerCase()}`);
       panel.stats.where.node.classList.toggle('is-alarm', ship !== sim);
-      setText(panel.stats.doing.value, describeTask(ship, member));
+      setText(panel.stats.doing.value, (ship === sim && describeJob(sim, member)) || describeTask(ship, member));
       setText(panel.stats.suit.value, member.suit ? 'on (slower)' : 'off');
       setText(panel.suit, member.suit ? 'Suit off' : 'Suit up');
       panel.suit.disabled = !member.alive;
@@ -1065,11 +1213,18 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
 
   function onTap({ x, y, pointerType }) {
     counts.canvasTaps += 1;
-    const target = pickTarget(allTargets(), x, y, pointerType);
+    let target = pickTarget(allTargets(), x, y, pointerType);
     if (!target) {
       selectedCrew = null;
       selectedWeapon = null;
       select(null);
+      return;
+    }
+    // A crate with someone selected, or while a crate is being moved, stands for the room it is in.
+    if (target.kind === 'crate' && (selectedCrew || movingCrate)) target = { kind: 'room', id: sim.state.crates[target.id]?.room ?? target.id };
+    if (target.kind === 'room' && movingCrate) {
+      const crate = movingCrate;
+      if (crateOrder({ type: 'crate.move', crate, room: target.id })) movingCrate = null;
       return;
     }
     if (target.kind === 'foe') {
@@ -1123,8 +1278,13 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
       if (member) selectCrew(selectedCrew === member.id ? null : member.id);
       return;
     }
+    if (action === 'brace') {
+      if (sim.state.fight) order({ type: 'ship.brace' });
+      return;
+    }
     if (action !== 'back') return;
     if (sheet) openSheet(sheet);
+    else if (movingCrate) movingCrate = null;
     else if (selectedWeapon !== null) selectWeapon(null);
     else if (selectedCrew) selectCrew(null);
     else if (selected) select(null);
@@ -1236,8 +1396,9 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
         // Game time, so flames and alarms hold still while paused.
         time: (sim.state.tick + clock.alpha) * TICK_SECONDS,
         alpha: clock.alpha,
-        selected: selected?.kind === 'foe' ? null : selected,
+        selected: selected?.kind === 'foe' || selected?.kind === 'crate' ? null : selected,
         selectedCrew,
+        selectedCrate: selected?.kind === 'crate' ? selected.id : null,
         showCrawlways,
         charges: sim.state.weapons.map((_, slot) => chargeOf(sim, slot)),
         chosenWeapon: selectedWeapon,
@@ -1280,7 +1441,10 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
     },
     /** For automated tests and the debug console. */
     debug: {
-      targets: () => renderer.targets(view, oursOn(sim)),
+      targets: () => renderer.targets(view, oursOn(sim), { crates: sim.state.crates }),
+      get movingCrate() {
+        return movingCrate;
+      },
       foeTargets: () => (foe && foeView && enemyOf(sim) ? foe.renderer.targets(foeView, oursOn(enemyOf(sim)), { foe: true }) : []),
       get shake() {
         return shake;

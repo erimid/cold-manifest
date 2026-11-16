@@ -140,7 +140,8 @@ test('the enemy captain feeds its guns after a hit, aims by its archetype and fi
   seconds(sim, 1);
   assert.equal(enemy.state.systems.shields.power, 0);
   seconds(sim, 120);
-  assert.ok([...volleys.values()].every((n) => n === 2), `every volley is both guns: ${[...volleys.values()]}`);
+  // Both guns go together while the slug thrower has rounds; dry, it is left out until someone carries more up (S2.8).
+  assert.ok([...volleys.values()].every((n) => n <= 2) && [...volleys.values()].filter((n) => n === 2).length >= 3, `volleys: ${[...volleys.values()]}`);
   assert.equal(enemy.state.systems.shields.damage, 0, 'their crew repaired it');
   assert.equal(enemy.state.systems.shields.power, 1, 'and the captain powered it again');
   const favourite = [...targets.entries()].sort((a, b) => b[1] - a[1])[0][0];

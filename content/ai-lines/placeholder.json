@@ -106,6 +106,24 @@
     { "id": "ph.lock_lost.002", "category": "combat_progress", "placeholder": true, "conditions": { "trigger": "lock.lost" }, "text": "I can't hold a firing solution. Power to sensors would help." },
     { "id": "ph.fix_ready.001", "category": "combat_progress", "placeholder": true, "conditions": { "trigger": "fix.ready" }, "text": "I have a fix. Say the word and we're gone." },
     { "id": "ph.fix_ready.002", "category": "combat_progress", "placeholder": true, "conditions": { "trigger": "fix.ready" }, "text": "Sensors have a fix on the way out. The drive needs a bar and a pilot, and then we can leave." },
-    { "id": "ph.fix_ready.003", "category": "combat_progress", "placeholder": true, "conditions": { "trigger": "fix.ready" }, "text": "Fix is good. We can jump whenever you've had enough." }
+    { "id": "ph.fix_ready.003", "category": "combat_progress", "placeholder": true, "conditions": { "trigger": "fix.ready" }, "text": "Fix is good. We can jump whenever you've had enough." },
+    { "id": "ph.ship_braced.001", "category": "combat_progress", "placeholder": true, "conditions": { "trigger": "ship.braced" }, "text": "Field's up. Everyone between here and the next system can see us now." },
+    { "id": "ph.ship_braced.002", "category": "combat_progress", "placeholder": true, "conditions": { "trigger": "ship.braced" }, "text": "Capacitor dumped. Whatever they throw in the next few seconds hits the field first." },
+    { "id": "ph.ship_braced.003", "category": "combat_progress", "placeholder": true, "conditions": { "trigger": "ship.braced" }, "text": "Bracing. I'll be charging that again from nothing, so don't make a habit of it." },
+    { "id": "ph.enemy_ship_braced.001", "category": "combat_progress", "placeholder": true, "conditions": { "trigger": "enemy.ship.braced" }, "text": "They've braced. That volley went into their field, not their hull." },
+    { "id": "ph.enemy_ship_braced.002", "category": "combat_progress", "placeholder": true, "conditions": { "trigger": "enemy.ship.braced" }, "text": "Their capacitor just went off. Lovely and bright on my sensors. Empty now, too." },
+    { "id": "ph.enemy_ship_braced.003", "category": "combat_progress", "placeholder": true, "conditions": { "trigger": "enemy.ship.braced" }, "text": "They saw it coming and braced. Wait for their field to drop." },
+    { "id": "ph.weapon_empty.001", "category": "combat_progress", "placeholder": true, "conditions": { "trigger": "weapon.empty" }, "text": "The slug thrower's dry. Somebody has to fetch rounds up from the hold." },
+    { "id": "ph.weapon_empty.002", "category": "combat_progress", "placeholder": true, "conditions": { "trigger": "weapon.empty" }, "text": "Heavy gun's charged with nothing in the breech. The ordnance is in the cargo hold, where it always is." },
+    { "id": "ph.weapon_empty.003", "category": "combat_progress", "placeholder": true, "conditions": { "trigger": "weapon.empty" }, "text": "Out of rounds. I can't carry crates, Captain. I've asked." },
+    { "id": "ph.weapon_loaded.001", "category": "order_confirm", "placeholder": true, "conditions": { "trigger": "weapon.loaded" }, "text": "{crew_name} has the gun loaded. That was a long walk with a heavy crate." },
+    { "id": "ph.weapon_loaded.002", "category": "order_confirm", "placeholder": true, "conditions": { "trigger": "weapon.loaded" }, "text": "Rounds are in. Thank {crew_name}'s back for it." },
+    { "id": "ph.weapon_loaded.003", "category": "order_confirm", "placeholder": true, "conditions": { "trigger": "weapon.loaded" }, "text": "Loaded. {crew_name} is asking who designed a ship where the ammunition lives three decks from the guns." },
+    { "id": "ph.crate_opened.001", "category": "cargo", "placeholder": true, "conditions": { "trigger": "crate.opened" }, "text": "{crew_name} broke the company seal. I've noted it. The company will too." },
+    { "id": "ph.crate_opened.002", "category": "cargo", "placeholder": true, "conditions": { "trigger": "crate.opened" }, "text": "Seal's broken. For the record, I'm required to log that, and I have." },
+    { "id": "ph.crate_opened.003", "category": "cargo", "placeholder": true, "conditions": { "trigger": "crate.opened" }, "text": "{crew_name} has it open. You'll want to read the contents before anyone asks what we were carrying." },
+    { "id": "ph.crate_jettisoned.001", "category": "cargo", "placeholder": true, "conditions": { "trigger": "crate.jettisoned" }, "text": "Crate's out the airlock. It's somebody else's problem now, or nobody's." },
+    { "id": "ph.crate_jettisoned.002", "category": "cargo", "placeholder": true, "conditions": { "trigger": "crate.jettisoned" }, "text": "Cycled out. I've struck it from the manifest. Someone may want to know why." },
+    { "id": "ph.crate_jettisoned.003", "category": "cargo", "placeholder": true, "conditions": { "trigger": "crate.jettisoned" }, "text": "That's one less crate. I hope it wasn't the one we're being paid for." }
   ]
 }

@@ -17,14 +17,18 @@
 //   3. works its crew: one stays at the helm, the rest go to the worst
 //      trouble aboard (suited for a breach, or to fight boarders), and back to
 //      their posts after;
-//   4. boards (S2.4), if the ship file says how: when our shields are down and
+//   4. sends someone to the hold for rounds when a heavy gun runs dry (S2.8);
+//   5. boards (S2.4), if the ship file says how: when our shields are down and
 //      nobody of theirs is already over (and the guns have had BOARD_AFTER_SECONDS), a party crosses to a room picked by
 //      the target weights. Aboard us they move on once a system is wrecked,
 //      and come home hurt, or when the ship is running.
+// Between decisions it watches our guns: when a volley of ours is in the air
+// it may brace (S2.8), as often as its archetype's `brace` chance says.
 
 import { hostilesBeside, isHome, CREW_COMMANDS } from './crew.js';
 import { sendAcross, whyNotCross } from './boarding.js';
 import { POWERED, POWER_COMMANDS, free } from './power.js';
+import { HOLD_COMMANDS, roundsInHold } from './hold.js';
 import { contactView } from './senses.js';
 import { SYSTEM_IDS } from './systems.js';
 
@@ -35,33 +39,38 @@ export const THINK_SECONDS = 0.5;
  * Archetypes (brief §7: glass cannon, boarders, drone carriers, shield tanks, stealth).
  *   power    systems in the order bars go to them
  *   targets  weights for picking a room of ours to shoot: a system id, "helm", or "other" for anything else
+ *   brace    the chance it braces against a volley of ours, when its capacitor can (S2.8)
  */
 export const ARCHETYPES = Object.freeze({
-  // Nobody aboard and no orders: a hulk that sits there and takes it.
-  drone: { label: 'Drone', power: [], targets: {} },
+  // Nobody aboard and no orders: a hulk that sits there and takes it. Its point defence braces on a coin toss.
+  drone: { label: 'Drone', power: [], targets: {}, brace: 0.5 },
   // Shoot first, shoot often: guns before shields, and at our guns and shields.
   gunner: {
     label: 'Glass cannon',
     power: ['weapons', 'engines', 'life_support', 'shields', 'doors', 'sensors', 'medbay', 'ai_core'],
     targets: { weapons: 4, shields: 3, engines: 1, helm: 1, other: 0.5 },
+    brace: 0.3,
   },
   // Pirates: keep a shield up, then guns, and go for what lets us fight back or get away.
   raider: {
     label: 'Raider',
     power: ['shields', 'weapons', 'engines', 'life_support', 'doors', 'medbay', 'sensors', 'ai_core'],
     targets: { shields: 3, weapons: 3, engines: 2, helm: 1, other: 0.5 },
+    brace: 0.6,
   },
   // Shields above all, and a slow grind at our guns.
   tank: {
     label: 'Shield tank',
     power: ['shields', 'life_support', 'weapons', 'engines', 'doors', 'medbay', 'sensors', 'ai_core'],
     targets: { weapons: 4, reactor: 2, other: 0.5 },
+    brace: 0.9,
   },
   // Soften us up for a boarding party (S2.4): doors, medbay and shields.
   boarder: {
     label: 'Boarders',
     power: ['engines', 'shields', 'weapons', 'life_support', 'doors', 'medbay', 'sensors', 'ai_core'],
     targets: { doors: 3, medbay: 3, shields: 2, life_support: 1, other: 0.5 },
+    brace: 0.5,
   },
 });
 
@@ -173,7 +182,35 @@ function order(ship, type, cmd) {
   return true;
 }
 
-/** One stays at the helm; the rest put out fires, patch holes and mend systems, then go back to their posts. */
+/** A heavy gun with no rounds: send the nearest spare hand (never the pilot) to the hold for more. */
+function feedGuns(ship) {
+  if (roundsInHold(ship) < 1) return;
+  const crew = Object.values(ship.state.crew).filter((member) => member.alive && isHome(ship, member) && !member.board);
+  ship.state.weapons.forEach((slot, index) => {
+    if (slot.rounds === null || slot.rounds > 0) return;
+    if (crew.some((member) => member.job?.kind === 'load' && member.job.slot === index)) return; // someone is on it
+    const hand = crew.slice(1).find((member) => !member.job && !member.path.length && trouble(ship, ship.layout.room(member.room)) === 0) ?? crew.slice(1).find((member) => !member.job);
+    if (!hand) return;
+    const cmd = { type: 'weapon.load', crew: hand.id, slot: index };
+    if (!HOLD_COMMANDS['weapon.load'].check(ship, cmd)) HOLD_COMMANDS['weapon.load'].apply(ship, cmd);
+  });
+}
+
+/**
+ * A volley of ours is in the air: should this captain brace? Only if the
+ * capacitor can, and the archetype's nerve holds. One roll per volley (every
+ * shot fired on one tick); combat.js does the bracing.
+ */
+export function braceAgainst(ship) {
+  const { tick } = ship.state;
+  if (ship.state.braceRoll === tick) return false;
+  ship.state.braceRoll = tick;
+  const { shield } = ship.state;
+  if (shield.field > 0 || shield.charge < 1 - 1e-9 || ship.state.hull.points === 0) return false;
+  return ship.rng.stream('tactics').chance(planOf(ship.layout).brace ?? 0);
+}
+
+/** One stays at the helm; the rest put out fires, patch holes and mend systems, then go back to their posts. A crate job is left to run. */
 function workCrew(ship) {
   const crew = Object.values(ship.state.crew).filter((member) => member.alive && isHome(ship, member) && !member.board);
   if (!crew.length) return;
@@ -184,7 +221,7 @@ function workCrew(ship) {
   crew.forEach((member, index) => {
     const post = ship.layout.crewStart[member.index % ship.layout.crewStart.length];
     const here = ship.layout.room(member.room);
-    if (member.path.length) return; // on the way somewhere
+    if (member.path.length || member.job) return; // on the way somewhere, or carrying rounds
     if (trouble(ship, here) > 0) return; // busy where they stand
     const pilot = index === 0 && helm;
     const spot = pilot ? null : spots.find((room) => (heading.get(room.id) ?? 0) < 2 && room.id !== member.room);
@@ -250,7 +287,7 @@ export function think(ship, foe, { fleeing = false, boarding = false, battleSeco
   routePower(ship, fleeing ? ['engines', ...plan.power.filter((id) => id !== 'engines')] : plan.power);
   // Guns fire together, so the first shot takes down a shield layer and the next gets through.
   // A gun that is ready waits, unaimed, for the others with power.
-  const guns = ship.state.weapons.filter((slot) => slot.powered);
+  const guns = ship.state.weapons.filter((slot) => slot.powered && (slot.rounds === null || slot.rounds > 0)); // a dry gun waits for its rounds
   const ready = (slot) => slot.charge >= ship.catalog.weapon(slot.id).charge - 1e-9;
   const volley = guns.length > 0 && guns.every(ready);
   ship.state.weapons.forEach((slot) => {
@@ -263,6 +300,7 @@ export function think(ship, foe, { fleeing = false, boarding = false, battleSeco
     slot.target = pickTarget(ship, foe, plan, (room) => contactView(ship, room.id)?.resolved);
   });
   board(ship, foe, plan, { fleeing, boarding, battleSeconds });
+  feedGuns(ship);
   workCrew(ship);
 }
 
