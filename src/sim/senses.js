@@ -137,7 +137,12 @@ export function reactorLoad(ship) {
 /** How hard the drive is burning, 0 to 1. */
 export function burn(ship) {
   const { engines } = ship.state.systems;
-  return engines.absent ? 0 : engines.power / engines.level;
+  if (engines.absent) return 0;
+  // Our own drive only burns when the helm has it lit (encounters.js). In a fight, and aboard any other
+  // ship, powered engines are burning engines, as they were before the helm (the duel goes in H.3).
+  const { helm, fight } = ship.state;
+  if (helm && !(fight && !fight.over) && !helm.burn) return 0;
+  return engines.power / engines.level;
 }
 
 /** Below this light a room is dark to stand in (the same line a dark walk uses, crew.js). A fire lights its own room. */

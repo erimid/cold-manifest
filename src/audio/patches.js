@@ -52,6 +52,9 @@ export const EVENT_SOUNDS = Object.freeze({
   'room.jettisoned': 'thunk',
   'crew.died': 'flatline',
   'fight.started': 'klaxon',
+  // The scope (H.1): a new return, and a ship coming alongside.
+  'contact.sighted': 'chirp',
+  'contact.alongside': 'klaxon',
   'weapon.ready': 'chirp',
   'weapon.fired': 'shot',
   'shot.resolved': (event) => (event.result === 'hit' ? 'thunk' : event.result === 'shield' ? 'shield' : null),

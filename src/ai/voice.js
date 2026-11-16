@@ -97,6 +97,16 @@ export const TRIGGERS = Object.freeze({
   'pursuit.ended': { category: 'contract', priority: 3, ttl: 15, own: true },
   'contract.late': { category: 'contract', priority: 3, ttl: 20, own: true },
   'sector.delivered': { category: 'contract', priority: 3, ttl: 20, own: true },
+  // The scope (H.1, D-151): a return, what it turns out to be, what it does about us, and losing it.
+  'contact.sighted': { category: 'sensor_uncertain', priority: 3, ttl: 12, cooldown: 20, own: true },
+  'contact.identified': { category: 'sensor_uncertain', priority: 2, ttl: 10, cooldown: 20, own: true },
+  'contact.noticed': { category: 'combat_start', priority: 3, ttl: 10, cooldown: 30, own: true },
+  'contact.closing': { category: 'combat_start', priority: 4, ttl: 12, cooldown: 30, own: true },
+  'contact.alongside': { category: 'combat_start', priority: 5, ttl: 12, own: true },
+  'contact.fooled': { category: 'combat_progress', priority: 3, ttl: 8, cooldown: 20, own: true },
+  'contact.hailed': { category: 'combat_progress', priority: 4, ttl: 10, own: true, when: (event) => event.ok === false },
+  'contact.lost': { category: 'combat_end', priority: 3, ttl: 15, own: true },
+  'contact.passed': { category: 'combat_end', priority: 2, ttl: 15, own: true },
 });
 
 export function newVoiceState() {

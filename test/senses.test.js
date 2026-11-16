@@ -55,7 +55,9 @@ test('a room gives off light, noise, heat and movement, and the creature will re
   assert.ok(burning.noise >= NOISE.fire * 0.6 - 0.01, `and is heard: ${burning.noise}`);
   assert.ok(burning.heat > 0.2, `and felt: ${burning.heat}`);
 
-  // Machinery hums while it has power; the drive is loud and hot when it burns.
+  // Machinery hums while it has power; the drive is loud and hot when it burns (the helm lights it, H.1).
+  sim.state.helm.burn = true;
+  seconds(sim, 1);
   const drive = sense(sim, 'engines');
   assert.ok(drive.noise > 0.2 && drive.heat > 0.3, JSON.stringify(drive));
   go(sim, { type: 'power.add', system: 'engines', delta: -1 });
@@ -88,6 +90,8 @@ test('a bang rings and fades: a hit is loud where it lands, a gun where it is fi
 test('the signature adds the ship up: lamps, noise, reactor load and drive burn', () => {
   const sim = newCrewedSim('signature');
   seconds(sim, 2);
+  assert.equal(signature(sim).burn, 0, 'powered engines give off no burn until the helm lights the drive (H.1)');
+  sim.state.helm.burn = true;
   const lit = signature(sim);
   assert.equal(lit.light, 1);
   assert.equal(lit.heat, 1, 'the reactor starts fully loaded');

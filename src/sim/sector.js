@@ -24,6 +24,7 @@
 // `sim.state.run`, so a run replays from its seed and saves with the rest.
 
 import { endFight, startFight, whyNoJump, stepFix } from './combat.js';
+import { heldAlongside } from './encounters.js';
 
 /** What a point on the chart can be, as the chart labels it. */
 export const NODE_KINDS = Object.freeze({
@@ -321,6 +322,7 @@ export function whyNoCourseJump(sim) {
   if (sim.state.fight && !sim.state.fight.over) return 'in a fight a jump is an escape: use the fight controls';
   const lane = laneBetween(run.map, run.at, run.plot);
   if (run.fuel < lane.fuel) return `that lane takes ${lane.fuel} fuel and we have ${run.fuel}`;
+  if (heldAlongside(sim)) return 'a ship is alongside: she cannot jump with it this close';
   return whyNoJump(sim);
 }
 

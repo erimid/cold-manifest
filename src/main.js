@@ -25,7 +25,7 @@ import { createShipView } from './ui/shipview.js';
 import { renderContracts, renderEvent, renderHub, renderPort, renderScene, renderSummary } from './ui/screens.js';
 import { renderTitle } from './ui/title.js';
 
-const VERSION = '0.21.0';
+const VERSION = '0.22.0';
 
 const params = new URLSearchParams(window.location.search);
 const flags = {
@@ -97,6 +97,7 @@ let stopTyping = () => {};
 // Auto-pause (brief §7): stop the clock the moment something goes badly wrong, and say what.
 const AUTO_PAUSE_TEXT = {
   fight: (event) => `${event.name} alongside`,
+  contact: (event) => `${event.name} closing on us`,
   boarded: (event) => `Boarders in ${sim.layout.room(event.room).name}`,
   fire: (event) => `Fire in ${sim.layout.room(event.room).name}`,
   breach: (event) => `Breach in ${sim.layout.room(event.room).name}`,
@@ -120,7 +121,7 @@ let runCount = 0;
 /** Build a sim, its clock and its ship view, and wire the sound, auto-pause and run events to them. */
 function newGame(seed, { contract = null, pursuit } = {}) {
   // Only a run with a contract meets events: the sandbox has nowhere to show them.
-  sim = createSim({ seed, ship: content.require('ships', 'margin-of-error'), crew, lines: content.all('ai-lines'), weapons: content.all('weapons'), ships: content.all('ships'), rules, events: contract ? content.all('events') : [], sector: content.require('sectors', 'the-reach'), run: pursuit === undefined ? {} : { pursuit }, contract: contract?.template ?? null, ports });
+  sim = createSim({ seed, ship: content.require('ships', 'margin-of-error'), crew, lines: content.all('ai-lines'), weapons: content.all('weapons'), ships: content.all('ships'), rules, events: contract ? content.all('events') : [], sector: content.require('sectors', 'the-reach'), run: pursuit === undefined ? {} : { pursuit }, contract: contract?.template ?? null, ports, encounters: content.all('encounters') });
   clock = createClock({ sim, tickSeconds: TICK_SECONDS });
   clock.onChange(() => audio.play('pause'));
   runInfo = { contract, seed, seen: new Set([sim.state.run.at]), pending: null, doom: null, handedOver: false };
