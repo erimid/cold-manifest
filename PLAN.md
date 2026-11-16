@@ -134,7 +134,7 @@ Session counts are estimates. A stage is done when its exit checks pass, not whe
 
 | Session | Work | Done when |
 |---|---|---|
-| S4.1 Crew generation and traits | Name, background, look and voice pools in `content/crew/`; skills that improve with use (skills set station ratings, H.4) (engineering skill or a trait decides who may use the service crawlways, replacing S2.6's flag); **30+ traits** as data with behavior hooks (not just stat modifiers). | Every trait changes at least one behavior that the bot report can count. |
+| S4.1 Crew generation and traits | Name, background, look and voice pools in `content/crew/`, generating crew **with a role each** (roles, skill effects, six starting crew and drawn bodies were pulled forward on 2026-11-16, D-130 to D-132; H.4 maps roles onto stations); skills that improve with use (skills set station ratings, H.4) (engineering skill or a trait decides who may use the service crawlways, replacing S2.6's flag); **30+ traits** as data with behavior hooks (not just stat modifiers). | Every trait changes at least one behavior that the bot report can count. |
 | S4.2 Needs and stress | Rest (sleep and fatigue exist from H.4), food, safety, morale; stress sources; freeze / panic / lash out / break (break adds a lasting negative trait); lasting injuries. | Unit tests per break state. |
 | S4.3 Memory and opinions | Extend S2.10's memory log: memory log from bus events with emotional weight, decay, strong memories that stick; opinions of captain, each crew member, and the AI, from hatred to devotion; memory text templates ("Captain left {crew_name} behind on {location}"). | Crew panel shows each member's top memories with names and places. |
 | S4.4 Relationships | Pair relationships (friendship, rivalry, romance, mentorship, grudge), same-room bonuses and friction, fights. Crew panel: portraits (placeholder), health, stress, mood icon, traits, skills, relationships. | Relationship changes trace back to specific memories. |
@@ -225,7 +225,7 @@ Session counts are estimates. A stage is done when its exit checks pass, not whe
 
 | Session | Work |
 |---|---|
-| S11.1 Look | Finish the look S2.6 started (monitor frame, stencils): worn metal, company stencils, cables, condensation, flickering panels; fire, smoke, sparks, frost; animated crew silhouettes; subtle scanlines/CRT glow with an off switch. |
+| S11.1 Look | Finish the look S2.6 started (monitor frame, stencils): worn metal, company stencils, cables, condensation, flickering panels; fire, smoke, sparks, frost; animated crew silhouettes (bodies with role kit, poses and a walk cycle exist from 2026-11-16, D-132: this session adds polish such as more poses and idle motion); subtle scanlines/CRT glow with an off switch. |
 | S11.2 Sound | Real sound design of the patch library: hum, alarms, UI, AI voice blip, creature, music pads. One short session max per sound. |
 | S11.3 Juice and accessibility | Screen shake, impact flashes, pulsing alarm borders, heartbeat vignette; text size, reduce flicker/shake, colorblind-safe alarms (shape + icon), pause always available. |
 | S11.4 Tutorial | A short guided first contract that teaches pause, power, doors, crew, map, port. |

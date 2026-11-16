@@ -31,9 +31,10 @@
 //   facing      "right" (the default), "left" or "up": which way the bow points
 //   enemy       true for a ship the player fights rather than flies. An enemy
 //               may leave systems out, mount no weapons and carry no crew.
-//   crew        enemies only: who is aboard, [{ id, name }], placed in crewStart
+//   crew        enemies only: who is aboard, [{ id, name, role? }], placed in crewStart (roles.js)
 //   tactics     enemies only: how it fights, hails, surrenders and runs (tactics.js)
 
+import { ROLES } from './roles.js';
 import { validateCrates } from './hold.js';
 import { validatePower } from './power.js';
 import { validateTactics } from './tactics.js';
@@ -261,6 +262,7 @@ export function validateLayout(data) {
   // An enemy's own crew and how it fights. The player's crew come from content/crew/ instead.
   const roster = data.crew ?? [];
   if (!Array.isArray(roster) || !roster.every((p) => p && typeof p.id === 'string' && p.id && typeof p.name === 'string' && p.name)) problems.push('"crew" must be a list of { id, name }');
+  else for (const p of roster) if (p.role !== undefined && !ROLES[p.role]) problems.push(`crew ${p.id}: no role "${p.role}"`);
   else {
     if (roster.length && !enemy) problems.push('only an enemy ship lists its own "crew"');
     if (new Set(roster.map((p) => p.id)).size !== roster.length) problems.push('crew: duplicate id');

@@ -71,24 +71,24 @@ test('names in reach stand in for ids, and can be reached into', () => {
 
 test('a crew condition finds who fits, best at the skill first, and remembers them under a name', () => {
   const sim = started();
-  assert.deepEqual(crewMatching({}, on(sim)).map((m) => m.id), ['ilse', 'dace', 'okoro']);
+  assert.deepEqual(crewMatching({}, on(sim)).map((m) => m.id), ['ilse', 'dace', 'okoro', 'pruitt', 'halloran', 'vesna']);
   assert.deepEqual(crewMatching({ skill: 'medicine' }, on(sim)).map((m) => m.id), ['okoro']);
-  assert.deepEqual(crewMatching({ skill: 'medicine', min: 3 }, on(sim)), []);
+  assert.deepEqual(crewMatching({ skill: 'medicine', min: 4 }, on(sim)), []);
   assert.deepEqual(crewMatching({ in: 'reactor', suit: false }, on(sim)).map((m) => m.id), ['dace']);
   assert.deepEqual(crewMatching({ engineer: true }, on(sim)).map((m) => m.id), ['dace']);
-  assert.deepEqual(crewMatching({ not: 'ilse', away: 'reactor' }, on(sim)).map((m) => m.id), ['okoro']);
+  assert.deepEqual(crewMatching({ not: 'ilse', away: 'reactor' }, on(sim)).map((m) => m.id), ['okoro', 'pruitt', 'halloran', 'vesna']);
   assert.deepEqual(crewMatching({ where: { fact: 'crew.skill', crew: '$this', skill: 'piloting', gte: 2 } }, on(sim)).map((m) => m.id), ['ilse']);
   sim.state.crew.dace.skills.medicine = 4;
   assert.deepEqual(crewMatching({ skill: 'medicine' }, on(sim)).map((m) => m.id), ['dace', 'okoro'], 'the better medic comes first');
 
   const found = match({ crew: { skill: 'medicine' }, as: 'medic' }, on(sim));
   assert.deepEqual(found.medic, { type: 'crew', value: 'dace' });
-  assert.ok(holds({ crew: {}, count: 3 }, on(sim)));
-  assert.ok(!holds({ crew: {}, count: 4 }, on(sim)));
+  assert.ok(holds({ crew: {}, count: 6 }, on(sim)));
+  assert.ok(!holds({ crew: {}, count: 7 }, on(sim)));
   // What one condition remembers, the next in the list can use.
   assert.ok(holds([{ crew: { skill: 'piloting' }, as: 'pilot' }, { fact: 'crew.room', crew: '$pilot', eq: 'bridge' }], on(sim)));
   sim.state.crew.okoro.alive = false;
-  assert.deepEqual(crewMatching({}, on(sim)).map((m) => m.id), ['ilse', 'dace'], 'the dead fit nothing');
+  assert.deepEqual(crewMatching({}, on(sim)).map((m) => m.id), ['ilse', 'dace', 'pruitt', 'halloran', 'vesna'], 'the dead fit nothing');
 });
 
 test('a memory condition finds the newest memory that fits and has not faded', () => {
@@ -110,14 +110,14 @@ test('a memory condition finds the newest memory that fits and has not faded', (
   assert.ok(holds({ memory: { type: 'death' } }, ctx), 'a death lasts longer');
 });
 
-test('a requirement says who met it, "[Ilse, Piloting]", or what is missing, "[Needs Medicine 3]"', () => {
+test('a requirement says who met it, "[Ilse, Piloting]", or what is missing, "[Needs Medicine 4]"', () => {
   const sim = started();
   assert.deepEqual(requirement(undefined, on(sim)), { met: true, tag: null, vars: {} });
   const pilot = requirement({ crew: { skill: 'piloting', min: 2 }, as: 'pilot' }, on(sim));
   assert.equal(pilot.tag, '[Ilse, Piloting]');
   assert.equal(pilot.vars.pilot.value, 'ilse');
   assert.equal(requirement({ crew: { id: 'okoro', skill: 'medicine' } }, on(sim)).tag, '[Okoro, Medicine]');
-  assert.deepEqual(requirement({ crew: { skill: 'medicine', min: 3 } }, on(sim)), { met: false, tag: '[Needs Medicine 3]', vars: null });
+  assert.deepEqual(requirement({ crew: { skill: 'medicine', min: 4 } }, on(sim)), { met: false, tag: '[Needs Medicine 4]', vars: null });
   assert.equal(requirement({ crew: { engineer: true } }, on(sim)).tag, '[Dace, Engineer]');
   sim.state.crew.okoro.alive = false;
   assert.equal(requirement({ crew: { id: 'okoro', skill: 'medicine' } }, on(sim)).tag, '[Needs Okoro, Medicine]');

@@ -327,15 +327,18 @@
       "crew": [
         {
           "id": "vask",
-          "name": "Vask"
+          "name": "Vask",
+          "role": "pilot"
         },
         {
           "id": "moll",
-          "name": "Moll"
+          "name": "Moll",
+          "role": "gunner"
         },
         {
           "id": "teague",
-          "name": "Teague"
+          "name": "Teague",
+          "role": "engineer"
         }
       ],
       "crates": [
@@ -613,11 +616,13 @@
       "crew": [
         {
           "id": "rook",
-          "name": "Rook"
+          "name": "Rook",
+          "role": "pilot"
         },
         {
           "id": "sable",
-          "name": "Sable"
+          "name": "Sable",
+          "role": "gunner"
         }
       ],
       "crates": [
@@ -868,23 +873,28 @@
       "crew": [
         {
           "id": "harrow",
-          "name": "Harrow"
+          "name": "Harrow",
+          "role": "pilot"
         },
         {
           "id": "pell",
-          "name": "Pell"
+          "name": "Pell",
+          "role": "gunner"
         },
         {
           "id": "juno",
-          "name": "Juno"
+          "name": "Juno",
+          "role": "security"
         },
         {
           "id": "crake",
-          "name": "Crake"
+          "name": "Crake",
+          "role": "engineer"
         },
         {
           "id": "odd",
-          "name": "Odd"
+          "name": "Odd",
+          "role": "security"
         }
       ],
       "crewStart": [
@@ -1151,15 +1161,18 @@
       "crew": [
         {
           "id": "maren",
-          "name": "Maren"
+          "name": "Maren",
+          "role": "pilot"
         },
         {
           "id": "tobin",
-          "name": "Tobin"
+          "name": "Tobin",
+          "role": "engineer"
         },
         {
           "id": "ives",
-          "name": "Ives"
+          "name": "Ives",
+          "role": "gunner"
         }
       ],
       "crewStart": [
@@ -1422,11 +1435,13 @@
       "crew": [
         {
           "id": "wick",
-          "name": "Wick"
+          "name": "Wick",
+          "role": "pilot"
         },
         {
           "id": "nalo",
-          "name": "Nalo"
+          "name": "Nalo",
+          "role": "gunner"
         }
       ],
       "crewStart": [

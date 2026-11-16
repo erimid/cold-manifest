@@ -63,7 +63,7 @@ test('the summary names the ending, the contract and what became of it, the mone
   assert.equal(rows.Standing, 'Reach Medical Cooperative -2');
   assert.equal(rows.Money, String(120 + 150 - 60));
   assert.match(rows.Jumps, /^0 of \d+ allowed$/);
-  assert.equal(rows.Crew, '2 of 3 alive');
+  assert.equal(rows.Crew, '5 of 6 alive');
   assert.equal(summary.dead.length, 1);
   for (const kind of Object.keys(ENDINGS)) assert.ok(summarize(runSim(), kind).headline, kind);
   assert.equal(Object.fromEntries(summarize(runSim(), 'retired').rows).Contract, 'None');

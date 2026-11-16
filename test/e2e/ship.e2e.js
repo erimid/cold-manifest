@@ -86,11 +86,20 @@ const doorIs = (page, id, state, openness) =>
     return d.state === st && d.openness === op;
   }, [id, state, openness], { timeout: 3000 });
 
-/** A hit target's box and centre in page pixels. */
+/**
+ * A hit target's box and a point to tap it at, in page pixels. For a room that is its middle, or the nearest
+ * point along its middle that no crew member's body covers (people stand in rooms, D-132).
+ */
 async function target(page, id) {
-  const t = await game(page, (tid) => window.coldManifest.shipView.debug.targets().find((x) => x.id === tid), id);
+  const all = await game(page, () => window.coldManifest.shipView.debug.targets());
+  const t = all.find((x) => x.id === id);
   assert.ok(t, `no target ${id}`);
-  return { ...t, mx: t.x + t.w / 2, my: t.y + t.h / 2 };
+  const mx = t.x + t.w / 2;
+  const my = t.y + t.h / 2;
+  if (t.kind !== 'room' && t.kind !== 'foe') return { ...t, mx, my };
+  const covered = (x, y) => all.some((o) => o.priority > t.priority && x >= o.x - 16 && x <= o.x + o.w + 16 && y >= o.y - 16 && y <= o.y + o.h + 16);
+  for (let d = 0; d <= t.w / 2; d += 4) for (const x of [mx - d, mx + d]) if (!covered(x, my)) return { ...t, mx: x, my };
+  return { ...t, mx, my };
 }
 
 /** Raw touch through the browser, so holds and drags are real pointer streams. */
@@ -582,16 +591,17 @@ async function desktopTests(browser) {
     await game(page, () => window.coldManifest.sim.enqueue({ type: 'debug.system', system: 'reactor', damage: 0 }));
   });
 
+  // The brig door: nobody stands next to it to free it by hand (Halloran starts in the shields room).
   await check('debug: a jammed door refuses the panel and taps', async () => {
-    const t = await target(page, 'd_shields');
+    const t = await target(page, 'd_brig');
     await page.mouse.click(t.mx, t.my);
-    await doorIs(page, 'd_shields', 'open', 1);
+    await doorIs(page, 'd_brig', 'open', 1);
     await page.click('#btn-dbg-jam');
-    await doorIs(page, 'd_shields', 'jammed', 1);
+    await doorIs(page, 'd_brig', 'jammed', 1);
     for (const id of ['#btn-door-open', '#btn-door-close', '#btn-door-lock']) assert.equal(await page.isDisabled(id), true);
     await page.mouse.click(t.mx, t.my);
     await sleep(250);
-    assert.deepEqual(await door(page, 'd_shields'), { state: 'jammed', openness: 1 });
+    assert.deepEqual(await door(page, 'd_brig'), { state: 'jammed', openness: 1 });
     assert.match(await page.textContent('#status'), /Jammed/);
   });
 
@@ -602,7 +612,7 @@ async function desktopTests(browser) {
     await page.mouse.move(box.x + box.width / 2, box.y - 160, { steps: 5 });
     await page.mouse.up();
     await sleep(200);
-    assert.equal((await door(page, 'd_shields')).state, 'jammed');
+    assert.equal((await door(page, 'd_brig')).state, 'jammed');
   });
 
   await check('escape clears the selection, then goes back', async () => {
@@ -1009,7 +1019,7 @@ async function endingTests(browser) {
     await startSkiff();
     await page.waitForSelector('#fightcall:not([hidden])', { timeout: 2000 });
     assert.match(await page.textContent('#fightcall-title'), /Salvager skiff hails us/);
-    assert.match(await page.textContent('#btn-talk'), /Talk · 35%/);
+    assert.match(await page.textContent('#btn-talk'), /Talk · 50%/); // 35% for this ship, and 15% for Vesna's negotiation 3 (D-131)
     assert.match(await page.textContent('#btn-bribe'), /Pay 80 · have 120/);
     assert.equal(await page.isVisible('#btn-engage'), true);
     assert.equal(await page.isVisible('#btn-accept'), false);
@@ -1155,8 +1165,8 @@ async function boardingTests(browser) {
       throw new Error(`${err.message}\n${JSON.stringify(why)}`);
     });
     const tappable = await game(page, () => window.coldManifest.shipView.debug.targets().filter((x) => x.kind === 'crew').map((x) => x.id).sort());
-    assert.deepEqual(tappable, ['dace', 'ilse', 'okoro']);
-    assert.equal(await page.$$eval('.crewchip:not(.weapon)', (nodes) => nodes.length), 3, 'no chips for their crew');
+    assert.deepEqual(tappable, ['dace', 'halloran', 'ilse', 'okoro', 'pruitt', 'vesna']);
+    assert.equal(await page.$$eval('.crewchip:not(.weapon)', (nodes) => nodes.length), 6, 'no chips for their crew');
     if (shots) {
       await page.waitForTimeout(1500);
       await page.screenshot({ path: `${shots}/s2-4-boarders-ipad.png` });
@@ -1913,7 +1923,7 @@ async function loopTests(browser) {
     assert.match(title, /Delivered/);
     const facts = await page.textContent('#summary-facts');
     assert.match(facts, /Courier/);
-    assert.match(facts, /3 of 3 alive/);
+    assert.match(facts, /6 of 6 alive/);
     assert.match(facts, /Result\s*Delivered whole/);
     assert.match(facts, /Paid\s*150 advance \+ 450 at the drop/);
     assert.match(facts, /Standing\s*Reach Medical Cooperative \+2/);

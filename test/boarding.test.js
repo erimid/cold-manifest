@@ -98,7 +98,7 @@ test('a boarder walks to an airlock, crosses, and comes out aboard them', () => 
   assert.equal(boarded.length, 1);
   assert.equal(boarded[0].onto, 'enemy');
   assert.equal(findCrew(sim, 'okoro').ship, enemy);
-  assert.deepEqual(ourCrew(sim).map(({ member }) => member.id), ['ilse', 'dace', 'okoro']);
+  assert.deepEqual(ourCrew(sim).map(({ member }) => member.id), ['ilse', 'dace', 'okoro', 'pruitt', 'halloran', 'vesna']);
   until(sim, () => okoro.room === 'bridge' || !okoro.alive, 20);
 });
 
@@ -131,6 +131,7 @@ test('hand to hand: fighters in a room wear each other down, two on one twice as
   go(sim, { type: 'debug.fight', enemy: SKIFF });
   go(sim, { type: 'fight.engage' });
   const raider = boarder(sim, 'raider', 'quarters'); // okoro's room
+  sim.state.crew.okoro.skills = {}; // an untrained fighter: combat skill is its own test
   seconds(sim, 3);
   const okoro = sim.state.crew.okoro;
   assert.equal(okoro.task, 'fighting');
@@ -144,6 +145,7 @@ test('hand to hand: fighters in a room wear each other down, two on one twice as
   go(two, { type: 'debug.fight', enemy: SKIFF });
   go(two, { type: 'fight.engage' });
   const lone = boarder(two, 'raider', 'quarters');
+  two.state.crew.okoro.skills = {};
   two.state.crew.ilse.room = 'quarters'; // an extra pair of hands, there already
   Object.assign(two.state.crew.ilse, { x: okoro.x + 0.5, y: okoro.y });
   seconds(two, 3);
