@@ -24,6 +24,7 @@
 
 import { whyNoJump, stepFix } from './combat.js';
 import { heldAlongside, spawnContact } from './encounters.js';
+import { running } from './stations.js';
 
 /** What a point on the chart can be, as the chart labels it. */
 export const NODE_KINDS = Object.freeze({
@@ -362,7 +363,7 @@ function stepPursuit(sim) {
   else if (chase.at !== run.at) chase.at = fewestJumps(run.map, chase.at, run.at)[1];
   const lanes = distance(run.map, chase.at, run.at);
   const wasSeen = chase.seen;
-  chase.seen = lanes <= chase.sight && sim.state.systems.sensors.power > 0;
+  chase.seen = lanes <= chase.sight && running(sim, 'sensors');
   if (chase.seen) {
     chase.lastSeen = { node: chase.at, jump: run.jumps };
     if (!wasSeen) sim.events.emit('pursuit.sighted', { node: chase.at, lanes, encounter: chase.encounter, tick });

@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import { BREATHABLE_O2, FIRE_MIN_O2, isExposed, whyNotJettison } from '../src/sim/atmosphere.js';
-import { free, litRooms } from '../src/sim/power.js';
+import { litRooms } from '../src/sim/power.js';
+import { running } from '../src/sim/stations.js';
 import { validateLayout } from '../src/sim/ship.js';
 import { TICK_RATE, checkInvariants } from '../src/sim/sim.js';
 import { newSim, putCrew, shipCopy } from './helpers.js';
@@ -15,7 +16,7 @@ const give = (sim, ...commands) => {
   sim.step();
 };
 const o2 = (sim, room) => sim.state.rooms[room].oxygen;
-const noLifeSupport = (sim) => give(sim, { type: 'power.add', system: 'life_support', delta: -1 });
+const noLifeSupport = (sim) => give(sim, { type: 'station.stand', station: 'life_support', down: true });
 const listen = (sim, type) => {
   const heard = [];
   sim.events.on(type, (e) => heard.push(e));
@@ -80,7 +81,7 @@ test('fire dies at zero O2', () => {
   assert.equal(sim.state.rooms.brig.fire, 0, 'no air, no fire, at once');
 
   // Starved rather than emptied: it shrinks fast below the minimum.
-  give(sim, { type: 'debug.room', room: 'brig', set: { fire: 1, oxygen: FIRE_MIN_O2 / 2 } }, { type: 'power.add', system: 'life_support', delta: -1 });
+  give(sim, { type: 'debug.room', room: 'brig', set: { fire: 1, oxygen: FIRE_MIN_O2 / 2 } }, { type: 'station.stand', station: 'life_support', down: true });
   seconds(sim, 5);
   assert.equal(sim.state.rooms.brig.fire, 0);
   assert.equal(out.length, 2);
@@ -187,15 +188,14 @@ test('jettison removes the section and everything in it', () => {
   const deaths = listen(sim, 'crew.died');
   putCrew(sim, 'inside', 'shields', { suit: true });
   putCrew(sim, 'outside', 'fore_corridor');
-  give(sim, { type: 'power.add', system: 'sensors', delta: -1 });
-  give(sim, { type: 'power.add', system: 'shields', delta: 1 }, { type: 'debug.room', room: 'shields', set: { fire: 0.8, breach: 0.5 } });
+  give(sim, { type: 'station.stand', station: 'shields', down: false }, { type: 'debug.room', room: 'shields', set: { fire: 0.8, breach: 0.5 } });
   give(sim, { type: 'room.jettison', room: 'shields' });
 
   const r = sim.state.rooms.shields;
   assert.equal(r.jettisoned, true);
   assert.deepEqual([r.oxygen, r.fire, r.breach, r.lightsOn, r.hull], [0, 0, 0, false, 0]);
-  assert.deepEqual(sim.state.systems.shields, { level: 2, damage: 2, power: 0, lost: true });
-  assert.equal(free(sim), 1, 'its power comes back to the pool');
+  assert.deepEqual(sim.state.systems.shields, { level: 2, damage: 2, lost: true });
+  assert.equal(running(sim, 'shields'), false, 'its station is dark for good');
   assert.equal(litRooms(sim), 16);
   assert.equal(sim.state.crew.inside.alive, false, 'a suit does not help');
   assert.equal(sim.state.crew.outside.alive, true);
@@ -214,7 +214,7 @@ test('jettison removes the section and everything in it', () => {
     assert.match(sim.whyNot(command), /gone/, command.type);
   }
   assert.match(sim.whyNot({ type: 'debug.system', system: 'shields', damage: 0 }), /went with its room/);
-  assert.match(sim.whyNot({ type: 'power.add', system: 'shields', delta: 1 }), /damaged/);
+  assert.match(sim.whyNot({ type: 'station.stand', station: 'shields', down: true }), /went with its room/);
 
   // And the ship carries on without it: no air in, no fire across.
   give(sim, { type: 'debug.room', room: 'fore_corridor', set: { fire: 1 } });
@@ -241,13 +241,15 @@ test('the layout checker rejects a bad jettison flag', () => {
   assert.match(validateLayout(ship).join('\n'), /"jettison" must be true or false/);
 });
 
-test('a system broken by fire loses its power in the same tick', () => {
+test('a system broken by fire goes dark in the same tick', () => {
   const sim = newSim();
   give(sim, { type: 'debug.room', room: 'reactor', set: { fire: 1 } }, { type: 'debug.room', room: 'ai_core', set: { fire: 1 } });
   for (let i = 0; i < 120 * TICK_RATE; i++) {
     sim.step();
     assert.deepEqual(checkInvariants(sim), [], `tick ${sim.state.tick}`);
   }
-  assert.equal(sim.state.systems.ai_core.power, 0);
-  assert.ok(sim.state.systems.reactor.damage >= 3, 'the reactor fire cut the supply');
+  assert.equal(running(sim, 'ai_core'), false);
+  assert.ok(sim.state.systems.reactor.damage >= 1, 'the reactor fire cut the supply');
+  // With Margo's core burnt out and nobody aboard, nothing runs the air plant: the fires starve sooner than they used to.
+  assert.equal(running(sim, 'life_support'), false);
 });

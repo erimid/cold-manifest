@@ -385,7 +385,7 @@ test('deck lights, the vent and hiding say no when they should', () => {
   assert.match(sim.whyNot({ type: 'deck.lights', deck: 'hold', on: false }), /already dark/);
   assert.match(sim.whyNot({ type: 'deck.lights', deck: 'bilge', on: false }), /no deck/);
   assert.match(sim.whyNot({ type: 'room.vent', room: 'lift', open: true }), /no vent/);
-  go(sim, { type: 'power.add', system: 'doors', delta: -1 });
+  go(sim, { type: 'station.stand', station: 'doors', down: true });
   assert.match(sim.whyNot({ type: 'room.vent', room: 'aft_corridor', open: true }), /door control/);
   // The reactor room has no lockers, and the gunner is no engineer.
   walk(sim, 'pruitt', 'reactor');

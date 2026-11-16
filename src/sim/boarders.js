@@ -38,6 +38,7 @@ import { CARRY_SPEED, findRoute, isHome, letGo, newCrewMember, planPath, unhide 
 import { THIN_AIR, findChance, hidingSpot, isDark, oursIn, pickRoom, roomPull, searchSeconds, whyNoHide } from './agents.js';
 import { LIFT_SECONDS } from './hold.js';
 import { bestSkillAboard } from './roles.js';
+import { running } from './stations.js';
 import { SYSTEMS } from './systems.js';
 
 /** What a party can come for. */
@@ -534,7 +535,7 @@ export const BOARDING_COMMANDS = {
       if (sim.state.rooms[cmd.room].jettisoned) return 'that section is gone';
       if (room.kind === 'lift') return 'a lift shaft has no vent';
       if (Boolean(sim.state.rooms[cmd.room].vent) === cmd.open) return cmd.open ? 'the vent is already open' : 'the vent is already shut';
-      if (sim.state.systems.doors.power < 1) return 'the vents are worked from door control, which has no power';
+      if (!running(sim, 'doors')) return 'the vents are worked from door control, which is dark';
       return null;
     },
     apply(sim, cmd) {

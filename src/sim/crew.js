@@ -20,8 +20,10 @@
 
 import { crewEmit, harmCrew } from './atmosphere.js';
 import { refusalOf } from './memory.js';
-import { bestSkillIn, skillFactor, skillOf } from './roles.js';
-import { isPowered } from './power.js';
+import { skillFactor, skillOf } from './roles.js';
+import { liftRuns } from './power.js';
+import { STATIONS, postOfRole, rating, stationOfRoom } from './stations.js';
+import { tiredness } from './watches.js';
 import { SPACE, SYSTEMS } from './systems.js';
 
 /** Tiles per second on foot. A suit is heavy. */
@@ -29,13 +31,13 @@ export const WALK_SPEED = 3;
 export const SUIT_SPEED = 0.7;
 /**
  * Every way between decks is a lift (D-093): the main shaft, and a deck lift
- * under each hatch. With door control powered a lift carries crew at this many
- * times walking speed; without it they crank it by hand, at this share of it.
+ * under each hatch. With the lift motor switched on (power.js, H.4) a lift carries crew at this many
+ * times walking speed; with it off they crank it by hand, at this share of it.
  */
 export const LIFT_SPEED = 2;
 export const CRANK_SPEED = 0.3;
 /** How fast the lifts run just now: powered, or cranked by hand. */
-export const liftSpeed = (sim) => (isPowered(sim, 'doors') ? LIFT_SPEED : CRANK_SPEED);
+export const liftSpeed = (sim) => (liftRuns(sim) ? LIFT_SPEED : CRANK_SPEED);
 /** Seconds an engineer takes to squeeze through a service crawlway (D-072). */
 export const CRAWL_SECONDS = 2.5;
 /** Carrying a crate (hold.js) slows anyone down to this share of their pace, and nobody carries through a crawlway. */
@@ -51,7 +53,7 @@ export const DARK_WORK = 0.5;
 /** Below this light a room counts as dark to walk through, and crew go at DARK_WALK of their pace (S2.5, D-096). */
 export const DARK_LIGHT = 0.2;
 export const DARK_WALK = 0.7;
-/** Health regained per second in a powered medbay. */
+/** Health regained per second in a medbay run by the book; a medic on the station is faster (stations.js). */
 export const MEDBAY_HEAL = 1 / 40;
 /** How open a door must be to walk through. */
 export const WALKABLE = 0.9;
@@ -113,6 +115,11 @@ export function newCrewMember(layout, { id, name, role = null, engineer = false,
     memories: [], // what they remember: { type, tick, room, who, dark } (memory.js)
     dread: 0, // 0 to 1: how the dark is wearing on them (memory.js)
     lampUntil: 0, // the tick until which they will not sit in the dark again
+    post: owner === 'player' ? postOfRole(role) : null, // the station they are posted to (stations.js, H.4), or null for a spare hand
+    watch: 0, // which watch they stand (watches.js)
+    fatigue: 0, // 0 fresh to 1 dead on their feet (watches.js)
+    asleep: false, // below, in their bunk
+    due: null, // where the watch bill wants them once they are free: 'post' | 'bunk'
   };
 }
 
@@ -281,6 +288,22 @@ const living = (sim, id) => {
   return null;
 };
 
+/**
+ * Walk someone to a room without an order from the captain: the watch bill or a posting (watches.js, stations.js).
+ * They will not go where they would refuse to (memory.js) or where there is no way. Returns whether they set off.
+ */
+export function sendTo(sim, member, roomId, why = 'watch') {
+  if (!member.alive || member.room === roomId) return false;
+  if (!findRoute(sim, member.room, roomId, member) || refusalOf(sim, member, roomId)) return false;
+  letGo(sim, member);
+  member.asleep = false;
+  member.goal = roomId;
+  member.path = planPath(sim, member, roomId);
+  member.task = 'walking';
+  crewEmit(sim, member, 'crew.sent', { crew: member.id, room: roomId, why, tick: sim.state.tick });
+  return true;
+}
+
 export const CREW_COMMANDS = {
   // Send someone to a room. They work out the doors themselves.
   'crew.move': {
@@ -303,6 +326,8 @@ export const CREW_COMMANDS = {
         return;
       }
       letGo(sim, member); // a new order: whatever they were carrying is set down here
+      member.asleep = false; // an order wakes a sleeper, and stands until the next change of the watch (watches.js)
+      member.due = null;
       member.goal = cmd.room;
       member.path = planPath(sim, member, cmd.room);
       member.task = 'walking';
@@ -329,11 +354,13 @@ export const CREW_COMMANDS = {
     check(sim, cmd) {
       const problem = living(sim, cmd.crew);
       if (problem) return problem;
-      if (!(cmd.health > 0 && cmd.health <= 1)) return 'health must be above 0 and at most 1';
-      return null;
+      if (cmd.health !== undefined && !(cmd.health > 0 && cmd.health <= 1)) return 'health must be above 0 and at most 1';
+      if (cmd.fatigue !== undefined && !(cmd.fatigue >= 0 && cmd.fatigue <= 1)) return 'fatigue must be between 0 and 1';
+      return cmd.health === undefined && cmd.fatigue === undefined ? 'needs health or fatigue' : null;
     },
     apply(sim, cmd) {
-      sim.state.crew[cmd.crew].health = cmd.health;
+      if (cmd.health !== undefined) sim.state.crew[cmd.crew].health = cmd.health;
+      if (cmd.fatigue !== undefined) sim.state.crew[cmd.crew].fatigue = cmd.fatigue;
     },
   },
 };
@@ -497,17 +524,17 @@ function work(sim, member, seconds) {
   const r = sim.state.rooms[member.room];
 
   if (!job) {
-    // Nothing to fix: a powered medbay patches up its own crew instead.
-    if (isHome(sim, member) && sim.layout.room(member.room).system === 'medbay' && sim.state.systems.medbay.power > 0 && member.health < 1) {
-      // A medic in the room heals everyone in it faster, themselves included (D-131).
-      const medic = skillFactor(bestSkillIn(sim, member.room, 'medicine'));
-      member.health = Math.min(1, member.health + MEDBAY_HEAL * sim.state.systems.medbay.power * medic * seconds);
+    // Nothing to fix: a running medbay patches up its own crew instead, at its station's rating:
+    // a medic on the station heals everyone in it faster, themselves included (D-131, H.4).
+    if (isHome(sim, member) && sim.layout.room(member.room).system === 'medbay' && member.health < 1) {
+      const pace = rating(sim, 'medbay');
+      if (pace > 0) member.health = Math.min(1, member.health + MEDBAY_HEAL * (sim.state.systems.medbay.level - sim.state.systems.medbay.damage) * pace * seconds);
     }
     return;
   }
 
-  // Hurt people work slower, and so does anyone in a suit or in the dark.
-  let rate = (0.5 + 0.5 * member.health) * (member.suit ? SUIT_WORK : 1) * seconds;
+  // Hurt people work slower, and so does anyone in a suit, in the dark or dead on their feet (watches.js).
+  let rate = (0.5 + 0.5 * member.health) * (member.suit ? SUIT_WORK : 1) * tiredness(member) * seconds;
   if (job.type !== 'extinguish' && r.light < 0.5) rate *= DARK_WORK;
   // Engineers mend, patch and free doors faster (D-131). Anyone can put out a fire.
   if (job.type === 'repair' || job.type === 'patch' || job.type === 'unjam') rate *= skillFactor(skillOf(member, 'engineering'));
@@ -587,7 +614,7 @@ export function describeTask(sim, member) {
     case 'crawling':
       return 'In a service crawlway';
     case 'walking':
-      if (onLift(member) && !isPowered(sim, 'doors')) return `Cranking the lift by hand, to ${sim.layout.room(member.goal)?.name ?? 'somewhere'}`;
+      if (onLift(member) && !liftRuns(sim)) return `Cranking the lift by hand, to ${sim.layout.room(member.goal)?.name ?? 'somewhere'}`;
       return `Walking to ${sim.layout.room(member.goal)?.name ?? 'somewhere'}`;
     case 'fighting':
       return 'Fighting hand to hand';
@@ -612,7 +639,9 @@ export function describeTask(sim, member) {
     case 'searching':
       return 'Searching the room';
     default:
-      return isHome(sim, member) && room.system === 'medbay' && member.health < 1 && sim.state.systems.medbay.power > 0 ? 'Being patched up' : 'Standing by';
+      if (member.asleep) return 'Asleep';
+      if (isHome(sim, member) && room.system === 'medbay' && member.health < 1 && rating(sim, 'medbay') > 0) return 'Being patched up';
+      return member.post && stationOfRoom(sim, member.room) === member.post ? `On station: ${STATIONS[member.post].name.toLowerCase()}` : 'Standing by';
   }
 }
 

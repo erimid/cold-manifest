@@ -796,7 +796,8 @@ body {
 }
 
 .power__folded[hidden],
-.power__tiles[hidden] {
+.power__tiles[hidden],
+.power__board[hidden] {
   display: none;
 }
 
@@ -854,6 +855,154 @@ body {
   border: 1px solid #343b45;
   border-radius: 3px;
   box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.6);
+}
+
+/* ---------- switch panel and watch bill (H.4, D-185) ---------- */
+
+/* Open, the panel is two rows of big switches over a row of stations. */
+.power__board {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.power__switches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+}
+
+.power__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+}
+
+.power__rowname {
+  min-width: 58px;
+  font-size: 0.72em;
+  color: #8b93a1;
+}
+
+.power__row .btn {
+  min-height: var(--tap);
+  min-width: var(--tap);
+  padding: 0 10px;
+  font-size: 0.8em;
+}
+
+.power__row .btn.is-blocked {
+  opacity: 0.55;
+}
+
+/* The reactor's load: what a scope reads as our heat. */
+.power__load {
+  width: 100%;
+  min-width: 70px;
+  height: 8px;
+  border: 1.5px solid var(--amber-dim);
+  border-radius: 2px;
+  box-sizing: border-box;
+}
+
+.power__loadfill {
+  display: block;
+  height: 100%;
+  background: var(--amber);
+}
+
+.power__watch {
+  color: #8b93a1;
+  white-space: nowrap;
+}
+
+.power__stations {
+  display: flex;
+  gap: 5px;
+}
+
+/* A station: its name, who has it and how well, and its switch. */
+.station {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 3px 3px 4px;
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px solid #343b45;
+  border-radius: 3px;
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.6);
+  font-size: 0.78em;
+}
+
+.station__name {
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--amber);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.station__line {
+  display: flex;
+  justify-content: space-between;
+  gap: 4px;
+  color: #aab2bf;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+/* Someone of ours on a station reads differently from Margo: brighter, and marked. */
+.station.is-crew .station__who {
+  color: var(--paper);
+  font-weight: 700;
+}
+
+.station.is-crew .station__who::before {
+  content: '\25B8 ';
+}
+
+.station.is-dead .station__name,
+.station.is-dead .station__line {
+  color: #6a7180;
+}
+
+.station.is-damaged .station__name {
+  color: var(--alarm);
+}
+
+.btn.station__stand {
+  min-height: var(--tap);
+  min-width: var(--tap);
+  padding: 0;
+  text-align: center;
+  font-size: 0.95em;
+}
+
+.status__posts {
+  align-items: center;
+  gap: 5px;
+  margin-top: 0;
+}
+
+.status__posts .btn {
+  min-height: var(--tap);
+  padding: 0 8px;
+}
+
+.crewchip.is-asleep {
+  opacity: 0.6;
+}
+
+.crewchip.is-tired .crewchip__task::after {
+  content: ' \00B7 tired';
+  color: var(--sodium);
 }
 
 /* ---------- intercom (S2.9, D-094) ---------- */
@@ -1683,4 +1832,22 @@ body {
 }
 .event__result .menu {
   margin-top: 1rem;
+}
+
+.status__posts[hidden] {
+  display: none;
+}
+
+/* The strip stays on one line: the load bar gives way before the words or the Switches button do. */
+.power__summary {
+  white-space: nowrap;
+  font-size: 0.85em;
+}
+
+.power__watch {
+  font-size: 0.85em;
+}
+
+.btn.power__toggle {
+  flex-shrink: 0;
 }

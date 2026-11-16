@@ -12,6 +12,7 @@
 
 import { contrabandAboard, contractCrates, contractOf } from '../sim/contracts.js';
 import { usable } from '../sim/power.js';
+import { STATIONS, rating } from '../sim/stations.js';
 import { DARK_ROOM, lightIn, roomView } from '../sim/senses.js';
 
 const room = (sim, id) => {
@@ -59,7 +60,10 @@ export const FACTS = Object.freeze({
   trust: { value: 'number', get: (sim) => sim.state.ai.trust },
   cargo: { args: { name: 'string' }, optional: ['name'], value: 'number', get: (sim, a) => sim.state.cargo.filter((item) => a.name === undefined || item.name === a.name).reduce((sum, item) => sum + item.qty, 0) },
   crates: { args: { kind: 'string' }, optional: ['kind'], value: 'number', get: (sim, a) => Object.values(sim.state.crates).filter((crate) => a.kind === undefined || crate.kind === a.kind).length },
-  'system.power': { args: { system: 'system' }, value: 'number', get: (sim, a) => sim.state.systems[a.system]?.power },
+  /** Is a system doing its job: stood to, not wrecked, and with someone (or Margo) on its station? */
+  'system.running': { args: { system: 'system' }, value: 'boolean', get: (sim, a) => (sim.state.systems[a.system] ? (STATIONS[a.system] ? rating(sim, a.system) > 0 : !sim.state.systems[a.system].lost) : undefined) },
+  /** How well a station is being run: 0 dark, 1 by the book (Margo), more with a skilled hand on it. */
+  'station.rating': { args: { station: 'station' }, value: 'number', get: (sim, a) => (STATIONS[a.station] ? rating(sim, a.station) : undefined) },
   'system.damage': { args: { system: 'system' }, value: 'number', get: (sim, a) => sim.state.systems[a.system]?.damage },
   'system.usable': { args: { system: 'system' }, value: 'number', get: (sim, a) => (sim.state.systems[a.system] ? usable(sim, a.system) : undefined) },
 

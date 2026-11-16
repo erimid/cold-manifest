@@ -156,14 +156,14 @@ test('no line repeats until every line that fits has been heard', () => {
   assert.equal(new Set(idle.slice(0, pool)).size, pool, 'the first pass through the idle lines has no repeats');
 });
 
-test('with no power to her core she is silent, and speaks again when it returns', () => {
+test('with her core stood down she is silent, and speaks again when it is stood to', () => {
   const sim = newTalkingSim();
   seconds(sim, 8);
-  give(sim, { type: 'power.add', system: 'ai_core', delta: -1 });
+  give(sim, { type: 'station.stand', station: 'ai_core', down: true });
   give(sim, { type: 'debug.room', room: 'cargo', set: { fire: 0.5 } });
   seconds(sim, 200);
   assert.deepEqual(said(sim), ['greeting']);
-  give(sim, { type: 'power.add', system: 'ai_core', delta: 1 }, { type: 'debug.room', room: 'cargo', set: { fire: 0 } }, { type: 'debug.room', room: 'brig', set: { breach: 0.3 } });
+  give(sim, { type: 'station.stand', station: 'ai_core', down: false }, { type: 'debug.room', room: 'cargo', set: { fire: 0 } }, { type: 'debug.room', room: 'brig', set: { breach: 0.3 } });
   seconds(sim, 5);
   assert.equal(said(sim).at(-1), 'hazard');
 });

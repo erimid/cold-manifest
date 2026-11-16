@@ -5,7 +5,8 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { validateContent } from '../src/engine/content-schema.js';
 import { MEDBAY_HEAL, MELEE_SECONDS, REPAIR_RATE, newCrewMember, spotIn } from '../src/sim/crew.js';
-import { ROLES, ROLE_IDS, SKILL_STEP, bestSkillIn, roleOf, skillFactor, skillWords } from '../src/sim/roles.js';
+import { ROLES, ROLE_IDS, SKILL_STEP, roleOf, skillFactor, skillWords } from '../src/sim/roles.js';
+import { MARGO_RATING, crewRating, operatorOf } from '../src/sim/stations.js';
 import { TICK_RATE } from '../src/sim/sim.js';
 import { CREW, newCrewedSim } from './helpers.js';
 
@@ -75,16 +76,16 @@ test('security hits harder hand to hand', () => {
   assert.ok(ilse <= 2 / MELEE_SECONDS + 1e-9);
 });
 
-test('a medic in a powered medbay heals everyone in it faster', () => {
+test('a medic on the medbay station heals everyone in it faster than Margo does', () => {
+  const sim0 = newCrewedSim('medbay');
   const heal = (withMedic) => {
     const sim = newCrewedSim('medbay');
-    go(sim, { type: 'power.add', system: 'sensors', delta: -1 });
-    go(sim, { type: 'power.add', system: 'medbay', delta: 1 });
+    go(sim, { type: 'station.stand', station: 'medbay', down: false });
     const patient = place(sim, 'dace', 'medbay');
     patient.health = 0.5;
     if (withMedic) {
       place(sim, 'okoro', 'medbay');
-      assert.equal(bestSkillIn(sim, 'medbay', 'medicine'), 3);
+      assert.equal(operatorOf(sim, 'medbay')?.id, 'okoro');
     }
     seconds(sim, 4);
     return patient.health - 0.5;
@@ -92,16 +93,13 @@ test('a medic in a powered medbay heals everyone in it faster', () => {
   const alone = heal(false);
   const tended = heal(true);
   assert.ok(alone > 0 && alone <= 4 * MEDBAY_HEAL * 2 + 1e-9);
-  assert.ok(Math.abs(tended / alone - skillFactor(3)) < 0.02, `${tended} against ${alone}`);
+  assert.ok(Math.abs(tended / alone - crewRating(sim0.state.crew.okoro, 'medicine') / MARGO_RATING) < 0.02, `${tended} against ${alone}`);
 });
 
-test('a gunner in the weapons room charges the guns faster', () => {
+test('a gunner on the guns charges them faster than Margo does', () => {
   const charge = (keepGunner) => {
     const sim = newCrewedSim('guns');
-    go(sim, { type: 'power.add', system: 'sensors', delta: -1 });
-    go(sim, { type: 'power.add', system: 'doors', delta: -1 });
-    go(sim, { type: 'power.add', system: 'weapons', delta: 1 });
-    go(sim, { type: 'power.add', system: 'weapons', delta: 1 });
+    go(sim, { type: 'station.stand', station: 'weapons', down: false });
     if (!keepGunner) place(sim, 'pruitt', 'hold');
     seconds(sim, 3);
     return sim.state.weapons[1].charge; // the slug thrower: point defence fills in a moment either way

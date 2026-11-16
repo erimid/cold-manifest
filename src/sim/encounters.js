@@ -44,7 +44,8 @@ import { validateParty, startBoarding } from './boarders.js';
 import { DRONE_WEAPON, GUN, fireOn, hasPilot } from './combat.js';
 import { changeReputation } from './contracts.js';
 import { isHome } from './crew.js';
-import { flare as flash, sensorGain, signature } from './senses.js';
+import { driveShare, flare as flash, sensorGain, signature } from './senses.js';
+import { rating, running } from './stations.js';
 
 /** The states a contact can be in, in the order an encounter usually runs. */
 export const STATES = Object.freeze(['unseen', 'shadowing', 'closing', 'alongside', 'docked', 'lost']);
@@ -76,7 +77,7 @@ export const DECOY_KINDS = Object.freeze(['flare', 'crate']);
 /** One scope unit, for the readouts. */
 export const KM_PER_UNIT = 10;
 
-/** The helm: degrees a second she turns, speed and acceleration at full engine power, and flares carried. */
+/** The helm: degrees a second she turns with the helm run by the book, speed and acceleration at the drive's full push, and flares carried. */
 export const HELM = Object.freeze({ turn: 15, accel: 0.06, speed: 1, flares: 2 });
 
 /**
@@ -86,7 +87,7 @@ export const HELM = Object.freeze({ turn: 15, accel: 0.06, speed: 1, flares: 2 }
  * up to `bearingError` degrees and the range by up to `rangeError` of itself at quality 0, down to the
  * floors at quality 1. Someone in the sensors room reads it `station` times better.
  */
-export const SCOPE = Object.freeze({ range: 120, reach: 150, clear: 0.45, show: 0.1, fade: 0.04, intent: 0.35, identify: 0.55, gain: 0.25, loss: 0.1, bearingError: 35, rangeError: 0.45, floorBearing: 1.5, floorRange: 0.02, station: 1.25, jitterSeconds: 3, wander: 0.6, ghostSeconds: 30 });
+export const SCOPE = Object.freeze({ range: 120, reach: 150, clear: 0.45, show: 0.1, fade: 0.04, intent: 0.35, identify: 0.55, gain: 0.25, loss: 0.1, bearingError: 35, rangeError: 0.45, floorBearing: 1.5, floorRange: 0.02, jitterSeconds: 3, wander: 0.6, ghostSeconds: 30 });
 
 /**
  * A contact's awareness of us, 0 to 1: it settles toward how far our signature, through its sensors and
@@ -252,13 +253,8 @@ export function newScopeState() {
 }
 
 const defOf = (sim, contact) => sim.encounters.byId.get(contact.encounter);
-/** Is the drive pushing right now? Lit, with power in the engines. */
-export const burning = (sim) => sim.state.helm.burn && sim.state.systems.engines.power > 0;
-/** The share of the drive's full push the engines' power allows, 0 to 1. */
-const driveShare = (sim) => {
-  const { engines } = sim.state.systems;
-  return engines.absent || engines.level <= 0 ? 0 : engines.power / engines.level;
-};
+/** Is the drive pushing right now? Lit, with the engines running. */
+export const burning = (sim) => sim.state.helm.burn && driveShare(sim) > 0;
 /** Our speed, scope units a second. */
 export const speedOf = (sim) => Math.hypot(sim.state.helm.vx, sim.state.helm.vy);
 /** The contacts still in play: not docked, not gone. */
@@ -368,12 +364,8 @@ function remove(sim, contact) {
 /** The error on a return of quality `q`: degrees either side of the bearing, and the share of the range either way. */
 export const errorOf = (q) => ({ bearing: SCOPE.floorBearing + SCOPE.bearingError * (1 - q), range: SCOPE.floorRange + SCOPE.rangeError * (1 - q) });
 
-/** How well our sensors read things outside the ship: the sensors' gain, better with someone in the sensors room. */
-export function scopeGain(sim) {
-  const room = sim.layout.roomOfSystem?.('sensors');
-  const manned = room && Object.values(sim.state.crew).some((member) => member.alive && member.room === room.id && isHome(sim, member));
-  return sensorGain(sim) * (manned ? SCOPE.station : 1);
-}
+/** How well our sensors read things outside the ship: the sensors' gain, which is their station's rating at work (senses.js). */
+export const scopeGain = (sim) => sensorGain(sim);
 
 /** The quality a return on this contact would settle to as things stand, 0 to 1. */
 export function returnQuality(sim, contact) {
@@ -933,10 +925,11 @@ export function pdShot(sim, target, cause = 'pd') {
 function stepHelm(sim, dt) {
   const { helm } = sim.state;
   const share = driveShare(sim);
-  // She only comes round with the engines up and someone at the helm.
+  // She only comes round with the engines up and the helm held, and as briskly as the helm is rated:
+  // a pilot brings her round faster than Margo, and Margo faster than an untrained hand (H.4).
   if (helm.heading !== helm.wanted && share > 0 && hasPilot(sim)) {
     const turn = turnBetween(helm.heading, helm.wanted);
-    const step = HELM.turn * dt;
+    const step = HELM.turn * rating(sim, 'helm') * dt;
     helm.heading = Math.abs(turn) <= step ? helm.wanted : norm360(helm.heading + Math.sign(turn) * step);
   }
   if (helm.burn && share > 0) {
@@ -1068,8 +1061,8 @@ export const ENCOUNTER_COMMANDS = {
   'helm.heading': {
     check(sim, cmd) {
       if (!(typeof cmd.heading === 'number' && Number.isFinite(cmd.heading))) return 'needs a heading in degrees';
-      if (sim.state.systems.engines.power < 1) return 'the engines have no power to bring her round';
-      if (!hasPilot(sim)) return 'nobody is at the helm';
+      if (!running(sim, 'engines')) return 'the engines are stood down and cannot bring her round';
+      if (!hasPilot(sim)) return 'nobody has the helm';
       return null;
     },
     apply(sim, cmd) {
@@ -1083,8 +1076,8 @@ export const ENCOUNTER_COMMANDS = {
       if (typeof cmd.on !== 'boolean') return 'needs on: true or false';
       if (cmd.on === sim.state.helm.burn) return cmd.on ? 'the drive is already burning' : 'the drive is already cold';
       if (!cmd.on) return null;
-      if (sim.state.systems.engines.power < 1) return 'the engines have no power';
-      if (!hasPilot(sim)) return 'nobody is at the helm';
+      if (!running(sim, 'engines')) return 'the engines are stood down';
+      if (!hasPilot(sim)) return 'nobody has the helm';
       return null;
     },
     apply(sim, cmd) {

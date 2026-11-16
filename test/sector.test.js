@@ -77,7 +77,7 @@ test('a course goes one lane at a time, and the fuel has to cover it', () => {
   assert.match(sim.whyNot({ type: 'course.plot', to: next }), /fuel/);
 });
 
-test('a jump needs the sensor fix, someone at the helm and the engines, then spends fuel and a jump', () => {
+test('a jump needs the sensor fix, the helm held and the engines, then spends fuel and a jump', () => {
   const sim = runSim();
   const { run } = sim.state;
   const from = run.at;
@@ -96,17 +96,19 @@ test('a jump needs the sensor fix, someone at the helm and the engines, then spe
   assert.equal(sim.state.fix, 0, 'the fix was for where we were');
   assert.deepEqual(checkInvariants(sim), []);
 
-  // No power to the drive, no jump.
+  // The engines stood down, no jump.
   sim.enqueue({ type: 'course.plot', to: neighbours(run.map, run.at)[0] });
   for (let i = 0; i < 4000 && sim.state.fix < 1; i++) sim.step();
-  sim.state.systems.engines.power = 0;
+  sim.state.stations.engines.down = true;
   assert.match(whyNoCourseJump(sim), /engines/);
 });
 
-test('with nobody at the helm the fix never comes', () => {
+test('with nobody holding the helm the fix never comes', () => {
   const sim = runSim();
   const { run } = sim.state;
+  // The pilot below and Margo stood down: nobody has the helm.
   for (const member of Object.values(sim.state.crew)) if (member.room === 'bridge') sim.enqueue({ type: 'crew.move', crew: member.id, room: 'quarters' });
+  sim.enqueue({ type: 'station.stand', station: 'ai_core', down: true });
   sim.enqueue({ type: 'course.plot', to: neighbours(run.map, run.at)[0] });
   for (let i = 0; i < 2000; i++) sim.step();
   assert.ok(sim.state.fix < 1, `fix at ${sim.state.fix}`);

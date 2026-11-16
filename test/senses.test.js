@@ -4,7 +4,7 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { NOISE, hiddenRooms, roomView, sense, sensorGain, signature, watched } from '../src/sim/senses.js';
+import { NOISE, THRUST, hiddenRooms, roomView, sense, sensorGain, signature, watched } from '../src/sim/senses.js';
 import { TICK_RATE, checkInvariants } from '../src/sim/sim.js';
 import { newCrewedSim, newSim, newTalkingSim } from './helpers.js';
 
@@ -23,8 +23,8 @@ function collect(sim, type) {
 /** Every lamp off, and the systems that give us away: what a player does to run dark. */
 function goDark(sim, { sensors = true } = {}) {
   if (!sim.whyNot({ type: 'lights.all', on: false })) go(sim, { type: 'lights.all', on: false });
-  for (const system of ['engines', 'doors', ...(sensors ? [] : ['sensors'])]) {
-    while (sim.state.systems[system].power > 0) go(sim, { type: 'power.add', system, delta: -1 });
+  for (const station of ['engines', 'doors', ...(sensors ? [] : ['sensors'])]) {
+    if (!sim.state.stations[station].down) go(sim, { type: 'station.stand', station, down: true });
   }
 }
 function emptyRooms(sim) {
@@ -56,7 +56,7 @@ test('a room gives off light, noise, heat and movement, and the creature will re
   seconds(sim, 1);
   const drive = sense(sim, 'engines');
   assert.ok(drive.noise > 0.2 && drive.heat > 0.3, JSON.stringify(drive));
-  go(sim, { type: 'power.add', system: 'engines', delta: -1 });
+  go(sim, { type: 'station.stand', station: 'engines', down: true });
   seconds(sim, 3);
   assert.equal(sense(sim, 'engines').noise, 0, 'a cold drive is silent');
 
@@ -87,12 +87,12 @@ test('a bang rings and fades: a hit is loud where it lands, a gun where it is fi
 test('the signature adds the ship up: lamps, noise, reactor load and drive burn', () => {
   const sim = newCrewedSim('signature');
   seconds(sim, 2);
-  assert.equal(signature(sim).burn, 0, 'powered engines give off no burn until the helm lights the drive (H.1)');
+  assert.equal(signature(sim).burn, 0, 'running engines give off no burn until the helm lights the drive (H.1)');
   sim.state.helm.burn = true;
   const lit = signature(sim);
   assert.equal(lit.light, 1);
-  assert.equal(lit.heat, 1, 'the reactor starts fully loaded');
-  assert.equal(lit.burn, 0.5, 'one bar of two on the drive');
+  assert.ok(lit.heat > 0.75 && lit.heat < 1, `the reactor starts well loaded, with the guns, shields and medbay still to come: ${lit.heat}`);
+  assert.equal(lit.burn, THRUST, 'Margo runs the drive by the book');
   assert.ok(lit.total > 0.6, `lit and running: ${lit.total}`);
 
   go(sim, { type: 'lights.all', on: false });
@@ -110,7 +110,7 @@ test('the signature adds the ship up: lamps, noise, reactor load and drive burn'
   assert.ok(dark.total > 0, 'a ship with air and an AI is never quite invisible');
 });
 
-test('lights.all turns every lamp off, and back on as far as the power goes', () => {
+test('lights.all turns every lamp off, and back on while the reactor lives', () => {
   const sim = newSim('lamps');
   sim.step();
   assert.match(sim.whyNot({ type: 'lights.all', on: true }), /already on/);
@@ -119,10 +119,13 @@ test('lights.all turns every lamp off, and back on as far as the power goes', ()
   assert.ok(Object.values(sim.state.rooms).every((room) => !room.lightsOn));
   assert.equal(heard[0].rooms, sim.layout.rooms.length);
   assert.match(sim.whyNot({ type: 'lights.all', on: false }), /already dark/);
-  // Spend the power the lamps were using, bar one: only six rooms can come back.
-  for (const system of ['shields', 'shields']) go(sim, { type: 'power.add', system, delta: 1 });
   go(sim, { type: 'lights.all', on: true });
-  assert.equal(Object.values(sim.state.rooms).filter((room) => room.lightsOn).length, sim.layout.power.lightsPerBar);
+  assert.ok(Object.values(sim.state.rooms).every((room) => room.lightsOn), 'lamps are a switch now, not bars');
+  // A dead reactor lights nothing.
+  go(sim, { type: 'debug.system', system: 'reactor', damage: sim.state.systems.reactor.level });
+  sim.step();
+  assert.ok(Object.values(sim.state.rooms).every((room) => !room.lightsOn));
+  assert.match(sim.whyNot({ type: 'lights.all', on: true }), /reactor is dead/);
   assert.deepEqual(checkInvariants(sim), []);
 });
 
@@ -137,7 +140,7 @@ test('a dark, empty room out of sensor cover hides its state: Margo shows what s
   assert.equal(watched(sim, 'cargo'), true, 'dark, but the sensors still see in');
 
   const hidden = collect(sim, 'rooms.hidden');
-  go(sim, { type: 'power.add', system: 'sensors', delta: -1 });
+  go(sim, { type: 'station.stand', station: 'sensors', down: true });
   assert.deepEqual(hiddenRooms(sim), ['cargo'], 'sensors down: only the lit and the manned rooms are seen');
   assert.deepEqual(hidden[0].rooms, ['cargo']);
 
@@ -174,7 +177,7 @@ test('someone standing in a dark room is eyes on it; a fire in the dark is found
   const sim = newCrewedSim('eyes');
   emptyRooms(sim); // the hold, where Vesna starts
   seconds(sim, 1);
-  go(sim, { type: 'power.add', system: 'sensors', delta: -1 });
+  go(sim, { type: 'station.stand', station: 'sensors', down: true });
   go(sim, { type: 'lights.all', on: false });
   seconds(sim, 1);
   assert.equal(roomView(sim, 'bridge').live, true, 'Ilse is on the bridge');

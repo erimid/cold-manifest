@@ -42,8 +42,9 @@
 //              On the crossings the bot pays at the lock when it can and opens it when not
 //
 // Chaos: the bot sends three crew around the ship to deal with whatever is
-// worst, suits them up for breaches, works doors, airlocks and lights, routes
-// power, starts fires and breaches, breaks systems and jams doors through the
+// worst, suits them up for breaches, works doors, airlocks and lights, stands
+// stations down and to, posts crew, changes the watch bill and the reactor's
+// output (H.4), starts fires and breaches, breaks systems and jams doors through the
 // debug commands, puts contacts on the scope and lays the gun on them, now and
 // then jettisons a room, and pauses at random. Its strategy and the
 // report grow stage by stage (PLAN.md §4).
@@ -53,7 +54,8 @@ import { createContent } from '../src/engine/content.js';
 import { eventView } from '../src/narrative/events.js';
 import { findBadNumbers, hashState } from '../src/engine/hash.js';
 import { createRng } from '../src/engine/rng.js';
-import { POWERED, used, supply } from '../src/sim/power.js';
+import { OUTPUT_LEVELS } from '../src/sim/power.js';
+import { POSTS, STATION_IDS, rating, running } from '../src/sim/stations.js';
 import { gunSlot, ourCrew } from '../src/sim/combat.js';
 import { roundsInHold } from '../src/sim/hold.js';
 import { MANUAL_DOOR_SECONDS, TICK_RATE, TICK_SECONDS, checkInvariants, createSim } from '../src/sim/sim.js';
@@ -102,7 +104,7 @@ const MAX_DOOR_TICKS = Math.ceil(MANUAL_DOOR_SECONDS * TICK_RATE) + 3;
 
 /** Play one run to the end. Returns its stats, or throws on any failure. */
 function playRun(seed) {
-  const sim = createSim({ seed, ship, crew: roster, lines, weapons, rules: ruleSet, encounters: encounterDefs });
+  const sim = createSim({ seed, ship, crew: roster, watches: 2, lines, weapons, rules: ruleSet, encounters: encounterDefs });
   const clock = createClock({ sim, tickSeconds: TICK_SECONDS });
   // The bot's own dice, kept apart from the sim's so its choices are not part of the game state.
   const bot = createRng(`bot:${seed}`);
@@ -121,7 +123,8 @@ function playRun(seed) {
     movingSince.delete(door);
   });
   sim.events.on('command.dropped', () => (stats.dropped += 1));
-  sim.events.on('power.changed', ({ reason }) => reason === 'order' && (stats.powerMoves += 1));
+  sim.events.on('station.stood', () => (stats.powerMoves += 1));
+  sim.events.on('power.output', ({ reason }) => reason === 'order' && (stats.powerMoves += 1));
   sim.events.on('power.brownout', () => (stats.brownouts += 1));
   sim.events.on('fire.started', ({ cause }) => (cause === 'spread' ? (stats.spreads += 1) : (stats.fires += 1)));
   sim.events.on('fire.out', () => (stats.firesOut += 1));
@@ -214,7 +217,7 @@ function playRun(seed) {
     if (roll < 0.7) return order({ type: 'contact.pay', contact: contact.id });
     if (roll < 0.8) return order({ type: 'contact.hail', contact: contact.id, bluff: bot.pick(Object.keys(BLUFFS)) });
     if (roll < 0.88) return order({ type: 'debug.gun', ...bot.pick([{ load: true }, { charge: true }, { money: true }]) });
-    if (roll < 0.94) return order({ type: 'power.add', system: bot.pick(['weapons', 'shields', 'engines']), delta: 1 });
+    if (roll < 0.94) return order({ type: 'station.stand', station: bot.pick(['weapons', 'shields', 'engines']), down: false });
     // A shot out of nowhere, through the debug panel.
     return order({ type: 'debug.hit', at: 'us', room: null, weapon: bot.pick(weapons).id, force: bot.chance(0.5) });
   }
@@ -225,11 +228,21 @@ function playRun(seed) {
     const roll = bot.next();
     if (roll < 0.25) {
       // Like a player, it wants the doors working: half the time it tries to get door control back first.
-      if (sim.state.systems.doors.power === 0 && bot.chance(0.5)) {
+      if (!running(sim, 'doors') && bot.chance(0.5)) {
         order({ type: 'debug.system', system: 'doors', damage: 0 });
-        if (!sim.whyNot({ type: 'power.add', system: 'doors', delta: 1 })) order({ type: 'power.add', system: 'doors', delta: 1 });
-        else order({ type: 'power.add', system: bot.pick(POWERED.filter((id) => id !== 'doors')), delta: -1 });
-      } else order({ type: 'power.add', system: bot.pick(POWERED), delta: bot.chance(0.55) ? 1 : -1 });
+        order({ type: 'station.stand', station: 'doors', down: false });
+        order({ type: 'station.stand', station: 'ai_core', down: false });
+      } else {
+        // The switches and the watch bill (H.4): stand a station down or to, post someone, turn the reactor up or down.
+        const pick = bot.next();
+        if (pick < 0.5) order({ type: 'station.stand', station: bot.pick(STATION_IDS), down: bot.chance(0.45) });
+        else if (pick < 0.7) order({ type: 'crew.post', crew: bot.pick(ourCrew(sim)).member.id, station: bot.chance(0.15) ? null : bot.pick(POSTS) });
+        else if (pick < 0.8) order({ type: 'power.output', level: bot.pick(OUTPUT_LEVELS) });
+        else if (pick < 0.86) order({ type: 'power.lift', on: bot.chance(0.6) });
+        else if (pick < 0.9) order({ type: 'roster.watches', count: bot.pick([1, 2, 3]) });
+        else if (pick < 0.95) order({ type: 'crew.watch', crew: bot.pick(ourCrew(sim)).member.id, watch: bot.between(0, 2) });
+        else order({ type: 'roster.muster' });
+      }
     } else if (roll < 0.32) {
       const system = bot.pick(Object.keys(sim.state.systems));
       order({ type: 'debug.system', system, damage: bot.chance(0.5) ? 0 : bot.between(0, sim.state.systems[system].level) });
@@ -281,8 +294,7 @@ function playRun(seed) {
 
     const problems = checkInvariants(sim);
     if (problems.length) throw new Error(`tick ${sim.state.tick}: ${problems.join('; ')}`);
-    if (used(sim) > supply(sim)) throw new Error(`tick ${sim.state.tick}: ${used(sim)} bars in use of ${supply(sim)}`);
-    if (sim.state.systems.doors.power === 0) stats.darkTicks += 1;
+    if (!running(sim, 'doors')) stats.darkTicks += 1;
     for (const room of Object.values(sim.state.rooms)) if (!room.jettisoned && room.oxygen < 0.15) stats.airlessTicks += 1;
     watch();
     for (const [door, since] of movingSince) {
@@ -361,18 +373,15 @@ function carefulAnswers(sim, order) {
 const SCENARIO_MINUTES = 5;
 /** Under fire: how long the shooting goes on before the bot gets the rest of the five minutes to clean up. */
 const INCOMING_SECONDS = 120;
-/** Which systems the scenario bot gives power back to first, after a repair or a brownout. */
-const RESTORE_ORDER = ['life_support', 'ai_core', 'doors', 'engines', 'sensors', 'shields', 'medbay'];
 
 /**
  * One seeded emergency: a few seconds in, one to three fires and up to two
  * breaches open at once. The bot plays to win: it sends free hands to the
  * worst room, suits them for breaches, pulls back anyone badly hurt, and
- * leaves the doors alone. Each second it gives power back to whatever was
- * running at the start, air first. Returns how it went, or throws on any failure.
+ * leaves the doors alone. A mended system runs again by itself (H.4). Returns how it went, or throws on any failure.
  */
 function playScenario(seed, { incoming = false } = {}) {
-  const sim = createSim({ seed, ship, crew: roster, lines, weapons, rules: ruleSet });
+  const sim = createSim({ seed, ship, crew: roster, watches: 2, lines, weapons, rules: ruleSet });
   const bot = createRng(`${incoming ? 'incoming' : 'scenario'}:${seed}`);
   const watch = stuckWatch(sim);
   const rooms = bot.shuffle(sim.layout.rooms.map((room) => room.id));
@@ -394,7 +403,6 @@ function playScenario(seed, { incoming = false } = {}) {
     hits.hurt += event.crew.length;
   });
   const lastShot = INCOMING_SECONDS * TICK_RATE;
-  const startPower = Object.fromEntries(Object.entries(sim.state.systems).map(([id, system]) => [id, system.power]));
 
   const order = (command) => !sim.whyNot(command) && sim.enqueue(command);
   const mind = carefulAnswers(sim, order);
@@ -417,10 +425,6 @@ function playScenario(seed, { incoming = false } = {}) {
     }
     // Once a second, the bot looks the ship over.
     if (sim.state.tick > 3 * TICK_RATE && sim.state.tick % TICK_RATE === 0) {
-      // Power comes back to a repaired system only when someone routes it (D-030): air first.
-      for (const id of RESTORE_ORDER) {
-        if (sim.state.systems[id].power < startPower[id]) order({ type: 'power.add', system: id, delta: 1 });
-      }
       const spots = sim.layout.rooms.filter((room) => trouble(room) > 0).sort((a, b) => trouble(b) - trouble(a));
       const taken = new Map();
       for (const member of Object.values(sim.state.crew)) {
@@ -491,12 +495,13 @@ function playCrossing(seed, index) {
   // The board for this seed, and the contract of the type whose turn it is (S3.4).
   const offers = boardOffers(contractTemplates, { seed });
   const offer = offers[index % offers.length];
-  const sim = createSim({ seed, ship, crew: roster, lines, weapons, rules: ruleSet, events: transitEvents, sector: sectorDef, contract: offer.template, ports, encounters: encounterDefs, run: { pursuit: offer.followed } });
+  const sim = createSim({ seed, ship, crew: roster, watches: 2, lines, weapons, rules: ruleSet, events: transitEvents, sector: sectorDef, contract: offer.template, ports, encounters: encounterDefs, run: { pursuit: offer.followed } });
   const bot = createRng(`crossing:${seed}`);
   const { run } = sim.state;
   const contract = run.contract;
   const end = CROSSING_MINUTES * 60 * TICK_RATE;
-  const tally = { caught: 0, escapes: 0, detours: 0, sighted: 0, lines: 0, outcomes: {}, events: 0, lapsed: 0, eventContacts: 0, shots: 0, braces: 0, tolls: 0, hooks: 0, met: {}, picked: {}, locked: 0, offered: 0, inspections: 0, seized: 0, fuelBought: 0, fuelSpent: 0, repairSpent: 0, claimLeft: false, contacts: {}, contactKinds: {}, boardings: {} };
+  const tally = { caught: 0, escapes: 0, detours: 0, sighted: 0, lines: 0, outcomes: {}, events: 0, lapsed: 0, eventContacts: 0, shots: 0, braces: 0, tolls: 0, hooks: 0, met: {}, picked: {}, locked: 0, offered: 0, inspections: 0, seized: 0, fuelBought: 0, fuelSpent: 0, repairSpent: 0, claimLeft: false, contacts: {}, contactKinds: {}, boardings: {}, staff: { crew: 0, margo: 0, dark: 0, well: 0, samples: 0 }, tired: 0, watchChanges: 0 };
+  sim.events.on('watch.changed', () => (tally.watchChanges += 1));
   sim.events.on('cargo.seized', () => (tally.seized += 1));
   sim.events.on('port.refueled', (event) => {
     tally.fuelBought += event.bought;
@@ -578,13 +583,10 @@ function playCrossing(seed, index) {
       for (const contact of live) if (contact.tolled && !whyNoPay(sim, contact.id)) give({ type: 'contact.pay', contact: contact.id });
       const slot = gunSlot(sim);
       const threat = live.find((contact) => contact.state === 'closing' || contact.state === 'alongside' || contact.tolled);
-      // Something closing: bars for the gun and the brace, from the lamps, then the medbay.
+      // Something closing: lamps out, and the guns and the shields stood to.
       if (threat) {
         give({ type: 'lights.all', on: false });
-        for (const system of ['weapons', 'shields']) {
-          const { power: bars, level, damage } = sim.state.systems[system];
-          if (bars < level - damage && !give({ type: 'power.add', system, delta: 1 }) && sim.state.systems.medbay.power > 0) give({ type: 'power.add', system: 'medbay', delta: -1 });
-        }
+        for (const station of ['weapons', 'shields']) if (sim.state.stations[station].down) give({ type: 'station.stand', station, down: false });
       }
       if (slot >= 0) {
         const want = threat?.id ?? null;
@@ -623,7 +625,7 @@ function playCrossing(seed, index) {
     } else if (!whyNoCourseJump(sim)) give({ type: 'course.jump' });
     else if (sim.state.tick % TICK_RATE === 0) {
       // An event can leave the sensors or the engines down (S3.3): send whoever is not flying to mend
-      // them, and put the power back when they are mended.
+      // them. Mended, they run again by themselves (H.4).
       const helm = sim.layout.rooms.find((room) => room.kind === 'helm')?.id;
       const hands = ourCrew(sim).map(({ member }) => member).filter((member) => member.alive);
       const bound = (room) => hands.some((member) => member.room === room || member.goal === room);
@@ -633,10 +635,11 @@ function playCrossing(seed, index) {
         const free = hands.find((member) => member.room !== helm && member.goal === null && member.task === 'idle');
         if (r.fire > 0 && !r.jettisoned && free && !bound(room)) give({ type: 'crew.move', crew: free.id, room });
       }
-      // The doors come first: the bot strips their power in a fight, and nobody walks anywhere without them.
+      // The doors come first: nobody walks anywhere quickly without them.
       for (const id of ['doors', 'sensors', 'engines']) {
         const system = sim.state.systems[id];
-        if (system.power >= 1) continue;
+        if (sim.state.stations[id].down) give({ type: 'station.stand', station: id, down: false });
+        if (running(sim, id)) continue;
         const room = sim.layout.rooms.find((item) => item.system === id)?.id;
         // Whoever is free, a different one every few seconds in case one refuses; suited if the air in there is thin.
         const free = hands.filter((member) => member.room !== helm && member.goal === null && member.task === 'idle');
@@ -645,18 +648,20 @@ function playCrossing(seed, index) {
           if (sim.state.rooms[room].oxygen < 0.5 && !hand.suit) give({ type: 'crew.suit', crew: hand.id, on: true });
           give({ type: 'crew.move', crew: hand.id, room });
         }
-        // Out of a fight the guns can give a bar back for the drive and the sensors.
-        if (/no spare power/.test(sim.whyNot({ type: 'power.add', system: id, delta: 1 }) ?? '')) {
-          const spare = ['weapons', 'shields', 'medbay'].find((other) => sim.state.systems[other].power > 0);
-          if (spare) give({ type: 'power.add', system: spare, delta: -1 });
-        }
-        give({ type: 'power.add', system: id, delta: 1 });
       }
     }
     sim.step();
     if (sim.state.tick % 20 === 0) {
       const problems = checkInvariants(sim);
       if (problems.length) throw new Error(`invariant broken at tick ${sim.state.tick}: ${problems[0]}`);
+      // Who has each station this second (H.4): one of ours, Margo, or nobody.
+      for (const id of POSTS) {
+        const by = sim.state.stations[id].by;
+        tally.staff[by === null ? 'dark' : by === 'margo' ? 'margo' : 'crew'] += 1;
+        if (rating(sim, id) > 1) tally.staff.well += 1;
+        tally.staff.samples += 1;
+      }
+      tally.tired = Math.max(tally.tired, ...ourCrew(sim).map(({ member }) => (member.alive ? member.fatigue : 0)));
     }
   }
   if (!settled && !lost && !crewDead && sim.state.tick >= end) throw new Error(`still crossing after ${CROSSING_MINUTES} minutes, at ${run.at} with ${run.fuel} fuel (${run.plot ? whyNoCourseJump(sim) : `no course: ${sim.whyNot({ type: "course.plot", to: nextStop() })}`})`);
@@ -704,7 +709,7 @@ const TACTICS = Object.freeze(['nothing', 'quiet', 'run', 'flare', 'crate', 'blu
  *   pay   pay a toll when one is called; otherwise sit tight (a party's price at the lock is the boardings' bribe)
  */
 function playEncounter(seed, def, tactic) {
-  const sim = createSim({ seed, ship, crew: roster, lines, weapons, rules: ruleSet, encounters: encounterDefs });
+  const sim = createSim({ seed, ship, crew: roster, watches: 2, lines, weapons, rules: ruleSet, encounters: encounterDefs });
   const bot = createRng(`encounter:${def.id}:${tactic}:${seed}`);
   const end = ENCOUNTER_MINUTES * 60 * TICK_RATE;
   const give = (command) => !sim.whyNot(command) && sim.enqueue(command);
@@ -732,13 +737,16 @@ function playEncounter(seed, def, tactic) {
     tally.seconds = event.seconds;
   });
   const spawn = { range: bot.range(SPAWN.near, SPAWN.far), bearing: bot.range(0, 360), miss: bot.range(0, SPAWN.miss) };
-  const power = (system, delta) => give({ type: 'power.add', system, delta });
+  const stand = (station, down) => sim.state.stations[station].down !== down && give({ type: 'station.stand', station, down });
   const dark = () => {
     give({ type: 'lights.all', on: false });
-    for (const system of ['sensors', 'engines']) if (sim.state.systems[system].power > 0) power(system, -1);
+    for (const station of ['sensors', 'engines']) stand(station, true);
   };
   const fullBurn = (heading) => {
-    if (sim.state.systems.engines.power < sim.state.systems.engines.level && !power('engines', 1)) power('sensors', -1);
+    // All the drive has: the engineer off the reactor and onto the engines.
+    stand('engines', false);
+    const engineer = ourCrew(sim).map(({ member }) => member).find((member) => member.alive && member.role === 'engineer');
+    if (engineer && engineer.post !== 'engines') give({ type: 'crew.post', crew: engineer.id, station: 'engines' });
     give({ type: 'helm.heading', heading });
     give({ type: 'helm.burn', on: true });
   };
@@ -775,13 +783,9 @@ function playEncounter(seed, def, tactic) {
           }
         }
       } else if (tactic === 'gun') {
-        // Bars for the gun and the brace: the lamps go off for them, and the medbay or the drive gives one if that is not enough.
+        // The lamps go off, and the guns and the shields are stood to.
         give({ type: 'lights.all', on: false });
-        for (const system of ['weapons', 'shields']) {
-          const { power: bars, level, damage } = sim.state.systems[system];
-          if (bars >= level - damage) continue;
-          if (!power(system, 1)) for (const donor of ['medbay', 'engines']) if (sim.state.systems[donor].power > 0 && power(donor, -1)) break;
-        }
+        for (const station of ['weapons', 'shields']) stand(station, false);
         if (view.state === 'closing' || view.state === 'alongside' || sim.state.scope.contacts.find((item) => item.id === view.id)?.tolled) give({ type: 'gun.target', contact: view.id });
         const slot = gunSlot(sim);
         const hand = ourCrew(sim).map(({ member }) => member).find((member) => member.alive && !member.job && member.task === 'idle' && member.room !== 'bridge');
@@ -819,7 +823,7 @@ const ANSWERS = Object.freeze(['nothing', 'bribe', 'yield', 'hide', 'fight', 've
  * still aboard after its demand, its stay and its leaving are all up.
  */
 function playBoarding(seed, def, answer) {
-  const sim = createSim({ seed, ship, crew: roster, lines, weapons, rules: ruleSet, encounters: encounterDefs });
+  const sim = createSim({ seed, ship, crew: roster, watches: 2, lines, weapons, rules: ruleSet, encounters: encounterDefs });
   sim.state.money = 500;
   // Something for an inspection to find.
   const smuggled = Object.values(sim.state.crates).find((crate) => crate.label.includes('7731-D'));
@@ -970,7 +974,7 @@ out.push('');
 out.push(`Chaos (${minutes} game minutes each, ${ticks} ticks): a bot doing everything at random`);
 out.push(`  orders per run:    ${per(totals.orders)} given, ${per(totals.refused)} refused up front, ${per(totals.dropped)} dropped`);
 out.push(`  door moves:        ${per(totals.doorMoves)} completed per run`);
-out.push(`  power per run:     ${per(totals.powerMoves)} bars routed, ${per(totals.brownouts)} brownouts, door control dark ${((100 * totals.darkTicks) / (runs * ticks)).toFixed(0)}% of the time`);
+out.push(`  power per run:     ${per(totals.powerMoves)} switches thrown, ${per(totals.brownouts)} brownouts, door control dark ${((100 * totals.darkTicks) / (runs * ticks)).toFixed(0)}% of the time`);
 out.push(`  hazards per run:   ${per(totals.fires)} fires lit, ${per(totals.spreads)} spread, ${per(totals.firesOut)} went out, ${per(totals.scorched)} system bars burned, ${per(totals.jettisons)} rooms jettisoned`);
 out.push(`  crew per run:      ${per(totals.moves)} sent, ${per(totals.arrivals)} arrived, ${per(totals.blocked)} blocked, ${per(totals.deaths)} of ${roster.length} died`);
 out.push(`  crew work per run: ${per(totals.firesFought)} fires put out, ${per(totals.patches)} breaches patched, ${per(totals.repairs)} system bars repaired`);
@@ -1075,6 +1079,13 @@ for (const tactic of TACTICS) {
   const of = encounters.filter((e) => e.tactic === tactic);
   out.push(`  bot: ${tactic.padEnd(13)} got away ${pct(slipped(of), of.length)}: ${endingList(of)}`);
 }
+{
+  // Stations and shifts (H.4): who ran the ship on the crossings.
+  const staff = crossings.reduce((sum, c) => ({ crew: sum.crew + c.staff.crew, margo: sum.margo + c.staff.margo, dark: sum.dark + c.staff.dark, well: sum.well + c.staff.well, samples: sum.samples + c.staff.samples }), { crew: 0, margo: 0, dark: 0, well: 0, samples: 0 });
+  out.push(`Stations and shifts (H.4): two watches on the crossings, ${POSTS.length} stations for ${roster.length} crew`);
+  out.push(`  who had them:      crew ${pct(staff.crew, staff.samples)}, Margo ${pct(staff.margo, staff.samples)}, dark ${pct(staff.dark, staff.samples)} of station time; run better than the book ${pct(staff.well, staff.samples)}`);
+  out.push(`  the watch:         ${mean(crossings.map((c) => c.watchChanges)).toFixed(1)} changes a crossing; the most tired hand reached ${Math.round(100 * mean(crossings.map((c) => c.tired)))}% on average (worst ${Math.round(100 * Math.max(...crossings.map((c) => c.tired)))}%)`);
+}
 out.push(`Guns as deterrents (H.3): the same encounters, by what was fired and what it did`);
 for (const def of encounterDefs) {
   const of = encounters.filter((e) => e.encounter === def.id);
@@ -1111,7 +1122,7 @@ out.push('');
 out.push(`  wall time:         ${seconds.toFixed(2)}s`);
 const verdict = failures.length
   ? `FAILED: ${failures.length} problem(s).`
-  : 'PASSED: no crashes, no stuck doors, no crew stuck on a path, power never over supply, no fire without air, no crossing left unfinished, no contact left on the scope, no party left aboard, nothing moved while paused, every run replays from its seed.';
+  : 'PASSED: no crashes, no stuck doors, no crew stuck on a path, no station run by nobody, no fire without air, no crossing left unfinished, no contact left on the scope, no party left aboard, nothing moved while paused, every run replays from its seed.';
 
 console.log(out.join('\n'));
 const reportPath = option('report', null);

@@ -870,11 +870,11 @@ export function createShipRenderer(layout) {
 
   /**
    * Each deck lift's platform: under the feet of whoever is riding it, or parked
-   * where it last stopped. With door control dark, the rider turns the crank.
+   * where it last stopped. With the lift motor off, the rider turns the crank.
    */
   function drawDeckLifts(ctx, view, state, alpha, time) {
     const s = view.scale;
-    const powered = (state.systems.doors?.power ?? 0) > 0;
+    const powered = Boolean(state.power?.lift) && state.systems.reactor.damage < state.systems.reactor.level;
     const riders = Object.values(state.crew).filter((m) => m.alive);
     for (const lift of deckLifts) {
       let pad = liftPads.get(lift.door) ?? lift.floor;
@@ -941,7 +941,7 @@ export function createShipRenderer(layout) {
       if (rider) top = crewAt(rider, alpha).y + 0.5 - carH;
       top = Math.max(room.y + 0.05, Math.min(bottom - carH, top));
       liftCar = top;
-      const powered = (state.systems.doors?.power ?? 0) > 0;
+      const powered = Boolean(state.power?.lift) && state.systems.reactor.damage < state.systems.reactor.level;
       const x = view.ox + (room.x + 0.3) * s;
       const y = view.oy + top * s;
       const w = (room.w - 0.6) * s;

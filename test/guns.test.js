@@ -24,12 +24,11 @@ function seconds(sim, n) {
     assert.deepEqual(checkInvariants(sim), [], `tick ${sim.state.tick}`);
   }
 }
-/** Lamps off for the bars, then point defence and the gun (two bars), and the shields (one). */
-function armUp(sim, { gun = true, shields = true } = {}) {
+/** Lamps off, then the guns stood to (point defence and the gun), and the shields. */
+function armUp(sim, { shields = true } = {}) {
   go(sim, { type: 'lights.all', on: false });
-  go(sim, { type: 'power.add', system: 'weapons', delta: 1 });
-  if (gun) go(sim, { type: 'power.add', system: 'weapons', delta: 1 });
-  if (shields) go(sim, { type: 'power.add', system: 'shields', delta: 1 });
+  go(sim, { type: 'station.stand', station: 'weapons', down: false });
+  if (shields) go(sim, { type: 'station.stand', station: 'shields', down: false });
 }
 const spawn = (sim, encounter, options = {}) => go(sim, { type: 'debug.contact', encounter, ...options });
 const first = (sim) => sim.state.scope.contacts[0];
@@ -147,7 +146,7 @@ test('a contact\'s gun answers ours: a patrol cutter holds fire until we run or 
 test('point defence takes down drones before they reach the hull; without it they zap us', () => {
   const run = (pd) => {
     const sim = closing('drone-carrier', 18, 'drones');
-    if (pd) armUp(sim, { gun: false, shields: false });
+    if (pd) armUp(sim, { shields: false });
     const lost = { pd: 0, spent: 0 };
     sim.events.on('drone.lost', ({ cause }) => (lost[cause] = (lost[cause] ?? 0) + 1));
     const hull = sim.state.hull.points;
@@ -165,8 +164,8 @@ test('point defence takes down drones before they reach the hull; without it the
 
 test('a brace burns out a drone that zaps into it', () => {
   const sim = closing('drone-carrier', 18, 'drone-brace');
-  armUp(sim, { gun: false });
-  go(sim, { type: 'power.add', system: 'weapons', delta: -1 }); // no point defence: only the brace
+  armUp(sim);
+  go(sim, { type: 'station.stand', station: 'weapons', down: true }); // no point defence: only the brace
   const lost = [];
   sim.events.on('drone.lost', ({ cause }) => lost.push(cause));
   play(sim, 400, (s) => {
@@ -179,7 +178,7 @@ test('a grapple tender puts its party across in pods; point defence downs some, 
   let sawShort = false;
   for (const seed of ['pods-1', 'pods-2', 'pods-3', 'pods-4', 'pods-5', 'pods-6']) {
     const sim = closing('bounty-tender', 20, seed);
-    armUp(sim, { gun: false, shields: false });
+    armUp(sim, { shields: false });
     let launched = 0;
     let downed = 0;
     sim.events.on('pods.launched', ({ pods }) => (launched += pods));

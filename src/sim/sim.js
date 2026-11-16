@@ -8,9 +8,10 @@
 // Together these make pause exact (the clock simply stops calling step) and
 // let the autoplay bot use the same interface as a player.
 //
-// The ship has power (power.js): the reactor's bars are routed between
-// systems, lights draw from the same pool, and doors need the door control
-// system or a pair of hands. It has air (atmosphere.js): oxygen flows through
+// The ship has a reactor and a few big switches (power.js), and every system
+// has a station (stations.js) that works as well as whoever is on it: a
+// posted crew member, Margo, or nobody. The crew stand watches and sleep
+// (watches.js). Doors need door control running or a pair of hands. It has air (atmosphere.js): oxygen flows through
 // doors, fire burns it, breaches and airlocks lose it, and a sealed room can
 // be jettisoned. It has crew (crew.js): they walk the room and door graph and
 // fight fires, patch breaches and repair systems where they stand. And it has
@@ -30,8 +31,10 @@ import { EVENT_CHANCE, attachEvents, buildEvents, checkEventInvariants, eventCom
 import { buildRules } from '../narrative/rules.js';
 import { ATMOSPHERE_COMMANDS, checkAtmosphereInvariants, stepAtmosphere } from './atmosphere.js';
 import { COMBAT_COMMANDS, START_MONEY, checkCombatInvariants, newCombatState, stepCombat } from './combat.js';
-import { CREW_COMMANDS, checkCrewInvariants, newCrewState, stepCrew } from './crew.js';
-import { POWER_COMMANDS, checkPowerInvariants, isPowered, lightsNeedPower, newSystemsState, stepPower } from './power.js';
+import { CREW_COMMANDS, checkCrewInvariants, newCrewState, sendTo, stepCrew } from './crew.js';
+import { POWER_COMMANDS, checkPowerInvariants, newPowerState, newSystemsState, stepPower, whyNoLights } from './power.js';
+import { checkStationInvariants, newStationState, rating, roomOfStation, running, stationCommands, stepStations } from './stations.js';
+import { checkWatchInvariants, dealWatches, newRosterState, stepWatches, watchCommands } from './watches.js';
 import { checkSenseInvariants, newSenseState, stepSenses } from './senses.js';
 import { HOLD_COMMANDS, checkHoldInvariants, newHoldState, stepHold } from './hold.js';
 import { attachMemory, checkMemoryInvariants, lampHolder, memoryTypes, remember, stepNerve, whyKeepLamp } from './memory.js';
@@ -49,7 +52,7 @@ export const TICK_SECONDS = 1 / TICK_RATE;
 
 /** How long a door takes to slide fully open or shut, and a light to come up, in seconds. */
 export const DOOR_SECONDS = 0.35;
-/** A door worked by hand, with door control unpowered, is slower. */
+/** A door worked by hand, with door control dark, is slower. Run by the book it takes DOOR_SECONDS; a good hand on door control is quicker. */
 export const MANUAL_DOOR_SECONDS = 1.2;
 export const LIGHT_SECONDS = 0.25;
 
@@ -100,6 +103,8 @@ export function newShipState(layout, roster, owner, catalog) {
     rooms: Object.fromEntries(layout.rooms.map((room) => [room.id, newRoomState()])),
     doors: Object.fromEntries(layout.doors.map((door) => [door.id, newDoorState()])),
     systems,
+    stations: newStationState(layout), // which are stood down, and who has each (stations.js)
+    power: newPowerState(layout), // the reactor's output and the lift motor (power.js)
     crew: newCrewState(layout, roster, owner),
     ...newHoldState(layout),
     ...newCombatState(layout, systems, catalog),
@@ -126,10 +131,10 @@ const COMMANDS = {
       if (!['open', 'closed', 'locked'].includes(cmd.state)) return `a door cannot be set to "${cmd.state}"`;
       if (door.sealed) return 'that section is gone';
       if (door.state === 'jammed') return 'the door is jammed';
-      if (door.state === cmd.state || isPowered(sim, 'doors')) return null;
+      if (door.state === cmd.state || running(sim, 'doors')) return null;
       // Door control is dark (brief §6): locks stay as they are, and a door moves only if someone is there to move it.
-      if (cmd.state === 'locked' || door.state === 'locked') return 'the lock needs door control power';
-      if (!handsAt(sim, cmd.door)) return 'door control has no power, so someone has to work it by hand';
+      if (cmd.state === 'locked' || door.state === 'locked') return 'the lock needs door control running';
+      if (!handsAt(sim, cmd.door)) return 'door control is dark, so someone has to work it by hand';
       return null;
     },
     apply(sim, cmd) {
@@ -145,7 +150,7 @@ const COMMANDS = {
       if (!sim.state.rooms[cmd.room]) return `no room "${cmd.room}"`;
       if (typeof cmd.on !== 'boolean') return 'needs on: true or false';
       if (sim.state.rooms[cmd.room].jettisoned) return 'that section is gone';
-      if (cmd.on && !sim.state.rooms[cmd.room].lightsOn && lightsNeedPower(sim)) return 'no spare power for more lights';
+      if (cmd.on && !sim.state.rooms[cmd.room].lightsOn && whyNoLights(sim)) return whyNoLights(sim);
       // Someone badly scared by the dark keeps the lamp on where they stand (S2.10).
       if (!cmd.on && sim.state.rooms[cmd.room].lightsOn) return whyKeepLamp(sim, cmd.room);
       return null;
@@ -157,7 +162,7 @@ const COMMANDS = {
       sim.events.emit('room.lights', { room: cmd.room, on: cmd.on, tick: sim.state.tick });
     },
   },
-  // Every lamp at once: off to run dark, or back on for as many rooms as there is power to light.
+  // Every lamp at once: off to run dark, or back on.
   'lights.all': {
     check(sim, cmd) {
       if (typeof cmd.on !== 'boolean') return 'needs on: true or false';
@@ -165,7 +170,7 @@ const COMMANDS = {
       if (!rooms.some(([, room]) => room.lightsOn !== cmd.on)) return cmd.on ? 'every lamp is already on' : 'the ship is already dark';
       // Lamps the crew are holding on stay on: if those are all that is left, there is nothing to switch.
       if (!cmd.on && !rooms.some(([id, room]) => room.lightsOn && !lampHolder(sim, id))) return 'the only lamps left are ones the crew will not sit without';
-      if (cmd.on && lightsNeedPower(sim)) return 'no spare power for more lights';
+      if (cmd.on && whyNoLights(sim)) return whyNoLights(sim);
       return null;
     },
     apply(sim, cmd) {
@@ -173,7 +178,6 @@ const COMMANDS = {
       for (const { id } of sim.layout.rooms) {
         const room = sim.state.rooms[id];
         if (room.jettisoned || room.lightsOn === cmd.on) continue;
-        if (cmd.on && lightsNeedPower(sim)) break;
         if (!cmd.on && lampHolder(sim, id)) continue;
         room.lightsOn = cmd.on;
         changed += 1;
@@ -182,7 +186,7 @@ const COMMANDS = {
       if (changed) sim.events.emit('lights.all', { on: cmd.on, rooms: changed, tick: sim.state.tick });
     },
   },
-  // Every lamp on one deck (H.2): a deck the boarders are on goes dark, or comes back up as far as the power goes.
+  // Every lamp on one deck (H.2): a deck the boarders are on goes dark, or comes back up. The lights are switched by deck (H.4).
   'deck.lights': {
     check(sim, cmd) {
       const deck = sim.layout.decks.find((item) => item.id === cmd.deck);
@@ -190,7 +194,7 @@ const COMMANDS = {
       if (typeof cmd.on !== 'boolean') return 'needs on: true or false';
       const rooms = roomsOnDeck(sim, deck);
       if (!rooms.some((id) => sim.state.rooms[id].lightsOn !== cmd.on)) return cmd.on ? 'every lamp on that deck is already on' : 'that deck is already dark';
-      if (!rooms.some((id) => sim.state.rooms[id].lightsOn !== cmd.on && !COMMANDS['room.lights'].check(sim, { type: 'room.lights', room: id, on: cmd.on }))) return cmd.on ? 'no spare power for more lights' : 'the only lamps left on that deck are ones the crew will not sit without';
+      if (!rooms.some((id) => sim.state.rooms[id].lightsOn !== cmd.on && !COMMANDS['room.lights'].check(sim, { type: 'room.lights', room: id, on: cmd.on }))) return cmd.on ? (whyNoLights(sim) ?? 'those lamps will not light') : 'the only lamps left on that deck are ones the crew will not sit without';
       return null;
     },
     apply(sim, cmd) {
@@ -288,6 +292,8 @@ const COMMANDS = {
     },
   },
   ...POWER_COMMANDS,
+  ...stationCommands({ send: (sim, member, room) => sendTo(sim, member, room, 'post') }),
+  ...watchCommands(),
   ...ATMOSPHERE_COMMANDS,
   ...CREW_COMMANDS,
   ...HOLD_COMMANDS,
@@ -304,7 +310,8 @@ const COMMANDS = {
 export const COMMAND_TYPES = Object.freeze(Object.keys(COMMANDS));
 
 function stepDoors(sim) {
-  const stride = TICK_SECONDS / (isPowered(sim, 'doors') ? DOOR_SECONDS : MANUAL_DOOR_SECONDS);
+  const control = rating(sim, 'doors');
+  const stride = control > 0 ? (TICK_SECONDS * control) / DOOR_SECONDS : TICK_SECONDS / MANUAL_DOOR_SECONDS;
   for (const [id, door] of Object.entries(sim.state.doors)) {
     if (door.state === 'jammed') continue; // stuck exactly where it is
     const goal = door.state === 'open' ? 1 : 0;
@@ -324,13 +331,15 @@ function stepLights(sim) {
 }
 
 /** Everything that happens each tick, in order. Later sessions add systems here. */
-// Order matters: crew act on the world as it stood, then fire can break a system, so power is settled
-// after the air and before anything reads it.
+// Order matters: crew act on the world as it stood and the watch bill sees where that left them, then
+// fire can break a system, so the reactor and the stations are settled after the air and before anything
+// reads them, and once more at the end for whatever a hit or a boarder broke this tick.
 // Nerves come after the lamps, so a lamp someone puts on is counted by the senses in the same tick.
 // The guns come after the ship: a round lands on the ship as it now stands.
 // The scope comes after the chart: a jump clears it before any contact moves again.
 // A boarding party (H.2) decides what to do next after the crew have moved, with the ship as it now stands.
-const SYSTEMS = [(sim) => stepCrew(sim, TICK_SECONDS), (sim) => stepHold(sim, TICK_SECONDS), (sim) => stepAtmosphere(sim, TICK_SECONDS), stepPower, stepDoors, stepLights, (sim) => stepNerve(sim, TICK_SECONDS), (sim) => stepSenses(sim, TICK_SECONDS), (sim) => stepCombat(sim, TICK_SECONDS), (sim) => stepSector(sim, TICK_SECONDS), (sim) => stepEncounters(sim, TICK_SECONDS), (sim) => stepBoarders(sim, TICK_SECONDS), stepJudgement, stepVoice];
+const WATCH_HOOKS = { send: (sim, member, room) => sendTo(sim, member, room, 'watch'), postRoom: roomOfStation };
+const SYSTEMS = [(sim) => stepCrew(sim, TICK_SECONDS), (sim) => stepWatches(sim, TICK_SECONDS, WATCH_HOOKS), (sim) => stepHold(sim, TICK_SECONDS), (sim) => stepAtmosphere(sim, TICK_SECONDS), stepPower, stepStations, stepDoors, stepLights, (sim) => stepNerve(sim, TICK_SECONDS), (sim) => stepSenses(sim, TICK_SECONDS), (sim) => stepCombat(sim, TICK_SECONDS), (sim) => stepSector(sim, TICK_SECONDS), (sim) => stepEncounters(sim, TICK_SECONDS), (sim) => stepBoarders(sim, TICK_SECONDS), stepPower, stepStations, stepJudgement, stepVoice];
 
 /**
  * Create a simulation.
@@ -350,8 +359,10 @@ const SYSTEMS = [(sim) => stepCrew(sim, TICK_SECONDS), (sim) => stepHold(sim, TI
  *   ports   the items from content/ports/: what a port's services cost (S3.4). Without them ports charge nothing
  *   encounters the items from content/encounters/ (H.1): the ships that can turn up on the scope. Without them
  *           nothing does, except through the debug command in tests that pass their own
+ *   watches how many watches the crew stands (H.4): 1 all hands, 2 or 3. Without it no watch bill is kept:
+ *           nobody is walked to a post or a bunk and nobody tires (a bare test sim)
  */
-export function createSim({ seed, ship, crew = [], lines = [], weapons = [], sector = null, run = {}, rules = {}, events = [], contract = null, ports = [], encounters = [] }) {
+export function createSim({ seed, ship, crew = [], lines = [], weapons = [], sector = null, run = {}, rules = {}, events = [], contract = null, ports = [], encounters = [], watches = 0 }) {
   const layout = buildLayout(ship);
   const weaponById = new Map(weapons.map((item) => [item.id, item]));
   const catalog = {
@@ -395,6 +406,7 @@ export function createSim({ seed, ship, crew = [], lines = [], weapons = [], sec
       ai: newVoiceState(),
       helm: newHelmState(), // our heading, the drive and our velocity (encounters.js)
       scope: newScopeState(), // the contacts around us, and our decoys (encounters.js)
+      roster: newRosterState(watches), // the watch bill (watches.js)
       boarding: null, // a party docked with us, at the lock or aboard (boarders.js)
       boardings: { next: 1, record: [] }, // how boardings have ended: { encounter, wants, outcome, reason, seconds, took, seized, tick }
       run: null, // the chart, fuel, jumps, deadline and pursuit (sector.js); set below when there is a sector
@@ -470,6 +482,7 @@ export function createSim({ seed, ship, crew = [], lines = [], weapons = [], sec
     Object.assign(sim.state.run, { events: newEventState(), eventChance: { ...EVENT_CHANCE, ...sector.events }, flags: {}, scenes: [], threat: null, contract: null, contactChance: { ...sector.contacts } });
     if (contract) setUpContract(sim, contract);
   } else if (contract) throw new Error('A contract needs a sector to be flown across');
+  if (watches) dealWatches(sim);
   attachVoice(sim);
   attachJudgement(sim);
   attachMemory(sim);
@@ -517,6 +530,6 @@ function shipProblems(ship) {
 export function checkInvariants(sim) {
   const problems = [];
   if (!Number.isInteger(sim.state.tick) || sim.state.tick < 0) problems.push(`tick is ${sim.state.tick}`);
-  problems.push(...shipProblems(sim), ...checkVoiceInvariants(sim), ...checkJudgementInvariants(sim), ...checkRunInvariants(sim), ...checkEventInvariants(sim), ...checkContractInvariants(sim), ...checkEncounterInvariants(sim), ...checkBoarderInvariants(sim));
+  problems.push(...shipProblems(sim), ...checkVoiceInvariants(sim), ...checkJudgementInvariants(sim), ...checkRunInvariants(sim), ...checkEventInvariants(sim), ...checkContractInvariants(sim), ...checkEncounterInvariants(sim), ...checkBoarderInvariants(sim), ...checkStationInvariants(sim), ...checkWatchInvariants(sim));
   return problems;
 }

@@ -14,7 +14,7 @@
 //   light     its lamps, or the glow of a fire
 //   noise     running machinery, a fire, air rushing out of a hole, people at
 //             work or fighting, a gun going off, a hit landing. Bangs fade.
-//   heat      a fire, the power running through the room's system, the
+//   heat      a fire, the room's system if it is running, the
 //             reactor's load, the drive, and warm bodies
 //   movement  people walking
 // A ship's signature adds its rooms up: how much of it is lit, how loud it
@@ -29,7 +29,10 @@
 // return went with the duel in H.3.)
 
 import { isHome } from './crew.js';
-import { supply, used } from './power.js';
+import { liftRuns } from './power.js';
+import { rating, reactorLoad, running } from './stations.js';
+
+export { reactorLoad };
 
 /** How much each part counts toward a ship's signature. The parts are each 0 to 1. */
 export const SIGNATURE = Object.freeze({ light: 0.2, noise: 0.1, heat: 0.35, burn: 0.2, flare: 0.5 });
@@ -40,8 +43,8 @@ const SHIP_NOISE_GAIN = 3;
 export const NOISE = Object.freeze({
   fire: 0.5, // at full intensity
   breach: 0.5, // a full-size hole with air still going out of it
-  hum: 0.12, // a system with power, plus a little per bar
-  humPerBar: 0.06,
+  hum: 0.18, // a system that is running
+  lift: 0.2, // the lift motor, in its shaft
   reactor: 0.3, // at full load
   drive: 0.5, // engines at full burn
   sensors: 0.3, // active sensors ping
@@ -61,8 +64,8 @@ const FIRE_GLOW = 0.7;
 /** Light enough for the cameras to see a room by. */
 export const SEE_LIGHT = 0.35;
 
-/** How well a ship's sensors read what is outside: unpowered (eyes and optics), powered, more per extra bar; and a ship built without a sensors room has a fixed set. */
-export const GAIN = Object.freeze({ passive: 0.5, active: 1, perExtraBar: 0.25, builtin: 0.8 });
+/** How well a ship's sensors read what is outside: dark (eyes and optics), run by the book, more or less with the station's rating (stations.js); and a ship built without a sensors room has a fixed set. */
+export const GAIN = Object.freeze({ passive: 0.5, active: 1, perRating: 0.6, builtin: 0.8 });
 
 /** The facts about a room that are remembered when it can no longer be seen. */
 export const ROOM_FACTS = Object.freeze(['oxygen', 'temperature', 'light', 'noise', 'hull', 'fire', 'breach']);
@@ -102,21 +105,24 @@ const copyFacts = (to, from) => {
 };
 const WORK = new Set(['extinguish', 'patch', 'repair', 'unjam', 'sabotage', 'lifting', 'opening', 'loading', 'cycling', 'stashing', 'forcing', 'searching', 'grabbing']);
 
-/** The share of the reactor's output in use, 0 to 1. */
-export function reactorLoad(ship) {
-  const made = supply(ship);
-  return made > 0 ? clamp01(used(ship) / made) : 0;
-}
-
 /** How hard the drive is burning, 0 to 1. */
 export function burn(ship) {
   const { engines } = ship.state.systems;
   if (engines.absent) return 0;
-  // Our own drive only burns when the helm has it lit (encounters.js). In a fight, and aboard any other
-  // ship, powered engines are burning engines, as they were before the helm (the duel goes in H.3).
-  const { helm, fight } = ship.state;
-  if (helm && !(fight && !fight.over) && !helm.burn) return 0;
-  return engines.power / engines.level;
+  // The drive only burns when the helm has it lit (encounters.js), and pushes as hard as its station is run.
+  if (!ship.state.helm?.burn) return 0;
+  return driveShare(ship);
+}
+
+/**
+ * The share of the drive's full push the engines give: THRUST of it when run by the book, more with an
+ * engineer on the station, less for each broken bar, none with the engines stood down.
+ */
+export const THRUST = 0.7;
+export function driveShare(ship) {
+  const { engines } = ship.state.systems;
+  if (engines.absent) return 0;
+  return clamp01(THRUST * rating(ship, 'engines') * ((engines.level - engines.damage) / engines.level));
 }
 
 /** Below this light a room is dark to stand in (the same line a dark walk uses, crew.js). A fire lights its own room. */
@@ -133,12 +139,13 @@ function steadyNoise(ship, room, people, load) {
   const system = room.system ? ship.state.systems[room.system] : null;
   if (system && !system.lost) {
     if (room.system === 'reactor') level = Math.max(level, NOISE.reactor * load);
-    else if (system.power > 0) {
-      level = Math.max(level, NOISE.hum + NOISE.humPerBar * system.power);
+    else if (running(ship, room.system)) {
+      level = Math.max(level, NOISE.hum);
       if (room.system === 'engines') level = Math.max(level, NOISE.drive * burn(ship));
       if (room.system === 'sensors') level = Math.max(level, NOISE.sensors);
     }
   }
+  if (room.kind === 'lift' && liftRuns(ship)) level = Math.max(level, NOISE.lift);
   for (const member of people) {
     const loud = member.task === 'fighting' ? NOISE.fighting : member.task === 'walking' ? NOISE.walking : WORK.has(member.task) ? NOISE.working : 0;
     if (loud > level) level = loud;
@@ -169,7 +176,7 @@ export function sense(ship, roomId, people = living(ship, roomId), load = reacto
   const system = room.system ? ship.state.systems[room.system] : null;
   let heat = Math.max(0, r.temperature - 20) / 200 + 0.15 * people.length;
   if (system && !system.lost) {
-    heat += 0.12 * system.power;
+    if (room.system !== 'reactor' && running(ship, room.system)) heat += 0.12;
     if (room.system === 'reactor') heat += 0.5 * load;
     if (room.system === 'engines') heat += 0.5 * burn(ship);
   }
@@ -205,13 +212,15 @@ export function signature(ship) {
 export function sensorGain(ship) {
   const { sensors } = ship.state.systems;
   if (sensors.absent) return GAIN.builtin;
-  return sensors.power > 0 ? GAIN.active + GAIN.perExtraBar * (sensors.power - 1) : GAIN.passive;
+  // Run by the book the sensors read at GAIN.active; a trained hand on the station gets more out of them.
+  const run = rating(ship, 'sensors');
+  return run > 0 ? GAIN.active + GAIN.perRating * (run - 1) : GAIN.passive;
 }
 
 /** Are the ship's sensors running? They cover every room of our own ship, and keep the picture of the other ship fresh. */
 export function sensorsUp(ship) {
   const { sensors } = ship.state.systems;
-  return sensors.absent ? true : sensors.power > 0;
+  return sensors.absent ? true : running(ship, 'sensors');
 }
 
 /** Can Margo see into this room right now? Sensors, enough light for the cameras, or one of ours standing in it. */
