@@ -75,8 +75,29 @@ function checkWeapon(item) {
   return problems;
 }
 
+/** What crew answer over the intercom (S2.9, D-094): a walk, or one of the hold's jobs. */
+export const REPLY_KINDS = Object.freeze(['move', 'open', 'carry', 'jettison', 'load']);
+
+/** Rules for one crew member. Their intercom replies are lists of lines by kind; `{room}` is the only slot. */
+function checkCrew(item) {
+  const problems = [];
+  if (!isNonEmptyString(item.name)) problems.push('missing name');
+  if (item.replies === undefined) return problems;
+  if (!item.replies || typeof item.replies !== 'object' || Array.isArray(item.replies)) return [...problems, 'replies must be an object of line lists'];
+  for (const kind of REPLY_KINDS) if (!Array.isArray(item.replies[kind]) || !item.replies[kind].length) problems.push(`replies needs a list of "${kind}" lines`);
+  for (const [kind, lines] of Object.entries(item.replies)) {
+    if (!REPLY_KINDS.includes(kind)) problems.push(`replies has an unknown kind "${kind}"`);
+    for (const line of Array.isArray(lines) ? lines : []) {
+      if (!isNonEmptyString(line)) problems.push(`replies.${kind} has an empty line`);
+      else for (const slot of slotsIn(line)) if (slot !== 'room') problems.push(`replies.${kind}: unknown slot "{${slot}}"`);
+    }
+  }
+  return problems;
+}
+
 const ITEM_RULES = {
   'ai-lines': checkAiLine,
+  crew: checkCrew,
   ships: validateLayout,
   weapons: checkWeapon,
 };

@@ -2,7 +2,8 @@
 // The input module turns key presses into { type: 'key', action } events.
 // Number keys pick crew (S1.6). The Q row routes power: the key adds a bar to
 // that slot of the power panel, Shift with the key takes one back.
-// The A row picks a weapon to aim (S2.1). B braces the shields (S2.8).
+// The A row picks a weapon to aim (S2.1). B braces the shields (S2.8). P opens
+// or folds the breaker board (S2.9).
 
 export const KEYMAP = Object.freeze({
   Space: 'pause',
@@ -28,4 +29,5 @@ export const KEYMAP = Object.freeze({
   KeyD: 'weapon-3',
   KeyF: 'weapon-4',
   KeyB: 'brace',
+  KeyP: 'breakers',
 });

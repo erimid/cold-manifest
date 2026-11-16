@@ -246,6 +246,17 @@ async function touchTests(browser) {
     assert.equal(await game(page, () => JSON.stringify(window.coldManifest.sim.state.doors)), hash);
   });
 
+  await check('the breaker board starts folded to a strip of lamps, and Breakers opens it (S2.9)', async () => {
+    assert.equal(await page.isVisible('#breaker-board'), false);
+    assert.equal(await page.isVisible('#breakers-folded'), true);
+    assert.equal(await page.locator('#power-mini-engines .pip--on').count(), 1);
+    await page.tap('#btn-breakers');
+    await page.waitForSelector('#breaker-board', { state: 'visible', timeout: 2000 });
+    assert.equal(await page.isVisible('#breakers-folded'), false);
+    assert.match(await page.textContent('#power-life_support'), /Life support/, 'each breaker names its system');
+    if (process.env.E2E_SHOTS) await page.screenshot({ path: `${process.env.E2E_SHOTS}/s2-9-breakers-ipad.png` });
+  });
+
   await check('power: minus frees a bar, plus spends it, and the panel keeps count', async () => {
     assert.match(await page.textContent('#power-summary'), /0 of 8 spare/);
     assert.equal(await page.isDisabled('#btn-power-shields-plus'), true, 'nothing spare, so plus is off');
@@ -303,6 +314,16 @@ async function touchTests(browser) {
     await page.waitForFunction(() => window.coldManifest.sim.state.crew.okoro.room === 'medbay' && window.coldManifest.sim.state.crew.okoro.task === 'idle', null, { timeout: 8000 });
     assert.match(await page.textContent('#status'), /In\s*Medbay/);
     assert.equal((await door(page, 'd_medbay_quarters')).state, 'closed', 'and shut the door behind them');
+  });
+
+  await check('intercom: every order gets a reply in the crew member\'s own words (S2.9)', async () => {
+    const t = await target(page, 'quarters');
+    await page.touchscreen.tap(t.mx, t.my);
+    await page.waitForSelector('#intercom', { state: 'visible', timeout: 2000 });
+    assert.match(await page.textContent('#intercom'), /Okoro/i);
+    assert.ok((await page.textContent('#intercom-text')).length > 3);
+    await page.waitForFunction(() => window.coldManifest.sim.state.crew.okoro.room === 'quarters' && !window.coldManifest.sim.state.crew.okoro.path.length, null, { timeout: 8000 });
+    await page.waitForSelector('#intercom', { state: 'hidden', timeout: 6000 });
   });
 
   await check('crew: the crew bar selects too, and the suit button works', async () => {
@@ -481,7 +502,8 @@ async function desktopTests(browser) {
     assert.equal(await game(page, () => window.coldManifest.machine.state), 'ship', 'escape let go of the crew member, it did not leave the screen');
   });
 
-  await check('power keys: a Q-row key adds a bar, Shift with it takes one back', async () => {
+  await check('power keys: a Q-row key adds a bar, Shift with it takes one back, with the board folded', async () => {
+    assert.equal(await page.isVisible('#breaker-board'), false);
     await page.keyboard.press('Shift+KeyY');
     await powerIs(page, 'sensors', 0);
     await page.keyboard.press('KeyQ');
@@ -506,6 +528,8 @@ async function desktopTests(browser) {
     await page.click('#btn-dbg-repair');
     await page.waitForFunction(() => /of 8 spare/.test(document.querySelector('#power-summary').textContent));
     assert.equal(await power(page, 'sensors'), 0, 'power does not come back by itself');
+    await page.keyboard.press('KeyP');
+    await page.waitForSelector('#breaker-board', { state: 'visible', timeout: 2000 });
     await page.click('#btn-power-sensors-plus');
     await powerIs(page, 'sensors', 1);
   });
@@ -700,6 +724,7 @@ async function fightTests(browser) {
     // The scan has its own checks below (darkTests); here a perfect lock keeps these about the controls.
     await scan(page);
     assert.equal(await page.isVisible('#fightbar'), true);
+    assert.equal(await page.isVisible('#breaker-board'), true, 'a fight opens the breaker board');
     assert.match(await page.textContent('#fight-foe'), /Gunnery drone\s*8\/8/);
     assert.match(await page.textContent('#fight-own'), /20\/20/);
     const own = await game(page, () => window.coldManifest.shipView.debug.targets().filter((x) => x.kind === 'room'));
@@ -1155,6 +1180,7 @@ async function darkTests(browser) {
   });
 
   await check('sensors off as well: an empty dark room goes to static, and a breach in it stays unknown', async () => {
+    if (!(await page.isVisible('#breaker-board'))) await page.tap('#btn-breakers');
     for (let i = await power(page, 'sensors'); i > 0; i--) await page.tap('#btn-power-sensors-minus');
     await powerIs(page, 'sensors', 0);
     await page.waitForFunction(() => window.coldManifest.sim.state.seen.brig.live === false, null, { timeout: 3000 });
