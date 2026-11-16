@@ -102,7 +102,7 @@ const MAX_DOOR_TICKS = Math.ceil(MANUAL_DOOR_SECONDS * TICK_RATE) + 3;
 
 /** Play one run to the end. Returns its stats, or throws on any failure. */
 function playRun(seed) {
-  const sim = createSim({ seed, ship, crew: roster, lines, weapons, rules: ruleSet });
+  const sim = createSim({ seed, ship, crew: roster, lines, weapons, rules: ruleSet, encounters: encounterDefs });
   const clock = createClock({ sim, tickSeconds: TICK_SECONDS });
   // The bot's own dice, kept apart from the sim's so its choices are not part of the game state.
   const bot = createRng(`bot:${seed}`);
@@ -306,15 +306,16 @@ function playRun(seed) {
   return { ...stats, endings, hash: hashState(sim.snapshot()) };
 }
 
-/** Fail if anyone aboard with somewhere to be has not moved for too long. Call once a tick. */
+/** Fail if anyone aboard with somewhere to be has not moved for too long. A boarder cutting a door is getting somewhere. Call once a tick. */
 function stuckWatch(sim) {
   const stillSince = new Map();
   return () => {
     const { tick } = sim.state;
     for (const member of Object.values(sim.state.crew)) {
       const last = stillSince.get(member.id);
-      if (!member.alive || !member.path.length || !last || last.x !== member.x || last.y !== member.y) {
-        stillSince.set(member.id, { tick, x: member.x, y: member.y });
+      const forcing = member.forcing ?? 0;
+      if (!member.alive || !member.path.length || !last || last.x !== member.x || last.y !== member.y || last.forcing !== forcing) {
+        stillSince.set(member.id, { tick, x: member.x, y: member.y, forcing });
       } else if (tick - last.tick > MAX_STILL_TICKS) {
         throw new Error(`${member.id} stuck on a path in ${member.room} since tick ${last.tick} (${member.task}, next ${JSON.stringify(member.path[0])}${member.path[0]?.door ? `, door ${JSON.stringify(sim.state.doors[member.path[0].door])}` : ''})`);
       }
@@ -577,8 +578,9 @@ function playCrossing(seed, index) {
       for (const contact of live) if (contact.tolled && !whyNoPay(sim, contact.id)) give({ type: 'contact.pay', contact: contact.id });
       const slot = gunSlot(sim);
       const threat = live.find((contact) => contact.state === 'closing' || contact.state === 'alongside' || contact.tolled);
-      // Something closing: bars for the gun and the brace, out of the medbay if need be.
+      // Something closing: bars for the gun and the brace, from the lamps, then the medbay.
       if (threat) {
+        give({ type: 'lights.all', on: false });
         for (const system of ['weapons', 'shields']) {
           const { power: bars, level, damage } = sim.state.systems[system];
           if (bars < level - damage && !give({ type: 'power.add', system, delta: 1 }) && sim.state.systems.medbay.power > 0) give({ type: 'power.add', system: 'medbay', delta: -1 });
@@ -773,7 +775,8 @@ function playEncounter(seed, def, tactic) {
           }
         }
       } else if (tactic === 'gun') {
-        // Bars for the gun and the brace: from the drive and the medbay if the reactor has none spare.
+        // Bars for the gun and the brace: the lamps go off for them, and the medbay or the drive gives one if that is not enough.
+        give({ type: 'lights.all', on: false });
         for (const system of ['weapons', 'shields']) {
           const { power: bars, level, damage } = sim.state.systems[system];
           if (bars >= level - damage) continue;

@@ -42,7 +42,7 @@
       "name": "Slug thrower",
       "short": "Slugs",
       "kind": "kinetic",
-      "power": 2,
+      "power": 1,
       "charge": 13,
       "flight": 1.1,
       "damage": 2,
