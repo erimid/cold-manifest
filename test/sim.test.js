@@ -22,7 +22,7 @@ test('a new ship is whole, lit, breathable and shut', () => {
   assert.equal(Object.keys(sim.state.rooms).length, 15);
   assert.equal(Object.keys(sim.state.doors).length, 21);
   for (const room of Object.values(sim.state.rooms)) {
-    assert.deepEqual(room, { oxygen: 1, temperature: 20, light: 1, lightsOn: true, noise: 0, hull: 1, fire: 0, breach: 0 });
+    assert.deepEqual(room, { oxygen: 1, temperature: 20, light: 1, lightsOn: true, noise: 0, hull: 1, fire: 0, breach: 0, scorch: 0, burning: false, jettisoned: false });
   }
   for (const door of Object.values(sim.state.doors)) assert.deepEqual(door, { state: 'closed', openness: 0 });
   assert.deepEqual(checkInvariants(sim), []);

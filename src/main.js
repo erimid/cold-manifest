@@ -15,7 +15,7 @@ import { el, setPressBinder } from './ui/dom.js';
 import { createShipView } from './ui/shipview.js';
 import { renderStub, renderTitle } from './ui/title.js';
 
-const VERSION = '0.4.0';
+const VERSION = '0.5.0';
 
 const params = new URLSearchParams(window.location.search);
 const flags = {

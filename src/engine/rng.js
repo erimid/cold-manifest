@@ -13,6 +13,7 @@ export const STREAMS = Object.freeze([
   'ai',
   'threat',
   'market',
+  'hazard', // fire spread and other accidents aboard
   'cosmetic', // visual-only rolls (stars, flicker). Never used by the sim.
 ]);
 

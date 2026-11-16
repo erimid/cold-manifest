@@ -11,9 +11,10 @@
 //   --seed S       base seed; run i uses "S-i" (default "auto")
 //   --ship ID      ship layout to fly (default "margin-of-error")
 //
-// S1.4: the bot works doors and lights all over the ship, routes power, breaks
-// and mends systems (the reactor included) and jams doors through the debug
-// commands, and pauses at random. Its strategy and the
+// S1.5: the bot works doors, airlocks and lights all over the ship, routes
+// power, starts fires and breaches, breaks and mends systems and jams doors
+// through the debug commands, now and then jettisons a room, and pauses at
+// random. Its strategy and the
 // report grow stage by stage (PLAN.md §4).
 
 import { createClock } from '../src/engine/clock.js';
@@ -51,7 +52,7 @@ function playRun(seed) {
   const clock = createClock({ sim, tickSeconds: TICK_SECONDS });
   // The bot's own dice, kept apart from the sim's so its choices are not part of the game state.
   const bot = createRng(`bot:${seed}`);
-  const stats = { orders: 0, refused: 0, dropped: 0, doorMoves: 0, pauses: 0, powerMoves: 0, brownouts: 0, darkTicks: 0 };
+  const stats = { orders: 0, refused: 0, dropped: 0, doorMoves: 0, pauses: 0, powerMoves: 0, brownouts: 0, darkTicks: 0, fires: 0, spreads: 0, firesOut: 0, scorched: 0, jettisons: 0, airlessTicks: 0 };
   const movingSince = new Map(); // door id -> tick its last order was applied
 
   sim.events.on('door.changed', ({ door, tick }) => movingSince.set(door, tick));
@@ -66,6 +67,10 @@ function playRun(seed) {
   sim.events.on('command.dropped', () => (stats.dropped += 1));
   sim.events.on('power.changed', ({ reason }) => reason === 'order' && (stats.powerMoves += 1));
   sim.events.on('power.brownout', () => (stats.brownouts += 1));
+  sim.events.on('fire.started', ({ cause }) => (cause === 'spread' ? (stats.spreads += 1) : (stats.fires += 1)));
+  sim.events.on('fire.out', () => (stats.firesOut += 1));
+  sim.events.on('system.damage', ({ cause }) => cause === 'fire' && (stats.scorched += 1));
+  sim.events.on('room.jettisoned', () => (stats.jettisons += 1));
 
   /** Give an order the way a player would: only if the game would accept it. */
   function order(command) {
@@ -96,8 +101,12 @@ function playRun(seed) {
     } else if (roll < 0.95) {
       const door = bot.pick(sim.layout.doors).id;
       order({ type: 'debug.door', door, jammed: sim.state.doors[door].state !== 'jammed' });
+    } else if (roll < 0.985) {
+      // Trouble: usually a fire or a breach, sometimes both, and sometimes it gets patched.
+      const set = bot.chance(0.3) ? { fire: 0, breach: 0 } : bot.chance(0.5) ? { fire: bot.next() } : { breach: bot.next() };
+      order({ type: 'debug.room', room: bot.pick(sim.layout.rooms).id, set });
     } else {
-      order({ type: 'debug.room', room: bot.pick(sim.layout.rooms).id, set: { fire: bot.next(), breach: bot.next(), oxygen: bot.next() } });
+      order({ type: 'room.jettison', room: bot.pick(sim.layout.rooms).id });
     }
   }
 
@@ -126,6 +135,7 @@ function playRun(seed) {
     if (problems.length) throw new Error(`tick ${sim.state.tick}: ${problems.join('; ')}`);
     if (used(sim) > supply(sim)) throw new Error(`tick ${sim.state.tick}: ${used(sim)} bars in use of ${supply(sim)}`);
     if (sim.state.systems.doors.power === 0) stats.darkTicks += 1;
+    for (const room of Object.values(sim.state.rooms)) if (!room.jettisoned && room.oxygen < 0.15) stats.airlessTicks += 1;
     for (const [door, since] of movingSince) {
       const d = sim.state.doors[door];
       const settled = d.state === 'jammed' || d.openness === (d.state === 'open' ? 1 : 0);
@@ -146,9 +156,10 @@ function playRun(seed) {
   return { ...stats, hash: hashState(sim.snapshot()) };
 }
 
+const sim0Rooms = ship.rooms.length;
 const started = performance.now();
 const failures = [];
-const totals = { orders: 0, refused: 0, dropped: 0, doorMoves: 0, pauses: 0, powerMoves: 0, brownouts: 0, darkTicks: 0 };
+const totals = { orders: 0, refused: 0, dropped: 0, doorMoves: 0, pauses: 0, powerMoves: 0, brownouts: 0, darkTicks: 0, fires: 0, spreads: 0, firesOut: 0, scorched: 0, jettisons: 0, airlessTicks: 0 };
 for (let i = 1; i <= runs; i++) {
   const seed = `${baseSeed}-${i}`;
   try {
@@ -172,6 +183,8 @@ console.log(`  ship:              ${ship.name}`);
 console.log(`  orders per run:    ${per(totals.orders)} given, ${per(totals.refused)} refused up front, ${per(totals.dropped)} dropped`);
 console.log(`  door moves:        ${per(totals.doorMoves)} completed per run`);
 console.log(`  power per run:     ${per(totals.powerMoves)} bars routed, ${per(totals.brownouts)} brownouts, door control dark ${((100 * totals.darkTicks) / (runs * ticks)).toFixed(0)}% of the time`);
+console.log(`  hazards per run:   ${per(totals.fires)} fires lit, ${per(totals.spreads)} spread, ${per(totals.firesOut)} went out, ${per(totals.scorched)} system bars burned, ${per(totals.jettisons)} rooms jettisoned`);
+console.log(`  air:               rooms were unbreathable ${((100 * totals.airlessTicks) / (runs * ticks * sim0Rooms)).toFixed(0)}% of room-time`);
 console.log(`  pauses per run:    ${per(totals.pauses)} (state checked every paused frame)`);
 console.log(`  wall time:         ${seconds.toFixed(2)}s`);
 
@@ -180,4 +193,4 @@ if (failures.length) {
   if (failures.length > 20) console.error(`...and ${failures.length - 20} more`);
   process.exit(1);
 }
-console.log('\nPASSED: no crashes, no stuck doors, power never over supply, nothing moved while paused, every run replays from its seed.');
+console.log('\nPASSED: no crashes, no stuck doors, power never over supply, no fire without air, nothing moved while paused, every run replays from its seed.');

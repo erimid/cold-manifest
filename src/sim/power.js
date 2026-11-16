@@ -19,10 +19,6 @@ export const POWERED = Object.freeze(['shields', 'engines', 'weapons', 'life_sup
 /** What a brownout switches off first. Life support goes last. */
 export const SHED_ORDER = Object.freeze(['weapons', 'shields', 'sensors', 'medbay', 'engines', 'lights', 'doors', 'ai_core', 'life_support']);
 
-/** Oxygen (0 to 1) a room regains per second for each bar on life support, and loses per second with none. */
-export const O2_REFILL_PER_BAR = 1 / 60;
-export const O2_STALE = 1 / 480;
-
 const isCount = (v) => Number.isInteger(v) && v >= 0;
 
 /** Problems with a ship's "power" block, as readable strings. */
@@ -139,6 +135,7 @@ export const POWER_COMMANDS = {
       const system = sim.state.systems[cmd.system];
       if (!system) return `no system "${cmd.system}"`;
       if (!isCount(cmd.damage) || cmd.damage > system.level) return `damage must be between 0 and ${system.level}`;
+      if (system.lost) return 'that system went with its room';
       return null;
     },
     apply(sim, cmd) {
@@ -187,16 +184,6 @@ export function stepPower(sim) {
   let shed = 0;
   while (used(sim) > supply(sim) && shedOne(sim)) shed += 1;
   if (shed) sim.events.emit('power.brownout', { shed, supply: supply(sim), tick: sim.state.tick });
-}
-
-/** Life support tops the air up; without it the air slowly goes stale. Flow between rooms is S1.5. */
-export function stepLifeSupport(sim, seconds) {
-  const bars = sim.state.systems.life_support.power;
-  const change = bars > 0 ? bars * O2_REFILL_PER_BAR * seconds : -O2_STALE * seconds;
-  for (const room of Object.values(sim.state.rooms)) {
-    const next = Math.max(0, Math.min(1, room.oxygen + change));
-    if (next !== room.oxygen) room.oxygen = next;
-  }
 }
 
 /** Power problems that should never happen. */

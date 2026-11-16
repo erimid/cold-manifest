@@ -26,14 +26,17 @@ Items here are known shortcuts. Each names the stage that must clear it.
 | ~~DF-09~~ | ~~No Playwright touch tests in CI yet.~~ | S1.2 | Done in S1.2 |
 | DF-10 | Pinch-zoom and two-finger pan are not handled: the input module tracks one pointer at a time. | S1.3 if the ship view needs a camera, otherwise S11.5 | Open |
 | DF-11 | Auto-pause triggers and their settings (brief §7) are not wired; the clock supports a pause requested mid-tick. | S1.7 | Open |
-| DF-12 | Room values: light follows power and oxygen follows life support (S1.4). Temperature, noise, hull, fire and breach are still stored and drawn but only the debug command changes them. | S1.5 (air flow, fire, breaches), Stage 6 (noise) | Open |
-| DF-13 | Hull damage and temperature have no visual of their own yet; they only show in the status panel. | S1.5 (frost/heat), S11.1 (look pass) | Open |
+| DF-12 | Hull integrity is stored but nothing changes it; breaches only come from the debug command until weapons exist. Noise only comes from fire. | Stage 2 (hits), Stage 6 (noise sources) | Open |
+| DF-13 | Hull damage, heat and cold have no visual of their own beyond fire glow and breach frost; temperature only shows in the status panel and has no effect on crew or systems. No smoke or sparks yet. | S11.1 (look pass) | Open |
 | ~~DF-14~~ | ~~Doors open by remote from anywhere with no power or crew needed.~~ | S1.4 | Done in S1.4: doors need door control power or hands at the door (D-031) |
 | DF-15 | Autoplay takes about 35 s for 100 runs because invariants and stuck checks run every tick. Fine for now; sample them if it grows. | Stage 3 | Open |
 | DF-16 | "Hands at the door" reads `state.crew`, which is empty until crew exist, so an unpowered door cannot be moved at all in play yet. | S1.6 (crew; working a door by hand becomes a crew task) | Open |
-| DF-17 | Life support is a flat rate on every room (refill with power, slow loss without). No flow between rooms, no crew breathing. | S1.5 | Open |
+| ~~DF-17~~ | ~~Life support is a flat rate on every room with no flow between rooms.~~ | S1.5 | Done in S1.5: air flows through doors, airlocks and breaches (D-034). Crew still do not breathe air down (S1.6) |
 | DF-18 | Shields, engines, weapons, sensors and medbay take power but do nothing with it yet. AI core power and damage only feed `aiCoreStatus()`. Damage comes only from the debug command, and nothing repairs it in play. | Stage 2 (combat systems), S1.6 (repairs), Stage 5 (AI degradation) | Open |
 | DF-19 | Power panel tiles show system codes (SHD, ENG...) with no on-screen legend on touch; the codes match the stencils on the room floors. | S11.4 (tutorial), S11.5 (touch polish) | Open |
+| DF-20 | Crew hazards (suffocation, burns, death by jettison) act on bare `state.crew` entries that only tests create. | S1.6 (real crew, suits as equipment) | Open |
+| DF-21 | Jettison has no cost beyond the room: no cargo loss, no hull or handling penalty, no AI argument first, and the vent graph still lists vents into the missing room. | Stage 3 (cargo), Stage 5 (AI argues before risky orders), Stage 6 (vents) | Open |
+| DF-22 | Nothing puts a fire out except starving or venting it, and nothing patches a breach except the debug command. | S1.6 (extinguish and patch tasks) | Open |
 
 ---
 
@@ -173,6 +176,22 @@ Items here are known shortcuts. Each names the stage that must clear it.
 **What:** When the ship refuses an order (no spare power, door control dark), the status panel shows the sim's own reason for a couple of seconds. Disabled buttons cover the cases that are obvious from the panel; door buttons stay pressable when door control is dark so a press can explain itself.
 **Why:** A tap that does nothing reads as a broken touch screen.
 
+### D-034 Air model (S1.5)
+**What:** `oxygen` is how full of breathable air a room is, 0 to 1, and bigger rooms hold more. Each tick: life support adds a flat amount per bar to every room (or the air goes slowly stale without it), air evens out through open doors in proportion to how far they are open, an open airlock empties its room in a few seconds, and a breach drains its room at a rate set by its size. The rates are named constants at the top of `src/sim/atmosphere.js` and are starting values to tune by play.
+**Why:** Brief §6. Room-level air (no per-tile gas) is enough for doors to matter and cheap enough to run thousands of bot ticks a second.
+
+### D-035 Fire (S1.5)
+**What:** Fire is an intensity from 0 to 1. It burns oxygen, grows in good air, starves below 12% and is out at once at zero. It heats the room, makes noise, breaks one bar of the room's system for every 15 seconds of full-size fire, and hurts anyone in the room (a suit halves that). Each tick it may jump to a neighbouring room: readily through an open door, at 4% of that rate through a shut one, never into a room with too little air to catch. Spread uses the seeded `hazard` RNG stream. With life support running, a small fire is fed faster than it burns, so a closed door alone will not kill it: vent it, cut life support to it, or (from S1.6) send someone.
+**Why:** Brief §6. Closed doors as firebreaks and venting as the sure cure give the player door and power decisions rather than a timer.
+
+### D-036 Jettison (S1.5)
+**What:** Rooms flagged `jettison: true` in the ship data can be cut loose: on the *Margin of Error* that is cargo, brig, door control, shields, weapons, medbay, quarters and sensors. The reactor, engines, life support, AI core, bridge and corridors cannot. Every interior door into the room must be fully shut first. The room is then gone for good: no air, no fire, no lights, its system lost and unrepairable, its doors welded, anyone inside dead whatever they are wearing. The button takes two presses within four seconds.
+**Why:** Brief §6 calls it a last resort that loses whatever is inside. The spine of the ship stays so a run cannot be ended by a single press; losing door control or weapons is survivable and costly.
+
+### D-037 Tick order (S1.5)
+**What:** Each tick runs orders, then air and fire, then power, then doors, then lights.
+**Why:** Fire can break a system mid-tick, so power must settle after it or a broken system would hold power for a tick. The autoplay bot caught this.
+
 ---
 
 ## Stage notes
@@ -185,3 +204,4 @@ _None yet. Stage 1 note goes here when Stage 1 is done._
 - **S1.2 (2026-11-15):** Fixed-timestep clock with pause, command queue, game event bus, input module (tap, drag, long-press, padded hit areas, keyboard), temporary test bay screen, autoplay bot that gives orders and pauses, 59 unit tests, 18 browser checks. DF-08 cleared: Eric switched Pages on and confirmed the preview works. DF-09 cleared. Eric tested on his iPad: looks, responds and feels good.
 - **S1.3 (2026-11-15):** Ship layout format and validation, the *Margin of Error* (15 rooms, 21 doors, 9 vents), room and door state in the sim, door and light orders, debug room/door commands, cutaway renderer with per-room lighting, fire, frost and alarms, ship view with status panel. Test bay and probes removed. 76 unit tests, 25 browser checks.
 - **S1.4 (2026-11-15):** Reactor power pool, system levels and damage, one-bar routing orders, lights as a power draw, brownout shedding, door control (remote with power, by hand without, electric locks), flat-rate life support, AI core status stub, power panel with touch buttons and Q-row keys, refusal messages. 91 unit tests, 30 browser checks. DF-14 cleared.
+- **S1.5 (2026-11-15):** Oxygen flow through doors, airlocks and breaches; fire that grows, starves, spreads, heats, and breaks systems; temperature; hazards to crew (suffocation, burns); emergency jettison with a two-press control; jettisoned rooms and sealed doors in the renderer and panels; `hazard` RNG stream. 106 unit tests, 33 browser checks. DF-17 cleared.
