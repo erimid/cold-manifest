@@ -25,7 +25,7 @@ npm run autoplay -- --runs <N>   # tools/autoplay.js: headless seeded runs, no c
 npm run build        # static output in dist/, deployable to any static host
 ```
 - Update `DECISIONS.md`: new decisions, new deferrals (with the stage that must revisit them), cleared deferrals.
-- Open a PR. The PR description lists what's playable now and how to try it (URL flags, debug commands).
+- Open a PR. The PR description lists what's playable now, how to try it (URL flags, debug commands), and the Cloudflare Pages preview link for testing on iPad.
 
 **End of stage (in addition to the green gate)**
 - A stage note in `DECISIONS.md`: what was built, what changed and why, known issues.
@@ -59,7 +59,7 @@ Session counts are estimates. A stage is done when its exit checks pass, not whe
 
 | Session | Work | Done when |
 |---|---|---|
-| S1.1 Scaffold | Vite project, folder layout from brief §4, `index.html`, `main.js` state machine stub, seeded RNG with substreams (+ tests), content loader (browser + Node), `tools/content-check.js` skeleton (schema check for files that exist, ID uniqueness, `Math.random` lint), `tools/autoplay.js` skeleton, GitHub Actions running the green gate on every PR. | `npm run dev` shows a title screen; all four gate commands run in CI. |
+| S1.1 Scaffold | Vite project, folder layout from brief §4, `index.html`, `main.js` state machine stub, seeded RNG with substreams (+ tests), content loader (browser + Node), `tools/content-check.js` skeleton (schema check for files that exist, ID uniqueness, `Math.random` lint), `tools/autoplay.js` skeleton, GitHub Actions running the green gate on every PR. Cloudflare Pages preview deploys (Eric connects the repo once; see D-014). | `npm run dev` shows a title screen; all four gate commands run in CI; the PR has a working preview link that opens on Eric's iPad. |
 | S1.2 Clock and input | Fixed-timestep sim clock, pause/resume, command queue, render interpolation. Input module (Pointer Events, DOM-first routing, tap/drag threshold, padded hit areas, long-press). Keyboard map (space = pause). | Unit test: 1,000 ticks paused leaves the sim state hash unchanged. Playwright test with iPad touch emulation: tap on a panel never hits the canvas under it; long-press opens info. |
 | S1.3 Ship model and renderer | Ship layout format (`content/ships/`): 12 to 16 rooms, doors, corridors, vent graph (data only for now), system placement. The *Margin of Error* layout. Room state (O2, temp, light, noise, door state, hull, fire, breach). Canvas cutaway renderer with per-room lighting, pre-rendered offscreen layers, landscape fit. Tap a room to see its status. | Ship renders crisply at 1024×768, 1366×1024 and 1920×1080. Room status panel works by tap and click. |
 | S1.4 Power and systems | Reactor power pool, power routing panel (bottom of screen, chunky buttons + number keys), system levels and damage, lights as a power draw, door system (remote control with power, by hand without), life support, AI core damage level (stub value). | Routing works with mouse, touch and keyboard. Unit tests: power never exceeds supply; unpowered doors need a crew member present. |
@@ -67,7 +67,7 @@ Session counts are estimates. A stage is done when its exit checks pass, not whe
 | S1.6 Crew movement and repairs | Crew entities (placeholder stats), pathfinding on the room/door graph (respects locked and jammed doors), select by tap or number keys, move orders, repair / extinguish / patch tasks, health and suffocation, suits as an equipment flag. | You can fight a fire and patch a breach with three crew, entirely by touch. Orders given while paused start on resume. |
 | S1.7 Voice, sound, debug, bot | AI text box (typed-out effect, priority queue, drop stale lines, scrollable history), ~40 placeholder lines flagged `placeholder: true`. WebAudio engine with data-defined patches, unlocked by first tap. Debug panel (`?debug=1`). Auto-pause settings (fire, breach, death). Autoplay v1 (see §4). Touch pass on iPad-sized viewport. | Stage exit checks below. |
 
-**Exit checks:** green gate; autoplay v1 at 100 seeded hazard scenarios with no crash, no NaN state, no crew stuck on a path; 60 fps with a fire in the frame on the dev machine with CPU throttled 4×; Eric plays 10 minutes on an iPad (see open questions).
+**Exit checks:** green gate; autoplay v1 at 100 seeded hazard scenarios with no crash, no NaN state, no crew stuck on a path; 60 fps with a fire in the frame on the dev machine with CPU throttled 4×; Eric plays 10 minutes on his iPad from the PR preview link.
 
 ### Stage 2: Combat  (≈5 sessions)
 **Depends on:** Stage 1 (clock, power, damage, crew).
@@ -116,7 +116,7 @@ Session counts are estimates. A stage is done when its exit checks pass, not whe
 
 | Session | Work | Done when |
 |---|---|---|
-| S5.1 Voice and tooling | AI personality file (`content/ai-lines/_personality.md`): name, history, voice rules, do's and don'ts, 50 sample lines across categories. Line schema (id, category, conditions, weight, slots, priority). Slot system with fallbacks. Near-duplicate checker that treats slot variants as one line (slot-normalized n-gram similarity plus edit distance). | **Eric approves the voice sample before any bulk writing.** Checker flags a planted near-duplicate. |
+| S5.1 Voice and tooling | AI personality file (`content/ai-lines/_personality.md`) for M.A.R.G.O. ("Margo"): history, voice rules, do's and don'ts, 50 sample lines across categories. Line schema (id, category, conditions, weight, slots, priority). Slot system with fallbacks. Near-duplicate checker that treats slot variants as one line (slot-normalized n-gram similarity plus edit distance). | **Eric approves the voice sample before any bulk writing.** Checker flags a planted near-duplicate. |
 | S5.2 Selector | Triggers from bus events, condition matching, weights, no-repeat tracking (hard rule: never within a run; prefer unheard, then heard longest ago, across the meta-profile), priority queue with stale-drop, calm-period pacing (one line per 30 to 90 seconds), no talking over important events. When nothing eligible is left, stay silent rather than repeat. | Unit tests for every selection rule. |
 | S5.3 Trust and behavior | AI trust and opinions; arguing before risky orders (risk detector: venting an occupied room, jettisoning crew, etc.); limited refusals per run; captain's override (hits trust and crew opinion); withholding and lying hooks (low trust, protecting a liked crew member, damaged core); glitch rendering for a damaged core. | Each behavior reachable via debug panel and seen in bot runs. |
 | S5.4 to S5.7 Lines, 1,000 | Four writing sessions of about 250 lines each, in batches of 50 to 100 per category, running the checker after every batch. Allocation in §3. Remove all Stage 1 placeholder lines. | Checker shows the S5 column of §3 met, zero near-duplicates, zero placeholders. |

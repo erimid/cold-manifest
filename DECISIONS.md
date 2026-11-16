@@ -18,7 +18,7 @@ Items here are known shortcuts. Each names the stage that must clear it.
 | DF-01 | Placeholder AI lines (~40, flagged `placeholder: true`) stand in for the real library. | Stage 5 (all removed by end of S5.7) | Open |
 | DF-02 | Placeholder audio patches. | Stage 11 (S11.2) | Open |
 | DF-03 | Placeholder crew portraits in the crew panel. | Stage 8 (S8.2) | Open |
-| DF-04 | Faction, port and AI names are provisional (see D-012). | Stage 7 (factions), Stage 5 (AI name) | Open |
+| DF-04 | Faction and port names are provisional (see D-012). | Stage 7 (S7.4) | Open |
 | DF-05 | Vent graph is data only, not used by anything, until the creature exists. | Stage 6 (S6.1) | Open |
 | DF-06 | Pre-fight talk/bribe uses a placeholder negotiation value until crew skills exist. | Stage 4 (S4.1) | Open |
 
@@ -71,13 +71,18 @@ Items here are known shortcuts. Each names the stage that must clear it.
 **What:** A save is a JSON snapshot of sim state plus RNG state with a `schemaVersion`, migrated forward on load. Export/import is that JSON compressed and base64-encoded.
 **Why:** The build runs across many stages and sessions; old saves must keep loading.
 
-### D-012 Provisional names (Stage 1, revisit Stage 5 and Stage 7)
-**What:** Until Eric confirms, the ship AI is provisionally **"Tally"**: a salvaged company cargo-custody intelligence (formal designation TLY-9) that the crew calls Tally. Factions use the brief's working descriptions (Receivers, miners' union, religious order, pirate confederation, research collective) as internal ids; final names are chosen in S7.4.
+### D-012 Names: the AI is M.A.R.G.O.; factions provisional (Stage 1, revisit Stage 7)
+**What:** The ship AI is **M.A.R.G.O.** (Manifest Audit and Route Guidance Operator), a salvaged company cargo-custody intelligence. The crew calls it **Margo**, which also happens to be what's left of the ship's name, *Margin of Error*. Name confirmed by Eric on 2026-11-15 (he asked for an acronym). Factions use the brief's working descriptions (Receivers, miners' union, religious order, pirate confederation, research collective) as internal ids; final names are chosen in S7.4.
 **Why:** Placeholder lines in Stage 1 need something to call the AI, and ids need to be stable even if display names change. Display names live in content, so renaming later is a content edit.
 
 ### D-013 Session and PR rhythm
 **What:** One PR per session, each passing the green gate (see PLAN.md §0). Stage notes and autoplay reports at the end of each stage.
 **Why:** Small reviewable steps that are always playable.
+
+### D-014 Preview deploys on Cloudflare Pages (Stage 1)
+**What:** The repo is connected to Cloudflare Pages (build `npm run build`, output `dist/`). Every PR gets its own preview URL, and `main` deploys to production. PR descriptions link the preview so Eric can test on his iPad.
+**Why:** Eric tests on a real iPad (brief §4, §22). The brief already names Cloudflare Pages as the target host, and its Git integration gives per-PR previews with no secrets in the repo.
+**Note:** Connecting the repo is a one-time step in Eric's Cloudflare account (S1.1).
 
 ---
 
