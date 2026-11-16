@@ -5,21 +5,22 @@ Command: `node tools/autoplay.js --runs 100 --minutes 10 --seed auto`
 ```
 Cold Manifest autoplay
   runs:              100 (seeds auto-1 to auto-100), each played as chaos, as a hazard scenario, under fire and as a duel with every enemy, each twice
-  ship:              Margin of Error, crew of 3, 67 AI lines
+  ship:              Margin of Error, crew of 3, 76 AI lines
   crashed or bad:    0
 
 Chaos (10 game minutes each, 12000 ticks): a bot doing everything at random
-  orders per run:    398.4 given, 206.4 refused up front, 0.6 dropped
-  door moves:        87.1 completed per run
-  power per run:     35.0 bars routed, 1.0 brownouts, door control dark 30% of the time
-  hazards per run:   5.6 fires lit, 2.4 spread, 7.8 went out, 2.2 system bars burned, 1.8 rooms jettisoned
-  crew per run:      58.4 sent, 37.2 arrived, 0.7 blocked, 2.9 of 3 died
-  crew work per run: 2.2 fires put out, 2.3 breaches patched, 5.2 system bars repaired
-  air:               rooms were unbreathable 42% of room-time
-  fights per run:    9.6 started, 33.3 shots fired (17.3 hit, 14.9 stopped by shields, 2.8 missed), 0.2 enemies destroyed
-  fight endings:     destroyed 20, our hull gave out 350, their crew is dead 6, surrendered 0, we jumped away 0, they jumped away 1, talked down 3, paid off 8, broke off 169
-  AI lines per run:  18.2 (about one every 33 seconds)
-  pauses per run:    47.7 (state checked every paused frame)
+  orders per run:    389.9 given, 210.0 refused up front, 0.5 dropped
+  door moves:        88.8 completed per run
+  power per run:     32.7 bars routed, 1.1 brownouts, door control dark 31% of the time
+  hazards per run:   5.3 fires lit, 2.1 spread, 7.0 went out, 2.0 system bars burned, 1.8 rooms jettisoned
+  crew per run:      52.2 sent, 36.1 arrived, 0.8 blocked, 2.9 of 3 died
+  crew work per run: 1.8 fires put out, 2.2 breaches patched, 4.5 system bars repaired
+  air:               rooms were unbreathable 44% of room-time
+  fights per run:    9.6 started, 31.2 shots fired (17.7 hit, 12.6 stopped by shields, 2.2 missed), 0.2 enemies destroyed
+  boarding per run:  0.8 of ours crossed, 2.2 of theirs crossed, 0.6 killed hand to hand, 0.0 captured
+  fight endings:     destroyed 16, our hull gave out 382, their crew is dead 4, surrendered 0, we jumped away 0, they jumped away 2, talked down 4, paid off 5, broke off 157
+  AI lines per run:  18.0 (about one every 33 seconds)
+  pauses per run:    47.8 (state checked every paused frame)
 
 Hazard scenarios (5 game minutes each): fires and breaches at once, and a bot trying to save the ship
   completed:         100 of 100
@@ -45,11 +46,19 @@ Duels (up to 8 game minutes each): every enemy in turn, and a bot fighting it
     our shots:      7.1 per fight; 73% hit, 16% stopped by shields, 9% missed
     their shots:    0.0 per fight, 0.0 hit; our hull at the end 20.0 of 20, crew alive 3.00 of 3
   Salvager skiff: 100 fights
-    endings:        surrendered 59, destroyed 24, talked down 8, paid off 8, we jumped away 1
-    length:         median 75s, longest 173s
-    our shots:      10.1 per fight; 46% hit, 32% stopped by shields, 18% missed
-    their shots:    8.2 per fight, 1.1 hit; our hull at the end 18.1 of 20, crew alive 3.00 of 3
-    hails answered: talk 22, fight 70, pay 8; 83 surrender offers made
+    endings:        surrendered 48, destroyed 19, broke off 15, talked down 8, paid off 8, we jumped away 2
+    length:         median 74s, longest 233s
+    our shots:      8.1 per fight; 55% hit, 25% stopped by shields, 18% missed
+    their shots:    6.8 per fight, 1.3 hit; our hull at the end 17.8 of 20, crew alive 2.07 of 3
+    boarding:       1.5 of theirs crossed to us, 0.0 of ours to them per fight; 44 of theirs and 91 of ours killed hand to hand, 3 captured
+    hails answered: talk 22, fight 70, pay 8; 68 surrender offers made
+  Salvager skiff, and we board them: 100 fights
+    endings:        surrendered 27, destroyed 25, broke off 20, we jumped away 11, paid off 8, talked down 7, their crew is dead 2
+    length:         median 88s, longest 180s
+    our shots:      7.9 per fight; 53% hit, 28% stopped by shields, 16% missed
+    their shots:    7.6 per fight, 1.8 hit; our hull at the end 16.9 of 20, crew alive 1.64 of 3
+    boarding:       1.3 of theirs crossed to us, 1.5 of ours to them per fight; 71 of theirs and 128 of ours killed hand to hand, 50 captured
+    hails answered: pay 8, fight 64, talk 28; 33 surrender offers made
 
 ```
 

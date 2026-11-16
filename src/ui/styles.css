@@ -978,3 +978,19 @@ body {
   flex-wrap: wrap;
   gap: 8px;
 }
+
+/* Aboard the other ship (S2.4): the chip says so in the alarm colour. */
+.crewchip.is-away {
+  border-color: var(--alarm);
+}
+
+.crewchip.is-away .crewchip__task {
+  color: var(--alarm);
+}
+
+/* Settings toggles two to a row, so the sheet stays short on an iPad. */
+.sheet__pairs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}

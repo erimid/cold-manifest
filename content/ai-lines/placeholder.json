@@ -72,6 +72,15 @@
     { "id": "ph.combat_progress.009", "category": "combat_progress", "placeholder": true, "conditions": { "trigger": "fight.fleeing" }, "text": "They've had enough. Their engines are hot and pointed away from us." },
     { "id": "ph.combat_end.001", "category": "combat_end", "placeholder": true, "conditions": { "trigger": "fight.won" }, "text": "That's settled. I'm logging it as a navigational hazard, removed." },
     { "id": "ph.combat_end.002", "category": "combat_end", "placeholder": true, "conditions": { "trigger": "fight.won" }, "text": "It's over. Count the crew, then count the holes." },
-    { "id": "ph.combat_end.003", "category": "combat_end", "placeholder": true, "conditions": { "trigger": "fight.won" }, "text": "Guns cold. Nobody will ask us what happened here, and I suggest we let them not." }
+    { "id": "ph.combat_end.003", "category": "combat_end", "placeholder": true, "conditions": { "trigger": "fight.won" }, "text": "Guns cold. Nobody will ask us what happened here, and I suggest we let them not." },
+    { "id": "ph.combat_progress.010", "category": "combat_progress", "placeholder": true, "conditions": { "trigger": "enemy.crew.boarded" }, "text": "We've been boarded. They're inside the hull, Captain. I can lock doors; I can't throw punches."},
+    { "id": "ph.combat_progress.011", "category": "combat_progress", "placeholder": true, "conditions": { "trigger": "enemy.crew.boarded" }, "text": "Docking clamps on our hatch and boots in the corridor. We have guests."},
+    { "id": "ph.combat_progress.012", "category": "combat_progress", "placeholder": true, "conditions": { "trigger": "enemy.crew.boarded" }, "text": "Intruders aboard. I'd suggest someone large and someone else with a wrench."},
+    { "id": "ph.combat_progress.013", "category": "combat_progress", "placeholder": true, "conditions": { "trigger": "crew.boarded" }, "text": "{crew_name} is aboard them. I can't see much over there. Their cameras are not my cameras."},
+    { "id": "ph.combat_progress.014", "category": "combat_progress", "placeholder": true, "conditions": { "trigger": "crew.boarded" }, "text": "{crew_name} made it across. Their ship smells of burnt coolant, apparently."},
+    { "id": "ph.combat_progress.015", "category": "combat_progress", "placeholder": true, "conditions": { "trigger": "crew.boarded" }, "text": "{crew_name} is through the tube. Bring them back in one piece, please."},
+    { "id": "ph.combat_end.010", "category": "combat_end", "placeholder": true, "conditions": { "trigger": "crew.captured" }, "text": "The ones left aboard have put their hands up. The brig isn't ready for guests, so I've locked them in a cupboard."},
+    { "id": "ph.combat_end.011", "category": "combat_end", "placeholder": true, "conditions": { "trigger": "crew.captured" }, "text": "Their boarders have surrendered. Their ship didn't wait for them."},
+    { "id": "ph.combat_end.012", "category": "combat_end", "placeholder": true, "conditions": { "trigger": "crew.captured" }, "text": "We have prisoners. Nobody asked me where to put them, so I've chosen somewhere cold." }
   ]
 }

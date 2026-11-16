@@ -616,7 +616,7 @@ async function voiceTests(browser) {
     await page.waitForFunction(() => window.coldManifest.sim.state.rooms.sensors.fire > 0.3, null, { timeout: 2000 });
     assert.equal(await paused(page), false, 'no pause this time');
     const saved = await game(page, () => JSON.parse(window.localStorage.getItem('cold-manifest.settings.v1')));
-    assert.deepEqual(saved.autoPause, { fight: true, fire: false, breach: true, death: true });
+    assert.deepEqual(saved.autoPause, { fight: true, boarded: true, fire: false, breach: true, death: true });
   });
 
   await check('settings: sound off silences everything, sound on brings the hum back', async () => {
@@ -649,7 +649,7 @@ async function voiceTests(browser) {
   await check('a reload keeps the settings', async () => {
     await page.reload();
     await page.waitForFunction(() => window.coldManifest?.machine.state === 'title');
-    assert.deepEqual(await game(page, () => window.coldManifest.settings.values.autoPause), { fight: true, fire: false, breach: true, death: true });
+    assert.deepEqual(await game(page, () => window.coldManifest.settings.values.autoPause), { fight: true, boarded: true, fire: false, breach: true, death: true });
   });
 
   await check('no page errors', async () => assert.deepEqual(errors, []));
@@ -1025,6 +1025,89 @@ async function endingTests(browser) {
   await context.close();
 }
 
+async function boardingTests(browser) {
+  console.log('iPad: boarding');
+  const context = await browser.newContext({ ...devices['iPad (gen 7) landscape'] });
+  const page = await context.newPage();
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  await page.goto(`http://localhost:${PORT}/?seed=E2E-BOARD&autopause=0&debug=1`);
+  await page.waitForFunction(() => window.coldManifest?.machine.state === 'title');
+  await page.tap('#btn-ship');
+  await page.waitForFunction(() => window.coldManifest.machine.state === 'ship');
+  const shots = process.env.E2E_SHOTS;
+  const frame = () => page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
+  const aboardThem = (id) => game(page, (cid) => Boolean(window.coldManifest.sim.state.fight?.enemy.crew[cid]), id);
+  const tapFoe = async (id) => {
+    await frame();
+    const t = await game(page, (rid) => window.coldManifest.shipView.debug.foeTargets().find((x) => x.kind === 'foe' && x.id === rid), id);
+    assert.ok(t, `no enemy room ${id}`);
+    await page.touchscreen.tap(t.x + t.w / 2, t.y + t.h / 2);
+  };
+  const tapOurs = async (id) => {
+    await frame();
+    const t = await target(page, id);
+    await page.touchscreen.tap(t.x + t.w / 2, t.y + t.h / 2);
+  };
+
+  await check('with their shields up, a boarding order is refused and the panel says why', async () => {
+    await page.tap('#btn-dbg-menu');
+    await page.tap('#btn-dbg-fight-salvager-skiff');
+    await page.waitForSelector('#btn-engage:not([hidden])', { timeout: 2000 });
+    await page.tap('#btn-engage');
+    await page.tap('#crew-okoro');
+    await tapFoe('bridge');
+    await page.waitForFunction(() => /shields are up/.test(document.querySelector('.status__note')?.textContent ?? ''), null, { timeout: 2000 });
+    assert.match(await page.textContent('#crew-hint'), /a room of theirs to board/);
+  });
+
+  await check('their shields down: tap one of ours, then a room of theirs, and they cross over', async () => {
+    // Hits on their shield room break its bar.
+    for (let i = 0; i < 2; i++) await game(page, () => window.coldManifest.sim.enqueue({ type: 'debug.hit', at: 'them', room: 'shields', weapon: 'pulse-laser', force: true }));
+    await page.waitForFunction(() => window.coldManifest.sim.state.fight.enemy.shield.charge < 1 && window.coldManifest.sim.state.fight.enemy.systems.shields.damage >= window.coldManifest.sim.state.fight.enemy.systems.shields.level, null, { timeout: 3000 });
+    await tapFoe('bridge');
+    await page.waitForFunction(() => window.coldManifest.sim.state.crew.okoro?.board?.room === 'bridge' || window.coldManifest.sim.state.crew.okoro?.task === 'crossing', null, { timeout: 2000 });
+    await page.waitForFunction(() => /In the tube/.test(document.querySelector('#crew-okoro').textContent), null, { timeout: 8000 });
+    await page.waitForFunction(() => Boolean(window.coldManifest.sim.state.fight.enemy.crew.okoro), null, { timeout: 12000 });
+    await page.waitForFunction(() => /Aboard/.test(document.querySelector('#crew-okoro').textContent), null, { timeout: 2000 });
+    assert.equal(await game(page, () => document.querySelector('#crew-okoro').classList.contains('is-away')), true);
+    await frame();
+    const onTheirs = await game(page, () => window.coldManifest.shipView.debug.foeTargets().filter((x) => x.kind === 'crew').map((x) => x.id));
+    assert.deepEqual(onTheirs, ['okoro'], 'drawn, and tappable, on their ship');
+    assert.match(await page.textContent('.status__stats'), /Their /);
+    if (shots) await page.screenshot({ path: `${shots}/s2-4-aboard-ipad.png` });
+  });
+
+  await check('aboard them, a tap on a room of ours brings them home', async () => {
+    await tapOurs('medbay');
+    await page.waitForFunction(() => window.coldManifest.sim.state.crew.okoro?.room === 'medbay', null, { timeout: 25000 });
+    assert.equal(await aboardThem('okoro'), false);
+    assert.equal(await game(page, () => document.querySelector('#crew-okoro').classList.contains('is-away')), false);
+  });
+
+  await check('they board us: red boarders appear in our ship, and only ours can be tapped', async () => {
+    await page.tap('#btn-dbg-menu');
+    await page.tap('#btn-dbg-end-boardUs');
+    // (Their captain may have sent a party of its own already: our shields start unpowered.)
+    await page.waitForFunction(() => Object.values(window.coldManifest.sim.state.crew).some((m) => m.owner === 'enemy' && m.alive), null, { timeout: 4000 });
+    const tappable = await game(page, () => window.coldManifest.shipView.debug.targets().filter((x) => x.kind === 'crew').map((x) => x.id).sort());
+    assert.deepEqual(tappable, ['dace', 'ilse', 'okoro']);
+    assert.equal(await page.$$eval('.crewchip:not(.weapon)', (nodes) => nodes.length), 3, 'no chips for their crew');
+    if (shots) {
+      await page.waitForTimeout(1500);
+      await page.screenshot({ path: `${shots}/s2-4-boarders-ipad.png` });
+    }
+  });
+
+  await check('every control is at least 44px tall and wide in a boarding fight', async () => {
+    const small = await page.$$eval('.ship .btn', (nodes) => nodes.map((n) => ({ id: n.id, r: n.getBoundingClientRect() })).filter((n) => n.r.width > 0 && (n.r.width < 44 || n.r.height < 44)).map((n) => `${n.id} ${Math.round(n.r.width)}x${Math.round(n.r.height)}`));
+    assert.deepEqual(small, []);
+  });
+
+  await check('no page errors', async () => assert.deepEqual(errors, []));
+  await context.close();
+}
+
 const server = await startServer();
 const browser = await chromium.launch(process.env.PW_CHROMIUM ? { executablePath: process.env.PW_CHROMIUM } : {});
 try {
@@ -1034,6 +1117,7 @@ try {
   await fightTests(browser);
   await hitTests(browser);
   await endingTests(browser);
+  await boardingTests(browser);
 } finally {
   await browser.close();
   server.kill();

@@ -175,12 +175,22 @@ function stepTemperature(sim, seconds) {
   }
 }
 
+/**
+ * Announce something about a crew member. News about our people is ours
+ * wherever they stand, and news about theirs is the enemy's, so Margo mourns
+ * our dead aboard their ship and not their dead aboard ours.
+ */
+export function crewEmit(ship, member, type, payload) {
+  const bus = ship.events.bus ?? ship.events;
+  bus.emit(member.owner === 'enemy' ? `enemy.${type}` : type, { ...payload, aboard: ship.side ?? 'player' });
+}
+
 /** Kill a crew member. Stage 4 hangs memories and grief on this event. */
 export function killCrew(sim, id, cause) {
   const member = sim.state.crew[id];
   if (!member || member.alive === false) return;
-  Object.assign(member, { alive: false, health: 0, goal: null, path: [], task: 'dead' });
-  sim.events.emit('crew.died', { crew: id, room: member.room, cause, tick: sim.state.tick });
+  Object.assign(member, { alive: false, health: 0, goal: null, path: [], task: 'dead', board: null, crossEnds: null });
+  crewEmit(sim, member, 'crew.died', { crew: id, room: member.room, cause, tick: sim.state.tick });
 }
 
 /** What bad air and fire do to anyone standing in them. */
@@ -213,7 +223,7 @@ export function harmCrew(sim, id, amount, cause) {
   if (!member || member.alive === false || !(amount > 0)) return;
   const before = member.health ?? 1;
   member.health = Math.max(0, before - amount);
-  if (before >= 0.5 && member.health < 0.5 && member.health > 0) sim.events.emit('crew.hurt', { crew: id, room: member.room, cause, tick: sim.state.tick });
+  if (before >= 0.5 && member.health < 0.5 && member.health > 0) crewEmit(sim, member, 'crew.hurt', { crew: id, room: member.room, cause, tick: sim.state.tick });
   if (member.health === 0) killCrew(sim, id, cause);
 }
 
