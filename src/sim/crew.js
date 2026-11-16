@@ -72,7 +72,7 @@ export function spotIn(room, index) {
 }
 
 /** A new crew member standing in `roomId`. `index` is their place on the roster. */
-export function newCrewMember(layout, { id, name, engineer = false }, roomId, index = 0, owner = 'player') {
+export function newCrewMember(layout, { id, name, engineer = false, skills = {}, traits = [] }, roomId, index = 0, owner = 'player') {
   const { x, y } = spotIn(layout.room(roomId), index);
   return {
     id,
@@ -80,6 +80,8 @@ export function newCrewMember(layout, { id, name, engineer = false }, roomId, in
     index,
     owner, // whose crew: 'player' or 'enemy'. Not always the ship they are aboard
     engineer: engineer === true, // may use the service crawlways (D-072); from S4.1 a skill or trait decides
+    skills: { ...skills }, // piloting, engineering, weapons, medicine, combat, negotiation: read by conditions only until S4.1 (D-112)
+    traits: [...traits], // trait ids; none exist until S4.1
 
     room: roomId,
     x,
@@ -272,7 +274,7 @@ export const CREW_COMMANDS = {
       // They may say no (S2.10): a memory can keep them out of a room. Nothing else about them changes.
       const no = refusalOf(sim, member, cmd.room);
       if (no) {
-        crewEmit(sim, member, 'crew.refused', { crew: cmd.crew, room: cmd.room, rule: no.rule, memory: no.memory.type, reason: no.reason, tick: sim.state.tick });
+        crewEmit(sim, member, 'crew.refused', { crew: cmd.crew, room: cmd.room, rule: no.rule, memory: no.memory?.type ?? null, reason: no.reason, tick: sim.state.tick });
         return;
       }
       letGo(sim, member); // a new order: whatever they were carrying is set down here

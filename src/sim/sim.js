@@ -25,6 +25,8 @@ import { attachJudgement, checkJudgementInvariants, considerOrder, overrode, sta
 import { attachVoice, checkVoiceInvariants, newVoiceState, stepVoice } from '../ai/voice.js';
 import { createEventBus } from '../engine/events.js';
 import { createRngSet } from '../engine/rng.js';
+import { EVENT_CHANCE, attachEvents, buildEvents, checkEventInvariants, eventCommands, newEventState } from '../narrative/events.js';
+import { buildRules } from '../narrative/rules.js';
 import { checkBoardingInvariants } from './boarding.js';
 import { ATMOSPHERE_COMMANDS, checkAtmosphereInvariants, stepAtmosphere } from './atmosphere.js';
 import { START_MONEY, checkCombatInvariants, checkFightInvariants, combatCommands, enemyOf, newCombatState, stepCombat } from './combat.js';
@@ -32,7 +34,7 @@ import { CREW_COMMANDS, checkCrewInvariants, newCrewState, stepCrew } from './cr
 import { POWER_COMMANDS, checkPowerInvariants, isPowered, lightsNeedPower, newSystemsState, stepPower } from './power.js';
 import { checkSenseInvariants, newSenseState, stepSenses } from './senses.js';
 import { HOLD_COMMANDS, checkHoldInvariants, newHoldState, stepHold } from './hold.js';
-import { MEMORY_TYPES, attachMemory, checkMemoryInvariants, lampHolder, remember, stepNerve, whyKeepLamp } from './memory.js';
+import { attachMemory, checkMemoryInvariants, lampHolder, memoryTypes, remember, stepNerve, whyKeepLamp } from './memory.js';
 import { attachSector, checkRunInvariants, newRunState, sectorCommands, stepSector } from './sector.js';
 import { buildLayout } from './ship.js';
 
@@ -248,7 +250,7 @@ const COMMANDS = {
       const member = sim.state.crew[cmd.crew];
       if (!member?.alive || member.owner !== 'player') return `no crew member "${cmd.crew}" of ours aboard`;
       if (cmd.dread !== undefined) return cmd.dread >= 0 && cmd.dread < 1 ? null : 'dread must be at least 0 and below 1';
-      if (!MEMORY_TYPES.includes(cmd.memory)) return `memory must be one of ${MEMORY_TYPES.join(', ')}`;
+      if (!memoryTypes(sim).includes(cmd.memory)) return `memory must be one of ${memoryTypes(sim).join(', ')}`;
       if (cmd.room !== undefined && !sim.state.rooms[cmd.room]) return `no room "${cmd.room}"`;
       return null;
     },
@@ -264,7 +266,11 @@ const COMMANDS = {
   ...HOLD_COMMANDS,
   ...combatCommands(newShipState),
   ...sectorCommands(newShipState),
+  ...eventCommands(newShipState),
 };
+
+/** Every kind of order the sim accepts, for the content checker (a risk rule names the kind it is about). */
+export const COMMAND_TYPES = Object.freeze(Object.keys(COMMANDS));
 
 function stepDoors(sim) {
   const stride = TICK_SECONDS / (isPowered(sim, 'doors') ? DOOR_SECONDS : MANUAL_DOOR_SECONDS);
@@ -313,8 +319,12 @@ const SYSTEMS = [...SHIP_SYSTEMS, stepEnemy, (sim) => stepCombat(sim, TICK_SECON
  *   ships   every ship item from content/ships/, so enemies can be brought alongside
  *   sector  a sector item from content/sectors/: the run's chart is drawn from it (S3.1). Without one there is no run
  *   run     options for the run: { pursuit: true | false } to fix whether the contract is followed
+ *   rules   { memories, refusals, risks }: the items of those content folders, what the crew remember and
+ *           refuse and what Margo objects to (S3.3).
+ *           Without them nobody remembers, refuses or objects
+ *   events  the items from content/events/: what can be met on the chart (S3.3). Without them nothing is
  */
-export function createSim({ seed, ship, crew = [], lines = [], weapons = [], ships = [], sector = null, run = {} }) {
+export function createSim({ seed, ship, crew = [], lines = [], weapons = [], ships = [], sector = null, run = {}, rules = {}, events = [] }) {
   const layout = buildLayout(ship);
   const weaponById = new Map(weapons.map((item) => [item.id, item]));
   const shipById = new Map(ships.map((item) => [item.id, item]));
@@ -345,6 +355,10 @@ export function createSim({ seed, ship, crew = [], lines = [], weapons = [], shi
     layout,
     /** Everything the AI could say. Content, not state. */
     lines,
+    /** What the crew remember and refuse, and what Margo objects to. Content, not state. */
+    rules: buildRules(rules),
+    /** The transit events that can be met (`events` is the bus, so these go by another name). Content, not state. */
+    transit: buildEvents(events),
     state: {
       seed: String(seed),
       ship: layout.id,
@@ -423,11 +437,17 @@ export function createSim({ seed, ship, crew = [], lines = [], weapons = [], shi
       sim.rng.setState(snap.rng);
     },
   };
-  if (sector) sim.state.run = newRunState(sector, sim.rng.stream('map'), run);
+  if (sector) {
+    sim.state.run = newRunState(sector, sim.rng.stream('map'), run);
+    // What the events leave behind them (narrative/events.js, effects.js): the event on the table, notes for
+    // later events, and the hooks for scenes (Stage 4) and the threat (Stage 6).
+    Object.assign(sim.state.run, { events: newEventState(), eventChance: { ...EVENT_CHANCE, ...sector.events }, flags: {}, scenes: [], threat: null });
+  }
   attachVoice(sim);
   attachJudgement(sim);
   attachMemory(sim);
   attachSector(sim);
+  attachEvents(sim);
   return sim;
 }
 
@@ -469,7 +489,7 @@ export function checkInvariants(sim) {
   const problems = [];
   if (!Number.isInteger(sim.state.tick) || sim.state.tick < 0) problems.push(`tick is ${sim.state.tick}`);
   const enemy = enemyOf(sim);
-  problems.push(...shipProblems(sim, enemy), ...checkVoiceInvariants(sim), ...checkJudgementInvariants(sim), ...checkFightInvariants(sim), ...checkBoardingInvariants(sim, enemy), ...checkRunInvariants(sim));
+  problems.push(...shipProblems(sim, enemy), ...checkVoiceInvariants(sim), ...checkJudgementInvariants(sim), ...checkFightInvariants(sim), ...checkBoardingInvariants(sim, enemy), ...checkRunInvariants(sim), ...checkEventInvariants(sim));
   if (enemy) problems.push(...shipProblems(enemy, sim).map((problem) => `enemy: ${problem}`));
   return problems;
 }

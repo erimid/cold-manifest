@@ -1,0 +1,65 @@
+{
+  "note": "The orders Margo objects to (S2.10, moved into content in S3.3; D-101, D-110). `grave` ones she refuses, a few times a run; the rest she argues with. Tried in `order`; the first that fits is the one she raises. $order is the order as given, $room each room the rule looks at. The seen.* facts are the room as she sees it: where she has no eyes she has nothing to say.",
+  "items": [
+    {
+      "id": "jettison_crew",
+      "order": 1,
+      "grave": true,
+      "on": "room.jettison",
+      "rooms": "order.room",
+      "crew": { "in": "$room" }
+    },
+    {
+      "id": "vent_crew",
+      "order": 2,
+      "grave": true,
+      "on": "door.set",
+      "rooms": "order.door.inside",
+      "when": [{ "fact": "order", "field": "state", "eq": "open" }, { "fact": "door.airlock", "door": "$order.door" }, { "fact": "door.state", "door": "$order.door", "ne": "open" }],
+      "crew": { "in": "$room", "suit": false }
+    },
+    {
+      "id": "vent_near",
+      "order": 3,
+      "grave": false,
+      "note": "Nobody in the airlock room itself, but an open door lets the next room empty with it.",
+      "on": "door.set",
+      "rooms": "order.door.beside",
+      "when": [{ "fact": "order", "field": "state", "eq": "open" }, { "fact": "door.airlock", "door": "$order.door" }, { "fact": "door.state", "door": "$order.door", "ne": "open" }],
+      "crew": { "in": "$room", "suit": false }
+    },
+    {
+      "id": "air_cut",
+      "order": 4,
+      "grave": false,
+      "note": "Cutting the last bar of life support while someone unsuited stands in thin air or beside a hole.",
+      "on": "power.add",
+      "rooms": "ship",
+      "when": [
+        { "fact": "order", "field": "system", "eq": "life_support" },
+        { "fact": "order", "field": "delta", "eq": -1 },
+        { "fact": "system.power", "system": "life_support", "eq": 1 },
+        { "any": [{ "fact": "room.breach", "room": "$room", "gt": 0 }, { "fact": "room.oxygen", "room": "$room", "lt": 0.5 }] }
+      ],
+      "crew": { "in": "$room", "suit": false }
+    },
+    {
+      "id": "into_fire",
+      "order": 5,
+      "grave": false,
+      "on": "crew.move",
+      "rooms": "order.room",
+      "when": [{ "fact": "order", "field": "ship", "ne": "them" }, { "fact": "seen.live", "room": "$room" }, { "fact": "seen.fire", "room": "$room", "gte": 0.7 }],
+      "crew": { "id": "$order.crew", "suit": false, "away": "$room" }
+    },
+    {
+      "id": "into_vacuum",
+      "order": 6,
+      "grave": false,
+      "on": "crew.move",
+      "rooms": "order.room",
+      "when": [{ "fact": "order", "field": "ship", "ne": "them" }, { "fact": "seen.live", "room": "$room" }, { "fact": "seen.oxygen", "room": "$room", "lt": 0.15 }],
+      "crew": { "id": "$order.crew", "suit": false, "away": "$room" }
+    }
+  ]
+}

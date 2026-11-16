@@ -4,10 +4,13 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import { killCrew, harmCrew } from '../src/sim/atmosphere.js';
-import { DREAD, MEMORY_MAX, MEMORY_SECONDS, darkMemory, recall, refusalOf, remember, topMemory } from '../src/sim/memory.js';
+import { DREAD, MEMORY_MAX, darkMemory, recall, refusalOf, remember, topMemory } from '../src/sim/memory.js';
 import { TICK_RATE, checkInvariants } from '../src/sim/sim.js';
 import { createIntercom, replyKind } from '../src/ui/intercom.js';
 import { CATALOG, CREW, SHIP, content, newCrewedSim, newTalkingSim } from './helpers.js';
+
+/** How long each kind of memory lasts, from content/. */
+const MEMORY_SECONDS = Object.fromEntries(content.all('memories').map((rule) => [rule.id, rule.seconds]));
 
 const seconds = (sim, s) => {
   for (let i = 0; i < Math.round(s * TICK_RATE); i++) sim.step();

@@ -37,6 +37,7 @@
 
 import { createClock } from '../src/engine/clock.js';
 import { createContent } from '../src/engine/content.js';
+import { eventView } from '../src/narrative/events.js';
 import { findBadNumbers, hashState } from '../src/engine/hash.js';
 import { createRng } from '../src/engine/rng.js';
 import { POWERED, used, supply } from '../src/sim/power.js';
@@ -67,7 +68,9 @@ const ticks = Math.round(minutes * 60 * TICK_RATE);
 const content = createContent(readContentFiles());
 const shipId = String(option('ship', 'margin-of-error'));
 const ship = content.require('ships', shipId);
-const roster = content.all('crew').map(({ id, name, engineer }) => ({ id, name, engineer }));
+const roster = content.all('crew').map(({ id, name, engineer, skills, traits }) => ({ id, name, engineer, skills, traits }));
+const ruleSet = { memories: content.all('memories'), refusals: content.all('refusals'), risks: content.all('risks') };
+const transitEvents = content.all('events');
 const lines = content.all('ai-lines');
 const weapons = content.all('weapons');
 const ships = content.all('ships');
@@ -84,7 +87,7 @@ const MAX_DOOR_TICKS = Math.ceil(MANUAL_DOOR_SECONDS * TICK_RATE) + 3;
 
 /** Play one run to the end. Returns its stats, or throws on any failure. */
 function playRun(seed) {
-  const sim = createSim({ seed, ship, crew: roster, lines, weapons, ships });
+  const sim = createSim({ seed, ship, crew: roster, lines, weapons, ships, rules: ruleSet });
   const clock = createClock({ sim, tickSeconds: TICK_SECONDS });
   // The bot's own dice, kept apart from the sim's so its choices are not part of the game state.
   const bot = createRng(`bot:${seed}`);
@@ -372,7 +375,7 @@ const RESTORE_ORDER = ['life_support', 'ai_core', 'doors', 'engines', 'sensors',
  * running at the start, air first. Returns how it went, or throws on any failure.
  */
 function playScenario(seed, { incoming = false } = {}) {
-  const sim = createSim({ seed, ship, crew: roster, lines, weapons, ships });
+  const sim = createSim({ seed, ship, crew: roster, lines, weapons, ships, rules: ruleSet });
   const bot = createRng(`${incoming ? 'incoming' : 'scenario'}:${seed}`);
   const watch = stuckWatch(sim);
   const rooms = bot.shuffle(sim.layout.rooms.map((room) => room.id));
@@ -499,7 +502,7 @@ const OUTCOME_KIND = Object.freeze({ destroyed: 'won', 'crew-dead': 'won', surre
  * the end (the stalemate rule should make that impossible).
  */
 function playDuel(seed, enemyId, { boarding = false, dark = false } = {}) {
-  const sim = createSim({ seed, ship, crew: roster, lines, weapons, ships });
+  const sim = createSim({ seed, ship, crew: roster, lines, weapons, ships, rules: ruleSet });
   const bot = createRng(`duel:${boarding ? 'board:' : ''}${dark ? 'dark:' : ''}${enemyId}:${seed}`);
   const end = DUEL_MINUTES * 60 * TICK_RATE;
   const watch = stuckWatch(sim);
@@ -679,11 +682,21 @@ const DETOUR_CHANCE = 0.3;
  * with no way across, a bot that cannot get a fix, or a crossing still going after CROSSING_MINUTES.
  */
 function playCrossing(seed) {
-  const sim = createSim({ seed, ship, crew: roster, lines, weapons, ships, sector: sectorDef });
+  const sim = createSim({ seed, ship, crew: roster, lines, weapons, ships, rules: ruleSet, events: transitEvents, sector: sectorDef });
   const bot = createRng(`crossing:${seed}`);
   const { run } = sim.state;
   const end = CROSSING_MINUTES * 60 * TICK_RATE;
-  const tally = { caught: 0, escapes: 0, detours: 0, sighted: 0, fightTicks: 0, lines: 0, outcomes: {} };
+  const tally = { caught: 0, escapes: 0, detours: 0, sighted: 0, fightTicks: 0, lines: 0, outcomes: {}, events: 0, lapsed: 0, eventFights: 0, hooks: 0, met: {}, picked: {}, locked: 0, offered: 0 };
+  sim.events.on('event.opened', (event) => {
+    tally.events += 1;
+    tally.met[event.event] = (tally.met[event.event] ?? 0) + 1;
+  });
+  sim.events.on('event.chosen', (event) => (tally.picked[`${event.event}/${event.choice}`] = (tally.picked[`${event.event}/${event.choice}`] ?? 0) + 1));
+  sim.events.on('event.lapsed', () => (tally.lapsed += 1));
+  sim.events.on('effect.applied', (event) => {
+    if (event.effect === 'fight') tally.eventFights += 1;
+    if (event.effect === 'scene' || event.effect === 'threat') tally.hooks += 1;
+  });
   sim.events.on('pursuit.caught', () => (tally.caught += 1));
   sim.events.on('pursuit.sighted', () => (tally.sighted += 1));
   sim.events.on('ai.line', (event) => event.trigger && ['sector.jumped', 'course.ready', 'pursuit.sighted', 'contract.late', 'sector.delivered', 'fuel.out', 'pursuit.ended'].includes(event.trigger) && (tally.lines += 1));
@@ -708,9 +721,24 @@ function playCrossing(seed) {
     return ahead;
   }
   let lost = false;
+  let crewDead = false;
   while (!run.delivered && sim.state.tick < end) {
     const fight = sim.state.fight;
-    if (fight?.over) {
+    const view = eventView(sim);
+    if (!ourCrew(sim).some(({ member }) => member.alive)) {
+      crewDead = true;
+      break;
+    }
+    if (view) {
+      // An event on the table (S3.3): answer it with any choice that is open to us, then put it away.
+      if (view.result) give({ type: 'event.dismiss' });
+      else {
+        const open = view.choices.filter((choice) => choice.available);
+        tally.offered += view.choices.length;
+        tally.locked += view.choices.length - open.length;
+        give({ type: 'event.choose', choice: bot.pick(open).id });
+      }
+    } else if (fight?.over) {
       if (fight.over.outcome === 'lost') {
         lost = true;
         break;
@@ -742,13 +770,35 @@ function playCrossing(seed) {
       if (run.fuel < Math.min(...run.map.lanes.filter((l) => l.a === run.at || l.b === run.at).map((l) => l.fuel))) break; // stranded: ports refuel from S3.4
       give({ type: 'course.plot', to: nextStop() });
     } else if (!whyNoCourseJump(sim)) give({ type: 'course.jump' });
+    else if (sim.state.tick % TICK_RATE === 0) {
+      // An event can leave the sensors or the engines down (S3.3): send whoever is not flying to mend
+      // them, and put the power back when they are mended.
+      const helm = sim.layout.rooms.find((room) => room.kind === 'helm')?.id;
+      const hands = ourCrew(sim).map(({ member }) => member).filter((member) => member.alive);
+      const bound = (room) => hands.some((member) => member.room === room || member.goal === room);
+      if (helm && !bound(helm) && hands.length) give({ type: 'crew.move', crew: hands[0].id, room: helm });
+      // A fire in the way stops the mending: whoever is idle and not flying goes to put it out.
+      for (const [room, r] of Object.entries(sim.state.rooms)) {
+        const free = hands.find((member) => member.room !== helm && member.goal === null && member.task === 'idle');
+        if (r.fire > 0 && !r.jettisoned && free && !bound(room)) give({ type: 'crew.move', crew: free.id, room });
+      }
+      // The doors come first: the bot strips their power in a fight, and nobody walks anywhere without them.
+      for (const id of ['doors', 'sensors', 'engines']) {
+        const system = sim.state.systems[id];
+        if (system.power >= 1) continue;
+        const room = sim.layout.rooms.find((item) => item.system === id)?.id;
+        const hand = hands.find((member) => member.room !== helm && member.goal === null && member.task === 'idle');
+        if (system.damage > 0 && room && hand && !bound(room)) give({ type: 'crew.move', crew: hand.id, room });
+        give({ type: 'power.add', system: id, delta: 1 });
+      }
+    }
     sim.step();
     if (sim.state.tick % 20 === 0) {
       const problems = checkInvariants(sim);
       if (problems.length) throw new Error(`invariant broken at tick ${sim.state.tick}: ${problems[0]}`);
     }
   }
-  if (!run.delivered && !lost && sim.state.tick >= end) throw new Error(`still crossing after ${CROSSING_MINUTES} minutes, at ${run.at} with ${run.fuel} fuel`);
+  if (!run.delivered && !lost && !crewDead && sim.state.tick >= end) throw new Error(`still crossing after ${CROSSING_MINUTES} minutes, at ${run.at} with ${run.fuel} fuel (${run.plot ? whyNoCourseJump(sim) : `no course: ${sim.whyNot({ type: "course.plot", to: nextStop() })}`})`);
   const bad = findBadNumbers(sim.state);
   if (bad.length) throw new Error(`non-finite numbers at ${bad.join(', ')}`);
   return {
@@ -761,7 +811,8 @@ function playCrossing(seed) {
     delivered: run.delivered,
     late: run.late,
     lost,
-    stranded: !run.delivered && !lost,
+    crewDead,
+    stranded: !run.delivered && !lost && !crewDead,
     jumps: run.jumps,
     fuelLeft: run.fuel,
     minutes: sim.state.tick / TICK_RATE / 60,
@@ -967,6 +1018,20 @@ out.push(`  jumps:             ${mean(crossings.map((c) => c.jumps)).toFixed(1)}
 out.push(`  followed:          ${followed.length} of ${crossings.length}; Margo saw the pursuer in ${pct(followed.filter((c) => c.sighted > 0).length, followed.length)} of those; it caught us ${followed.reduce((n, c) => n + c.caught, 0)} times (${pct(followed.filter((c) => c.caught > 0).length, followed.length)} of followed crossings)`);
 out.push(`  pursuit fights:    ${Object.entries(crossOutcomes).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${OUTCOMES[k].toLowerCase()} ${n}`).join(', ') || 'none'}`);
 out.push(`  Margo on the chart: ${mean(crossings.map((c) => c.lines)).toFixed(1)} lines a crossing`);
+const sumOf = (key) => crossings.reduce((n, c) => n + c[key], 0);
+const merged = (key) => {
+  const all = {};
+  for (const c of crossings) for (const [k, n] of Object.entries(c[key])) all[k] = (all[k] ?? 0) + n;
+  return Object.entries(all).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+};
+out.push('');
+out.push(`Events (S3.3): what the crossings met, from content/events/ (${transitEvents.length} events)`);
+out.push(`  met:               ${mean(crossings.map((c) => c.events)).toFixed(1)} a crossing (${sumOf('events')} in all), ${sumOf('lapsed')} left behind unanswered; crew all dead in ${crossings.filter((c) => c.crewDead).length} crossings`);
+out.push(`  choices:           ${sumOf('offered')} shown, ${sumOf('locked')} of them locked behind a requirement the crew did not meet (${pct(sumOf('locked'), sumOf('offered'))})`);
+out.push(`  led to:            ${sumOf('eventFights')} fights, ${sumOf('hooks')} scene or threat hooks`);
+out.push(`  by event:          ${merged('met').map(([k, n]) => `${k} ${n}`).join(', ') || 'none'}`);
+out.push(`  never met:         ${transitEvents.filter((event) => !merged('met').some(([k]) => k === event.id)).map((event) => event.id).join(', ') || 'none'}`);
+out.push(`  by choice:         ${merged('picked').map(([k, n]) => `${k} ${n}`).join(', ') || 'none'}`);
 out.push('');
 out.push(`  wall time:         ${seconds.toFixed(2)}s`);
 const verdict = failures.length

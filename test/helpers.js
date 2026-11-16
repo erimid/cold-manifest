@@ -8,11 +8,17 @@ import { readContentFiles } from '../tools/lib/load-content.js';
 export const content = createContent(readContentFiles());
 export const SHIP = content.require('ships', 'margin-of-error');
 
-/** The weapons and ships the sim looks things up in. */
-export const CATALOG = { weapons: content.all('weapons'), ships: content.all('ships') };
+/** What the crew remember and refuse and what Margo objects to (content/memories, refusals, risks). */
+export const RULES = { memories: content.all('memories'), refusals: content.all('refusals'), risks: content.all('risks') };
+
+/** The weapons, ships and rules the sim looks things up in. */
+export const CATALOG = { weapons: content.all('weapons'), ships: content.all('ships'), rules: RULES };
+
+/** The transit events. */
+export const EVENTS = content.all('events');
 
 /** The placeholder starting crew. */
-export const CREW = content.all('crew').map(({ id, name, engineer }) => ({ id, name, engineer }));
+export const CREW = content.all('crew').map(({ id, name, engineer, skills, traits }) => ({ id, name, engineer, skills, traits }));
 
 /** A fresh sim on the starting ship with its three crew aboard. */
 export const newCrewedSim = (seed = 'test') => createSim({ seed, ship: SHIP, crew: CREW, ...CATALOG });

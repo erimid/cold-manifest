@@ -4,6 +4,7 @@
       "id": "ilse",
       "name": "Ilse",
       "placeholder": true,
+      "skills": { "piloting": 2, "negotiation": 1 },
       "replies": {
         "move": ["Copy. {room}.", "On my way to {room}.", "Moving.", "{room}. Got it."],
         "open": ["I'll crack it.", "Breaking the seal.", "Opening it up."],
@@ -19,6 +20,7 @@
       "name": "Dace",
       "placeholder": true,
       "engineer": true,
+      "skills": { "engineering": 2, "weapons": 1 },
       "replies": {
         "move": ["Yeah, yeah. {room}.", "Going. Don't touch anything.", "{room}? Fine.", "On it."],
         "open": ["Somebody sealed this for a reason.", "Cutting the seal.", "Fine. Let's see."],
@@ -33,6 +35,7 @@
       "id": "okoro",
       "name": "Okoro",
       "placeholder": true,
+      "skills": { "medicine": 2, "combat": 1 },
       "replies": {
         "move": ["Heading to {room}.", "Understood. {room}.", "On my way.", "I'm going."],
         "open": ["I'll have a look inside.", "Opening it.", "Let's see what we're carrying."],

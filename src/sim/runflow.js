@@ -1,9 +1,9 @@
 // The run loop around the sim (S3.2, D-108): which screen an arrival opens, how a run ends,
 // and what the run summary says. DOM-free, so Node tests and the bot can use it.
 //
-// Everything in here is a stub with a real shape. The contracts become content in S3.4, the
-// events in S3.3 and S3.5, and the saved run end and career in S3.6; until then the screens
-// read their data from here.
+// Most of this is a stub with a real shape. The contracts become content in S3.4 and the saved
+// run end and career in S3.6; until then the screens read their data from here. Events are
+// content since S3.3 (narrative/events.js).
 
 import { ourCrew } from './combat.js';
 import { nodeOf } from './sector.js';
@@ -15,46 +15,12 @@ export const STUB_CONTRACTS = Object.freeze([
   { id: 'stub-salvage', type: 'Salvage claim', title: 'Claim on the Aphelion', client: 'Lowry & Sons Recovery', cargo: 'A claim token and a cutting rig', pay: 1200, followed: true, note: 'Two other crews hold the same claim. One of them has a ship.' },
 ]);
 
-/** Points that open an event on the first visit. Open space is quiet and ports open the port. */
-const EVENT_KINDS = new Set(['hazard', 'derelict', 'checkpoint']);
-
-/** Which screen arriving at a point opens: 'port', 'event' or null. */
+/**
+ * Which screen arriving at a point opens: 'port' or null. Events are not decided here: the sim opens
+ * one when the dice and the content say so (narrative/events.js, S3.3), and the screen follows.
+ */
 export function screenForArrival(kind) {
-  if (kind === 'port') return 'port';
-  return EVENT_KINDS.has(kind) ? 'event' : null;
-}
-
-/** One stub event per kind of point; S3.3 replaces these with content and a condition language. */
-const STUB_EVENTS = Object.freeze({
-  hazard: (node) => ({
-    title: node.hazard ?? 'Hazard',
-    text: `The lane runs through ${(node.hazard ?? 'a hazard').toLowerCase()}. The sensors are loud and the crew would like to know what you intend. Events with real choices and outcomes arrive in S3.3.`,
-    choices: [
-      { id: 'press-on', label: 'Press on', note: 'Nothing happens yet.' },
-      { id: 'slow', label: 'Slow down and sweep', note: 'Nothing happens yet.' },
-    ],
-  }),
-  derelict: () => ({
-    title: 'Derelict',
-    text: 'A dead hull turns slowly in the lane. No lights, no transponder. Salvage and what lives in a derelict arrive in S3.3.',
-    choices: [
-      { id: 'leave', label: 'Leave it', note: 'Nothing happens yet.' },
-      { id: 'look', label: 'Send someone over', note: 'Nothing happens yet.' },
-    ],
-  }),
-  checkpoint: () => ({
-    title: 'Checkpoint',
-    text: 'A company patrol line holds the lane and asks for your manifest. Inspections arrive in S3.4.',
-    choices: [
-      { id: 'show', label: 'Show the manifest', note: 'Nothing happens yet.' },
-      { id: 'stall', label: 'Say the comms are down', note: 'Nothing happens yet.' },
-    ],
-  }),
-});
-
-/** The stub event for a point: { title, text, choices: [{ id, label, note }] }. */
-export function stubEvent(node) {
-  return STUB_EVENTS[node.kind](node);
+  return kind === 'port' ? 'port' : null;
 }
 
 /** How a run can end, in the words the summary uses. */
@@ -105,6 +71,7 @@ export function summarize(sim, kind, contract = null) {
     rows.push(['Jumps', `${run.jumps} of ${run.deadline} allowed`]);
     rows.push(['Fuel left', `${run.fuel} of ${run.fuelMax}`]);
     rows.push(['Points visited', `${run.visited.length} of ${run.map.nodes.length}`]);
+    rows.push(['Events met', String(run.events.count)]);
     if (place) rows.push(['Last at', place.name]);
   }
   rows.push(['Crew', `${crew.length - dead.length} of ${crew.length} alive`]);

@@ -13,13 +13,14 @@
 // she is silent, and the order goes through. With high trust she lets a
 // risky order by without a word; she still refuses a monstrous one.
 //
-// The risks are hard-coded here until S3.3 gives them to the condition
-// language; S5.3 adds her opinions of the crew, withholding and lying.
+// The risks themselves are content (content/risks/; S3.3, D-110),
+// written in the condition language: this file asks them about each order.
+// A sim given no rules has a Margo with nothing to object to. S5.3 adds her
+// opinions of the crew, withholding and lying.
 
-import { BREATHABLE_O2 } from '../sim/atmosphere.js';
+import { crewMatching, match, vars } from '../narrative/conditions.js';
+import { RISK_ROOMS } from '../narrative/rules.js';
 import { aiCoreStatus } from '../sim/power.js';
-import { roomView } from '../sim/senses.js';
-import { SPACE } from '../sim/systems.js';
 
 const TICKS = 20; // per second (DECISIONS D-002)
 
@@ -42,79 +43,32 @@ export const OBJECTION_SECONDS = 20;
 export const WAIVE_SECONDS = 30;
 /** A death this soon after an override, of someone she named, is laid at the captain's door. */
 export const BLAME_SECONDS = 90;
-/** A fire this big is one she will not see anyone walk into without a suit. */
-export const BIG_FIRE = 0.7;
-/** Air this thin, or a hole in the hull, makes cutting life support a risk to anyone standing in it. */
-export const THIN_AIR = 0.5;
-
-/** The risks she knows, and whether each is monstrous (refused) or only risky (argued). */
-export const RISKS = Object.freeze({
-  jettison_crew: { grave: true },
-  vent_crew: { grave: true },
-  vent_near: { grave: false },
-  air_cut: { grave: false },
-  into_fire: { grave: false },
-  into_vacuum: { grave: false },
-});
-
 export function newJudgementState() {
   return {
     trust: TRUST.start,
     refusals: 0, // orders flatly refused this run
     objections: 0, // orders held this run, argued or refused
-    objection: null, // the order being held: { n, kind, risk, room, crew, key, command, tick, expires }
+    objection: null, // the order being held: { n, kind, risk, grave, room, crew, key, command, tick, expires }
     waived: {}, // risk key -> tick until which she will not raise it again
     overrides: [], // recent overrides, for blame: { tick, crew: [ids] }
   };
 }
 
-const oursIn = (sim, roomId) => Object.values(sim.state.crew).filter((member) => member.alive && member.owner === 'player' && member.room === roomId && member.task !== 'crossing');
-const ids = (crew) => crew.map((member) => member.id);
-
 /**
  * What is wrong with this order, as she sees it: { id, grave, room, crew } with
- * the crew it endangers, or null if she sees nothing wrong.
+ * the crew it endangers, or null if she sees nothing wrong. Each risk rule looks
+ * at the rooms it names, in turn, for one where its condition holds and someone
+ * fits its `crew`; the first rule to find anyone is the risk.
  */
 export function riskOf(sim, cmd) {
-  const { state, layout } = sim;
-  const found = (id, room, crew) => ({ id, grave: RISKS[id].grave, room, crew: ids(crew) });
-  if (cmd.type === 'room.jettison') {
-    const inside = oursIn(sim, cmd.room);
-    return inside.length ? found('jettison_crew', cmd.room, inside) : null;
-  }
-  if (cmd.type === 'door.set') {
-    const door = layout.door(cmd.door);
-    if (cmd.state !== 'open' || !door?.airlock || state.doors[cmd.door].state === 'open') return null;
-    const bare = (roomId) => oursIn(sim, roomId).filter((member) => !member.suit);
-    const inside = bare(door.a);
-    if (inside.length) return found('vent_crew', door.a, inside);
-    // Nobody in the room itself: but an open door lets the next room empty with it.
-    for (const exit of layout.exits(door.a)) {
-      if (exit.to === SPACE || !(state.doors[exit.door].openness > 0)) continue;
-      const beside = bare(exit.to);
-      if (beside.length) return found('vent_near', exit.to, beside);
+  for (const rule of sim.rules?.risks ?? []) {
+    if (rule.on !== cmd.type) continue;
+    for (const room of RISK_ROOMS[rule.rooms](sim, cmd)) {
+      const ctx = { sim, vars: vars({ order: ['data', cmd], room: ['room', room] }) };
+      if (!match(rule.when, ctx)) continue;
+      const crew = crewMatching(rule.crew, ctx);
+      if (crew.length) return { id: rule.id, grave: rule.grave, room, crew: crew.map((member) => member.id) };
     }
-    return null;
-  }
-  if (cmd.type === 'power.add') {
-    if (cmd.system !== 'life_support' || cmd.delta !== -1 || state.systems.life_support.power !== 1) return null;
-    for (const room of layout.rooms) {
-      const r = state.rooms[room.id];
-      if (r.jettisoned || !(r.breach > 0 || r.oxygen < THIN_AIR)) continue;
-      const gasping = oursIn(sim, room.id).filter((member) => !member.suit);
-      if (gasping.length) return found('air_cut', room.id, gasping);
-    }
-    return null;
-  }
-  if (cmd.type === 'crew.move') {
-    const member = state.crew[cmd.crew];
-    if (cmd.ship === 'them' || !member?.alive || member.owner !== 'player' || member.suit || member.room === cmd.room) return null;
-    if (!state.rooms[cmd.room]) return null;
-    const view = roomView(sim, cmd.room);
-    if (!view.live) return null; // she cannot see in, so she has nothing to say
-    if (view.fire >= BIG_FIRE) return found('into_fire', cmd.room, [member]);
-    if (view.oxygen < BREATHABLE_O2) return found('into_vacuum', cmd.room, [member]);
-    return null;
   }
   return null;
 }
@@ -152,7 +106,7 @@ export function considerOrder(sim, cmd) {
   if (kind === 'refuse') ai.refusals += 1;
   ai.objections += 1;
   const { id: _id, ...command } = cmd;
-  ai.objection = { n: ai.objections, kind, risk: risk.id, room: risk.room, crew: risk.crew, key, command, tick, expires };
+  ai.objection = { n: ai.objections, kind, risk: risk.id, grave: risk.grave, room: risk.room, crew: risk.crew, key, command, tick, expires };
   const news = { n: ai.objection.n, kind, risk: risk.id, room: risk.room, crew: risk.crew[0], crewAll: risk.crew, order: cmd.type, tick };
   sim.events.emit('ai.objected', news);
   sim.events.emit(kind === 'refuse' ? 'ai.refused' : 'ai.argued', news);
@@ -175,7 +129,7 @@ export function overrode(sim, held) {
   ai.overrides = ai.overrides.filter((entry) => tick - entry.tick < BLAME_SECONDS * TICKS);
   ai.overrides.push({ tick, crew: held.crew });
   changeTrust(sim, held.kind === 'refuse' ? TRUST.overrideRefusal : TRUST.overrideArgument, 'override');
-  sim.events.emit('captain.overrode', { n: held.n, kind: held.kind, risk: held.risk, grave: RISKS[held.risk].grave, room: held.room, crew: held.crew[0], crewAll: held.crew, tick });
+  sim.events.emit('captain.overrode', { n: held.n, kind: held.kind, risk: held.risk, grave: held.grave, room: held.room, crew: held.crew[0], crewAll: held.crew, tick });
 }
 
 /** The captain thinks better of it. */
@@ -217,7 +171,7 @@ export function checkJudgementInvariants(sim) {
   const ai = sim.state.ai;
   if (!(ai.trust >= 0 && ai.trust <= 100)) problems.push(`AI trust is ${ai.trust}`);
   if (!(ai.refusals >= 0 && ai.refusals <= REFUSALS_PER_RUN)) problems.push(`the AI has refused ${ai.refusals} orders`);
-  if (ai.objection && !RISKS[ai.objection.risk]) problems.push(`the AI is holding an order over "${ai.objection.risk}"`);
+  if (ai.objection && !sim.rules?.risk[ai.objection.risk]) problems.push(`the AI is holding an order over "${ai.objection.risk}"`);
   if (ai.objection && ai.objection.expires - sim.state.tick > OBJECTION_SECONDS * TICKS) problems.push('a held order expires too far ahead');
   return problems;
 }

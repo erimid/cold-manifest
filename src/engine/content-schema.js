@@ -2,6 +2,12 @@
 // Each stage adds the rules for the content types it introduces (PLAN.md §4).
 
 import { AI_CATEGORIES, AI_SLOTS } from '../ai/categories.js';
+import { TRIGGERS } from '../ai/voice.js';
+import { SKILLS, validateCondition } from '../narrative/conditions.js';
+import { checkEvent, followUps } from '../narrative/events.js';
+import { checkRule } from '../narrative/rules.js';
+import { COMMAND_TYPES } from '../sim/sim.js';
+import { SYSTEM_IDS } from '../sim/systems.js';
 import { NODE_KINDS, checkSector, generateSector } from '../sim/sector.js';
 import { validateLayout } from '../sim/ship.js';
 import { createRng } from './rng.js';
@@ -35,7 +41,7 @@ function isNonEmptyString(value) {
 }
 
 /** Rules for one AI line. Returns a list of problems (empty when valid). */
-function checkAiLine(item) {
+function checkAiLine(item, refs = {}) {
   const problems = [];
   if (!CATEGORY_IDS.has(item.category)) problems.push(`unknown category "${item.category}"`);
   if (!isNonEmptyString(item.text)) {
@@ -52,8 +58,15 @@ function checkAiLine(item) {
   if (item.placeholder !== undefined && typeof item.placeholder !== 'boolean') {
     problems.push('placeholder must be true or false');
   }
-  if (item.conditions !== undefined && (typeof item.conditions !== 'object' || item.conditions === null)) {
-    problems.push('conditions must be an object');
+  if (item.conditions !== undefined) {
+    if (typeof item.conditions !== 'object' || item.conditions === null || Array.isArray(item.conditions)) return [...problems, 'conditions must be an object'];
+    // Which remark a line answers (`trigger`), which of Margo's risks it is for (`risk`), and anything else
+    // that must be true, in the condition language (`when`; S3.3, D-109).
+    const { trigger, risk, when, ...rest } = item.conditions;
+    for (const key of Object.keys(rest)) problems.push(`conditions: unknown key "${key}" (trigger, risk, when)`);
+    if (trigger !== undefined && !TRIGGERS[trigger]) problems.push(`conditions.trigger: nothing called "${trigger}" makes her speak`);
+    for (const id of risk === undefined ? [] : [].concat(risk)) if (refs.risks && !refs.risks.has(id)) problems.push(`conditions.risk: no risk "${id}"`);
+    problems.push(...validateCondition(when, { vars: {}, refs }, 'conditions.when').problems);
   }
   return problems;
 }
@@ -82,9 +95,22 @@ function checkWeapon(item) {
 export const REPLY_KINDS = Object.freeze(['move', 'open', 'carry', 'jettison', 'load', 'refuse', 'lamp']);
 
 /** Rules for one crew member. Their intercom replies are lists of lines by kind; `{room}` is the only slot. */
-function checkCrew(item) {
+function checkCrew(item, refs = {}) {
   const problems = [];
   if (!isNonEmptyString(item.name)) problems.push('missing name');
+  // Skills and traits are read by the condition language from S3.3 (D-112); S4.1 makes them matter to the work.
+  if (item.skills !== undefined) {
+    if (!item.skills || typeof item.skills !== 'object' || Array.isArray(item.skills)) problems.push('skills must be an object of skill: level');
+    else
+      for (const [skill, level] of Object.entries(item.skills)) {
+        if (!SKILLS.includes(skill)) problems.push(`skills: no skill "${skill}" (${SKILLS.join(', ')})`);
+        if (!(Number.isInteger(level) && level >= 1 && level <= 5)) problems.push(`skills.${skill} must be a whole number from 1 to 5`);
+      }
+  }
+  if (item.traits !== undefined) {
+    if (!Array.isArray(item.traits)) problems.push('traits must be a list of trait ids');
+    else for (const trait of item.traits) if (!refs.traits?.has(trait)) problems.push(`traits: no trait "${trait}" (traits arrive in S4.1)`);
+  }
   if (item.replies === undefined) return problems;
   if (!item.replies || typeof item.replies !== 'object' || Array.isArray(item.replies)) return [...problems, 'replies must be an object of line lists'];
   for (const kind of REPLY_KINDS) if (!Array.isArray(item.replies[kind]) || !item.replies[kind].length) problems.push(`replies needs a list of "${kind}" lines`);
@@ -123,6 +149,14 @@ function checkSectorDef(item) {
   for (const key of ['longLane', 'crossLanes', 'sideLanes']) if (!share(item[key])) problems.push(`${key} must be between 0 and 1`);
   if (!(Number.isInteger(item.fuel?.start) && Number.isInteger(item.fuel?.max) && item.fuel.start >= 1 && item.fuel.start <= item.fuel.max)) problems.push('fuel must be { start, max }, whole numbers, start at least 1 and no more than max');
   if (!range(item.slack, 0)) problems.push('slack must be [fewest, most] spare jumps on the deadline');
+  if (item.events !== undefined) {
+    if (!item.events || typeof item.events !== 'object' || Array.isArray(item.events)) problems.push('events must be an object of kind of point: chance of an event on arriving');
+    else
+      for (const [kind, chance] of Object.entries(item.events)) {
+        if (!NODE_KINDS[kind]) problems.push(`events: unknown kind "${kind}" (${Object.keys(NODE_KINDS).join(', ')})`);
+        if (!share(chance)) problems.push(`events.${kind} must be between 0 and 1`);
+      }
+  }
   const chase = item.pursuit;
   if (!chase || !share(chase.chance) || !isNonEmptyString(chase.ship) || !Number.isInteger(chase.lead) || chase.lead < 0 || !Number.isInteger(chase.sight) || chase.sight < 0) problems.push('pursuit must be { chance, ship, lead, sight }');
   if (problems.length) return problems;
@@ -135,13 +169,45 @@ function checkSectorDef(item) {
   return problems;
 }
 
+/** The rules for each content type: (item, refs) -> problems. `refs` is what exists across all the content (gatherRefs). */
 const ITEM_RULES = {
   'ai-lines': checkAiLine,
   crew: checkCrew,
-  ships: validateLayout,
-  weapons: checkWeapon,
-  sectors: checkSectorDef,
+  ships: (item) => validateLayout(item),
+  weapons: (item) => checkWeapon(item),
+  sectors: (item) => checkSectorDef(item),
+  events: checkEvent,
+  memories: (item, refs) => checkRule('memory', item, refs),
+  refusals: (item, refs) => checkRule('refusal', item, refs),
+  risks: (item, refs) => checkRule('risk', item, refs),
 };
+
+/**
+ * Everything a condition, an effect or a line can point at, gathered from all the files before any
+ * one of them is checked: ids by type as Sets. Rooms and doors are those of our own ships (an event
+ * happens aboard the ship we fly); `ships` are the ones that can be fought.
+ */
+export function gatherRefs(files) {
+  const ids = (type, keep = () => true) => new Set(files.filter((file) => !file.error && typeOfPath(file.path) === type && Array.isArray(file.data?.items)).flatMap((file) => file.data.items.filter((item) => item && typeof item.id === 'string' && keep(item))));
+  const of = (type, keep) => new Set([...ids(type, keep)].map((item) => item.id));
+  const ours = [...ids('ships', (item) => item.enemy !== true)];
+  const inShips = (key) => new Set(ours.flatMap((ship) => (Array.isArray(ship[key]) ? ship[key] : []).map((part) => part?.id).filter(Boolean)));
+  return {
+    rooms: inShips('rooms'),
+    doors: inShips('doors'),
+    systems: new Set(SYSTEM_IDS),
+    crew: of('crew'),
+    traits: new Set(), // S4.1 makes traits content
+    memories: of('memories'),
+    phrases: new Set([...ids('memories')].flatMap((item) => Object.keys(item.phrases && typeof item.phrases === 'object' ? item.phrases : {}))),
+    risks: of('risks'),
+    ships: of('ships', (item) => item.enemy === true),
+    scenes: of('scenes'),
+    events: of('events'),
+    threats: of('threats'),
+    orders: new Set(COMMAND_TYPES),
+  };
+}
 
 /**
  * Validate loaded content files.
@@ -157,6 +223,9 @@ export function validateContent(files) {
   const unmountable = new Set(); // weapons marked mount: false, such as a drone's zap
   const pursuers = []; // [label, ship id] for every sector's pursuer
   const enemyShips = new Set();
+  const refs = gatherRefs(files);
+  const followed = new Set(); // events another event leads on to
+  const unplaced = []; // [label, id] for events with no `at`
 
   for (const file of [...files].sort((a, b) => a.path.localeCompare(b.path))) {
     const { path, data, error } = file;
@@ -194,7 +263,12 @@ export function validateContent(files) {
       else ids.set(item.id, path);
 
       const rule = ITEM_RULES[type];
-      if (rule) for (const problem of rule(item)) errors.push(`${label}: ${problem}`);
+      if (rule) for (const problem of rule(item, refs)) errors.push(`${label}: ${problem}`);
+
+      if (type === 'events') {
+        for (const id of followUps(item)) followed.add(id);
+        if (item.at === undefined) unplaced.push([label, item.id]);
+      }
 
       if (type === 'weapons' && item.mount === false) unmountable.add(item.id);
       if (type === 'ships' && Array.isArray(item.weapons)) for (const id of item.weapons) fittedWeapons.push([label, id]);
@@ -218,6 +292,8 @@ export function validateContent(files) {
   }
 
   for (const [label, id] of pursuers) if (!enemyShips.has(id)) errors.push(`${label}: is followed by "${id}", which is not an enemy ship`);
+
+  for (const [label, id] of unplaced) if (!followed.has(id)) errors.push(`${label}: has no "at" and no other event leads on to it, so it can never be met`);
 
   return { errors, warnings };
 }
