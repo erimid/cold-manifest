@@ -25,7 +25,7 @@ import { createShipView } from './ui/shipview.js';
 import { renderContracts, renderEvent, renderHub, renderPort, renderScene, renderSummary } from './ui/screens.js';
 import { renderTitle } from './ui/title.js';
 
-const VERSION = '0.21.0';
+const VERSION = '0.22.0';
 
 const params = new URLSearchParams(window.location.search);
 const flags = {
@@ -273,7 +273,7 @@ const machine = createStateMachine({
     enter({ params }) {
       const draw = () =>
         renderPort(root, {
-          view: portView(sim),
+          view: portView(sim, { factions }),
           // The clock is stopped on this screen; one tick settles each order.
           onService: (service) => {
             settle(service.command);

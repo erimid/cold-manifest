@@ -1,5 +1,5 @@
 {
-  "note": "Events that belong to contracts (S3.4, D-115): the basic inspection at a checkpoint, which comes before any other checkpoint event while contraband is aboard (`priority`), and a salvage claim, which opens whenever we stand at the claim point with the claim unworked. The format is described at the top of src/narrative/events.js.",
+  "note": "Events that belong to contracts (S3.4, D-115): the basic inspection at a checkpoint, which comes before any other checkpoint event while contraband is aboard (`priority`), and the salvage claims (one for each salvage contract), each of which opens whenever we stand at the claim point with the claim unworked. The format is described at the top of src/narrative/events.js.",
   "items": [
     {
       "id": "checkpoint.inspection",
@@ -79,6 +79,70 @@
           "id": "leave",
           "label": "Leave the claim for now",
           "outcomes": [{ "text": "You log her position again. The claim will keep. Whoever cut that airlock may not wait as long." }]
+        }
+      ]
+    },
+    {
+      "id": "claim.hollow-psalm",
+      "once": false,
+      "title": "The Hollow Psalm at {place}",
+      "text": "The Order's chapel ship hangs nose-down in the lane with her lamps still burning on a battery that should have died years ago. The claim token opens her outer door without argument. Inside, the bells are wrapped in quilting and strapped to the deck, as if someone meant to come back for them.",
+      "choices": [
+        {
+          "id": "carry",
+          "label": "Carry the bells out one at a time",
+          "outcomes": [
+            { "weight": 3, "text": "It is slow, heavy work in a cold that gets into the joints. Three crates, three bells, and nobody drops one.", "effects": [{ "do": "contract.load" }, { "do": "hurt", "crew": "random", "amount": 0.1 }] },
+            { "weight": 1, "text": "The second bell rings once against a bulkhead on the way out. Every lamp on the chapel ship goes off at the same moment. You take the third crate anyway, and nobody talks on the way back.", "effects": [{ "do": "contract.load" }, { "do": "threat" }] }
+          ]
+        },
+        {
+          "id": "rig",
+          "label": "Rig a sling and float them across",
+          "requires": { "crew": { "skill": "engineering", "min": 2 }, "as": "rigger" },
+          "outcomes": [{ "text": "{rigger} strings a line between the two locks and runs the crates across it like washing. The whole thing takes an hour and the bells never touch metal.", "effects": [{ "do": "contract.load" }] }]
+        },
+        {
+          "id": "one",
+          "label": "Take the nearest bell and go",
+          "outcomes": [{ "text": "One crate, from just inside the door. The other two stay where the Order left them, under their quilts.", "effects": [{ "do": "contract.load", "count": 1 }] }]
+        },
+        {
+          "id": "leave",
+          "label": "Leave the claim for now",
+          "outcomes": [{ "text": "You close her door behind you. The lamps are still burning when the range opens." }]
+        }
+      ]
+    },
+    {
+      "id": "claim.relay-buoy",
+      "once": false,
+      "title": "The relay buoy at {place}",
+      "text": "The buoy is where the Receivers said it would be, which is to say in the worst of {hazard}. Its recorder housing is three sealed drums bolted to a frame that has been taking hits for a long time.",
+      "choices": [
+        {
+          "id": "unbolt",
+          "label": "Suit up and unbolt the drums",
+          "outcomes": [
+            { "weight": 2, "text": "Forty minutes outside with a wrench and a tether. All three drums come aboard, and so does a good deal of the hazard, on the suits.", "effects": [{ "do": "contract.load" }, { "do": "hurt", "crew": "random", "amount": 0.2 }] },
+            { "weight": 2, "text": "The drums come free easily. The frame comes free too, and swings into the hull on the way past.", "effects": [{ "do": "contract.load" }, { "do": "hull", "add": -2 }] }
+          ]
+        },
+        {
+          "id": "hold",
+          "label": "Hold the ship steady in the lee of the buoy",
+          "requires": { "crew": { "skill": "piloting", "min": 2 }, "as": "pilot" },
+          "outcomes": [{ "text": "{pilot} parks the ship so close to the buoy that the crew can reach the drums from the lock. Nobody goes outside.", "effects": [{ "do": "contract.load" }] }]
+        },
+        {
+          "id": "cut",
+          "label": "Cut the nearest drum loose and go",
+          "outcomes": [{ "text": "One drum, cut free at the bracket. The other two will have to wait for another ship or another day.", "effects": [{ "do": "contract.load", "count": 1 }] }]
+        },
+        {
+          "id": "leave",
+          "label": "Leave the claim for now",
+          "outcomes": [{ "text": "You back out of the hazard with the buoy still blinking behind you." }]
         }
       ]
     }

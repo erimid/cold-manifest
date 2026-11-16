@@ -5,13 +5,20 @@ import test from 'node:test';
 
 import { contractCrates } from '../src/sim/contracts.js';
 import { addCrate } from '../src/sim/hold.js';
-import { portHere, refuelQuote, repairQuote, whyNoRefuel, whyNoRepair, whyNoSell } from '../src/sim/port.js';
+import { nameChartPorts, portAt, portHere, refuelQuote, repairQuote, whyNoRefuel, whyNoRepair, whyNoSell } from '../src/sim/port.js';
+import { nodeOf } from '../src/sim/sector.js';
 import { checkInvariants, createSim } from '../src/sim/sim.js';
 import { CATALOG, CREW, SHIP, content } from './helpers.js';
 
 const PORTS = content.all('ports');
-const DOCK = PORTS[0];
-const portSim = (contract = 'smuggling-cold-freight') => createSim({ seed: 'port', ship: SHIP, crew: CREW, ...CATALOG, sector: content.require('sectors', 'the-reach'), run: { pursuit: false }, contract: contract ? content.require('contracts', contract) : null, ports: PORTS });
+/** The port the tests dock at: Kessel Port, which offers every service. */
+const DOCK = content.require('ports', 'kessel');
+/** A run docked at Kessel Port. */
+function portSim(contract = 'smuggling-cold-freight') {
+  const sim = createSim({ seed: 'port', ship: SHIP, crew: CREW, ...CATALOG, sector: content.require('sectors', 'the-reach'), run: { pursuit: false }, contract: contract ? content.require('contracts', contract) : null, ports: PORTS });
+  nodeOf(sim.state.run.map, sim.state.run.at).port = DOCK.id;
+  return sim;
+}
 
 const give = (sim, command) => {
   assert.equal(sim.whyNot(command), null, `${command.type}: ${sim.whyNot(command)}`);
@@ -19,9 +26,25 @@ const give = (sim, command) => {
   sim.step();
 };
 
-test('every port is the company dock until S3.5 names them, and only a port serves', () => {
+test('every port point on the chart is a named port from content, chosen without changing the chart, and only a port serves', () => {
   const sim = portSim();
   assert.equal(portHere(sim).id, DOCK.id);
+  for (let i = 0; i < 20; i++) {
+    const other = createSim({ seed: `names-${i}`, ship: SHIP, crew: CREW, ...CATALOG, sector: content.require('sectors', 'the-reach'), ports: PORTS });
+    const bare = createSim({ seed: `names-${i}`, ship: SHIP, crew: CREW, ...CATALOG, sector: content.require('sectors', 'the-reach') });
+    const ports = other.state.run.map.nodes.filter((node) => node.kind === 'port');
+    assert.equal(new Set(ports.map((node) => node.port)).size, ports.length, 'no two ports on a chart are the same port');
+    for (const node of ports) {
+      assert.equal(node.name, portAt(other, node.id).name);
+      assert.equal(node.designation, nodeOf(bare.state.run.map, node.id).name, 'the chart designation is kept');
+    }
+    assert.deepEqual(other.state.run.map.lanes, bare.state.run.map.lanes, 'naming the ports does not move the chart');
+    assert.equal(other.state.run.deadline, bare.state.run.deadline);
+  }
+  const named = new Set();
+  for (let i = 0; i < 60; i++) for (const node of createSim({ seed: `spread-${i}`, ship: SHIP, crew: CREW, ...CATALOG, sector: content.require('sectors', 'the-reach'), ports: PORTS }).state.run.map.nodes) if (node.port) named.add(node.port);
+  assert.equal(named.size, PORTS.length, 'every port turns up on some chart');
+  assert.equal(typeof nameChartPorts, 'function');
   const run = sim.state.run;
   run.at = run.map.nodes.find((node) => node.kind !== 'port').id;
   assert.equal(portHere(sim), null);
@@ -45,7 +68,7 @@ test('fuel is bought by the unit, as much as the money will pay for', () => {
   give(sim, { type: 'port.refuel' });
   assert.equal(run.fuel, 3);
   assert.equal(sim.state.money, 5);
-  assert.match(whyNoRefuel(sim), /fuel is 12 credits a unit and we have 5/);
+  assert.match(whyNoRefuel(sim), new RegExp(`fuel is ${DOCK.fuel} credits a unit and we have 5`));
 });
 
 test('the yard mends the hull and damaged systems for credits, as far as the money goes, and leaves lost systems alone', () => {

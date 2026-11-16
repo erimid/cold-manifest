@@ -161,7 +161,7 @@ export function contractLine(sim) {
  * services: [{ id, command, label, detail, why, danger }], deliver: { why, detail } | null, canRetire }.
  * Every service carries the order it gives and, if it cannot be had, why not.
  */
-export function portView(sim) {
+export function portView(sim, { factions = [] } = {}) {
   const run = sim.state.run;
   const port = portHere(sim) ?? FREE_PORT;
   const node = nodeOf(run.map, run.at);
@@ -191,11 +191,13 @@ export function portView(sim) {
     const result = why ? null : settlement(sim);
     deliver = { why, detail: result ? `${result.earned} earned, ${contract.advance} advanced: ${result.due} to collect${result.late ? ' (late)' : ''}` : why };
   }
+  const runBy = factions.find((faction) => faction.id === port.faction)?.name;
   const facts = [
+    ...(runBy ? [['Run by', runBy]] : []),
     ['Money', String(sim.state.money)],
     ['Fuel', `${run.fuel} of ${run.fuelMax}`],
     ['Hull', `${sim.state.hull.points} of ${sim.state.hull.max}`],
     ['Contract', contractLine(sim)],
   ];
-  return { name: node.name, text: isDrop ? 'The consignee is waiting at the dock.' : port.text, isDrop, facts, services, deliver, canRetire: !deliver || Boolean(deliver.why) };
+  return { name: node.name, text: isDrop ? `${port.text} The consignee is waiting at the dock.` : port.text, isDrop, facts, services, deliver, canRetire: !deliver || Boolean(deliver.why) };
 }

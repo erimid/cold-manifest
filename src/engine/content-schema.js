@@ -213,22 +213,32 @@ function checkContract(item, refs = {}) {
   return problems;
 }
 
-/** Rules for one port definition (S3.4; described in content/ports/). */
-function checkPort(item) {
+/** Rules for one port (S3.4, named in S3.5; described in content/ports/). */
+function checkPort(item, refs = {}) {
   const problems = [];
+  for (const key of Object.keys(item)) if (!['id', 'note', '_file', 'name', 'faction', 'text', 'fuel', 'hull', 'system', 'salvage', 'services'].includes(key)) problems.push(`unknown key "${key}"`);
   if (!isNonEmptyString(item.name)) problems.push('missing name');
+  if (!isNonEmptyString(item.faction)) problems.push('needs "faction": who runs it');
+  else if (refs.factions && !refs.factions.has(item.faction)) problems.push(`faction: no faction "${item.faction}"`);
   if (!isNonEmptyString(item.text)) problems.push('missing text: what the port screen says about it');
   for (const key of ['fuel', 'hull', 'system', 'salvage']) if (!(Number.isInteger(item[key]) && item[key] >= 0)) problems.push(`${key} must be a whole number of credits, 0 or more`);
   if (!Array.isArray(item.services)) problems.push(`services must be a list (${SERVICES.join(', ')})`);
-  else for (const service of item.services) if (!SERVICES.includes(service)) problems.push(`services: no service "${service}" (${SERVICES.join(', ')})`);
+  else {
+    for (const service of item.services) if (!SERVICES.includes(service)) problems.push(`services: no service "${service}" (${SERVICES.join(', ')})`);
+    if (!item.services.includes('refuel')) problems.push('services: every port sells fuel, or a crew could be stranded at a port');
+  }
   return problems;
 }
 
-/** Rules for one faction stub (S3.4; S7.4 writes them in full). */
-function checkFaction(item) {
+/** Rules for one faction (S3.4 stubs, filled out in S3.5; S7.4 gives them effects). */
+function checkFaction(item, refs = {}) {
   const problems = [];
-  if (!isNonEmptyString(item.name)) problems.push('missing name');
-  if (!isNonEmptyString(item.line)) problems.push('missing line: one sentence on who they are');
+  const allowed = ['id', 'note', '_file', 'name', 'line', 'look', 'values', 'buys', 'bans', 'smugglers', 'ships', 'voice'];
+  for (const key of Object.keys(item)) if (!allowed.includes(key)) problems.push(`unknown key "${key}"`);
+  for (const key of ['name', 'line', 'look', 'values', 'smugglers', 'voice']) if (!isNonEmptyString(item[key])) problems.push(`missing ${key}`);
+  for (const key of ['buys', 'bans']) if (!Array.isArray(item[key]) || !item[key].length || !item[key].every(isNonEmptyString)) problems.push(`${key} must be a list of goods, in words`);
+  if (!Array.isArray(item.ships) || !item.ships.length) problems.push('ships must be a list of the enemy ships it flies');
+  else for (const ship of item.ships) if (refs.ships && !refs.ships.has(ship)) problems.push(`ships: no enemy ship "${ship}"`);
   return problems;
 }
 
@@ -244,8 +254,8 @@ const ITEM_RULES = {
   refusals: (item, refs) => checkRule('refusal', item, refs),
   risks: (item, refs) => checkRule('risk', item, refs),
   contracts: checkContract,
-  ports: (item) => checkPort(item),
-  factions: (item) => checkFaction(item),
+  ports: checkPort,
+  factions: checkFaction,
 };
 
 /**

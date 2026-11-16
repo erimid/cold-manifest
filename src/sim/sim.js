@@ -37,7 +37,7 @@ import { HOLD_COMMANDS, checkHoldInvariants, newHoldState, stepHold } from './ho
 import { attachMemory, checkMemoryInvariants, lampHolder, memoryTypes, remember, stepNerve, whyKeepLamp } from './memory.js';
 import { attachSector, checkRunInvariants, newRunState, sectorCommands, stepSector } from './sector.js';
 import { CONTRACT_COMMANDS, attachContracts, checkContractInvariants, setUpContract } from './contracts.js';
-import { PORT_COMMANDS } from './port.js';
+import { PORT_COMMANDS, nameChartPorts } from './port.js';
 import { buildLayout } from './ship.js';
 
 /** Sim ticks per second (DECISIONS D-002). */
@@ -454,6 +454,7 @@ export function createSim({ seed, ship, crew = [], lines = [], weapons = [], shi
     // What the events leave behind them (narrative/events.js, effects.js): the event on the table, notes for
     // later events, and the hooks for scenes (Stage 4) and the threat (Stage 6).
     Object.assign(sim.state.run, { events: newEventState(), eventChance: { ...EVENT_CHANCE, ...sector.events }, flags: {}, scenes: [], threat: null, contract: null });
+    nameChartPorts(sim);
     if (contract) setUpContract(sim, contract);
   } else if (contract) throw new Error('A contract needs a sector to be flown across');
   attachVoice(sim);

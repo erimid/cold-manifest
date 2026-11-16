@@ -1748,7 +1748,9 @@ async function loopTests(browser) {
     await big('#screen button');
     await page.tap('#accept-courier');
     await page.waitForFunction(() => window.coldManifest.machine.state === 'ship' && window.coldManifest.shipView.debug.chartOpen);
-    assert.equal(await game(page, () => window.coldManifest.run.contract.id), 'courier-cold-chain');
+    // Which courier job is on the board depends on the seed (S3.5 has two); whichever it is, it is the one taken.
+    const taken = await game(page, () => window.coldManifest.run.contract.id);
+    assert.equal(await game(page, (id) => window.coldManifest.content.get('contracts', id).type, taken), 'courier');
   });
 
   await check('Back to the title and Resume run returns to the same run', async () => {
@@ -1819,12 +1821,22 @@ async function loopTests(browser) {
           await page.tap('#btn-back');
           assert.equal(await state(), 'port');
           assert.match(await page.textContent('#port-facts'), /Fuel\s*3 of 12/);
-          assert.match(await page.textContent('#btn-refuel'), /9 units, 108 credits/);
+          // Every port is a named port from content (S3.5, D-118), with its own price for fuel.
+          const dock = await game(page, () => {
+            const { sim } = window.coldManifest;
+            const node = sim.state.run.map.nodes.find((n) => n.id === sim.state.run.at);
+            const port = sim.ports.find((p) => p.id === node.port);
+            return { name: port.name, price: port.fuel, faction: port.faction, label: node.name };
+          });
+          assert.equal(dock.label, dock.name, 'the chart point carries the port name');
+          assert.match(await page.textContent('#port-facts'), /Run by\s*\S/);
+          const cost = 9 * dock.price;
+          assert.match(await page.textContent('#btn-refuel'), new RegExp(`9 units, ${cost} credits`));
           const money = Number((await page.textContent('#port-facts')).match(/Money\s*(\d+)/)[1]);
           await page.tap('#btn-refuel');
           assert.match(await page.textContent('#port-facts'), /Fuel\s*12 of 12/);
-          assert.match(await page.textContent('#port-facts'), new RegExp(`Money\\s*${money - 108}`), 'fuel is paid for');
-          assert.match(await page.textContent('#port-facts'), /Contract\s*Courier: 2 of 2 crates aboard/);
+          assert.match(await page.textContent('#port-facts'), new RegExp(`Money\\s*${money - cost}`), 'fuel is paid for');
+          assert.match(await page.textContent('#port-facts'), /Contract\s*Courier: (\d+) of \1 crates aboard/);
           assert.equal(await page.isDisabled('#btn-hire'), true, 'hiring is a stub until Stage 4');
           assert.equal(await page.isDisabled('#btn-refuel'), true, 'full tanks, nothing to buy');
           await shot('s3-2-port-ipad');
@@ -1901,7 +1913,8 @@ async function loopTests(browser) {
     assert.match(facts, /Courier/);
     assert.match(facts, /3 of 3 alive/);
     assert.match(facts, /Result\s*Delivered whole/);
-    assert.match(facts, /Paid\s*150 advance \+ 450 at the drop/);
+    const terms = await game(page, () => window.coldManifest.run.contract);
+    assert.match(facts, new RegExp(`Paid\\s*${terms.advance} advance \\+ ${terms.pay - terms.advance} at the drop`));
     assert.match(facts, /Standing\s*Reach Medical Cooperative \+2/);
     await shot('s3-2-summary-ipad');
     await big('#screen button');
@@ -1922,7 +1935,7 @@ async function loopTests(browser) {
     await page.waitForFunction(() => window.coldManifest.machine.state === 'ship');
     assert.equal(await game(page, () => window.coldManifest.sim.state.run.jumps), 0);
     assert.equal(await game(page, () => window.coldManifest.sim.state.run.pursuit !== null), await game(page, () => window.coldManifest.run.contract.followed), 'followed as the board said');
-    assert.equal(await game(page, () => Object.values(window.coldManifest.sim.state.crates).filter((c) => c.contraband).length), 4, 'the contraband is in the hold');
+    assert.equal(await game(page, () => Object.values(window.coldManifest.sim.state.crates).filter((c) => c.contraband).length), await game(page, () => window.coldManifest.run.contract.template.cargo.filter((c) => c.contraband).reduce((n, c) => n + (c.count ?? 1), 0)), 'the contraband is in the hold');
     // Kill everyone on board: the run ends on the next frame.
     await game(page, () => Object.values(window.coldManifest.sim.state.crew).forEach((m) => (m.alive = false)));
     await page.waitForFunction(() => window.coldManifest.machine.state === 'summary', null, { timeout: 2000 });

@@ -1,0 +1,144 @@
+{
+  "note": "Contract templates, second set (S3.5, D-119). The format is described at the top of src/sim/contracts.js and in first-three.json. With the first three this makes ten: four smuggling, three courier, three salvage. The board offers one of each type, picked by the run's seed.",
+  "items": [
+    {
+      "id": "smuggling-reliquary",
+      "type": "smuggling",
+      "title": "The bones of a saint",
+      "client": "the-order",
+      "contact": "A brother of the Quiet Order, by hand-written letter",
+      "text": "Three reliquary cases the Receivers listed as company property and mean to auction. The Order wants them home. Do not open them; the brother was very clear.",
+      "note": "Margo notes the cases are cold to the touch and draw no power. She notes it twice.",
+      "pay": 800,
+      "advance": 150,
+      "latePay": 0.5,
+      "followed": 0.5,
+      "value": 120,
+      "cargo": [
+        { "count": 3, "label": "Manifest 0077 · Ecclesiastical furniture", "contents": "A narrow box of dark wood lined with grey felt. Inside, wrapped in written cloth, something light that rattles when the box is tilted.", "contraband": true }
+      ],
+      "reputation": { "deliver": 3, "fail": -2 },
+      "penalty": 80
+    },
+    {
+      "id": "smuggling-union-books",
+      "type": "smuggling",
+      "title": "The union's second set of books",
+      "client": "miners-union",
+      "contact": "Hal Dorn, treasurer, Pell Station local",
+      "text": "Two crates of assay samples, and under the samples two strongboxes of union ledgers the Receivers would very much like to read. Four crates in all; only two are trouble.",
+      "note": "Clean manifest on top. The treasurer shook hands twice, which is once more than people usually do.",
+      "pay": 750,
+      "advance": 150,
+      "latePay": 0.5,
+      "followed": 0.5,
+      "value": 90,
+      "cargo": [
+        { "count": 2, "label": "Manifest 1188 · Assay samples", "contents": "Ore cores in labelled sleeves, exactly as stated." },
+        { "count": 2, "label": "Manifest 1188 · Assay samples (heavy)", "contents": "Under a layer of ore cores, a strongbox of ledgers in a careful hand: every share the union has paid since the company fell, and to whom.", "contraband": true }
+      ],
+      "reputation": { "deliver": 2, "fail": -3 },
+      "penalty": 80
+    },
+    {
+      "id": "smuggling-clinic-stock",
+      "type": "smuggling",
+      "title": "Unlicensed stock for a free clinic",
+      "client": "confederation",
+      "contact": "Doctor Imre, who runs a clinic the Cooperative does not know about",
+      "text": "Six crates of medicine with the Cooperative's labels scraped off, for a clinic that treats people who cannot pay. Everybody you could be caught by thinks this is a crime.",
+      "note": "The doctor paid the advance in small, mismatched notes.",
+      "pay": 700,
+      "advance": 250,
+      "latePay": 0.5,
+      "followed": 0.4,
+      "slack": [2, 3],
+      "value": 100,
+      "cargo": [
+        { "count": 6, "label": "Manifest 2302 · Industrial solvent", "contents": "Antibiotics, saline and wound film in Cooperative packaging with the labels scraped off. Enough for a small station for a year.", "contraband": true }
+      ],
+      "reputation": { "deliver": 2, "fail": -2 },
+      "penalty": 100
+    },
+    {
+      "id": "courier-tribunal",
+      "type": "courier",
+      "title": "Evidence for the tribunal",
+      "client": "receivers",
+      "contact": "Office of the Receiver-General, case 4471",
+      "text": "A sealed evidence case for a Receivers tribunal, due to sit when the deadline runs out. A case that arrives after the verdict is not evidence.",
+      "note": "Margo recognises the case number. She does not say where from.",
+      "pay": 650,
+      "advance": 150,
+      "latePay": 0,
+      "followed": 0.6,
+      "slack": [1, 2],
+      "value": 30,
+      "cargo": [
+        { "count": 1, "label": "Evidence case 4471 · Receivers seal", "contents": "A data core and a bundle of paper statements. The top statement is signed by somebody who worked on this ship." }
+      ],
+      "reputation": { "deliver": 3, "fail": -3 },
+      "penalty": 80
+    },
+    {
+      "id": "courier-share-ledger",
+      "type": "courier",
+      "title": "A captain's share, owed",
+      "client": "confederation",
+      "contact": "The quartermaster at Free Berth",
+      "text": "A dead captain's share of a prize, in a locked case, for her crew at the drop. Under the code, a share paid late is a share stolen.",
+      "note": "There are people who think the share should have been theirs. Some of them know your name now.",
+      "pay": 700,
+      "advance": 100,
+      "latePay": 0,
+      "followed": 0.7,
+      "slack": [1, 2],
+      "value": 60,
+      "cargo": [
+        { "count": 1, "label": "Locked case · Free Berth seal", "contents": "Credit chits, a ring, and a list of eleven names with a sum beside each one." }
+      ],
+      "reputation": { "deliver": 3, "fail": -3 },
+      "penalty": 100
+    },
+    {
+      "id": "salvage-hollow-psalm",
+      "type": "salvage",
+      "title": "The pilgrim ship Hollow Psalm",
+      "client": "the-order",
+      "contact": "The Quiet Order, through the brothers at Vigil",
+      "text": "A pilgrim ship of the Order went dark in the Reach a generation ago. Bring back what can be brought back. Leave the passengers where they are.",
+      "note": "The Order asks you to keep the lights low aboard her. They do not say why.",
+      "pay": 1000,
+      "advance": 100,
+      "latePay": 0.75,
+      "followed": 0.3,
+      "value": 70,
+      "claim": { "at": "derelict", "event": "claim.hollow-psalm" },
+      "cargo": [
+        { "count": 3, "kind": "salvage", "label": "Hollow Psalm salvage", "contents": "Prayer slates, a lamp of old brass, and a ship's bell wrapped in a written cloth." }
+      ],
+      "reputation": { "deliver": 3, "fail": -2 },
+      "penalty": 50
+    },
+    {
+      "id": "salvage-relay-buoy",
+      "type": "salvage",
+      "title": "A company relay in the weather",
+      "client": "receivers",
+      "contact": "Receivers asset recovery, Registry Nine",
+      "text": "A company relay buoy sits in a hazard on the chart, full of logs the Receivers want back. Cut out its memory cores and bring them in.",
+      "note": "The buoy is still transmitting. Nobody at Registry Nine will say what.",
+      "pay": 900,
+      "advance": 150,
+      "latePay": 0.75,
+      "followed": 0.4,
+      "value": 80,
+      "claim": { "at": "hazard", "event": "claim.relay-buoy" },
+      "cargo": [
+        { "count": 3, "kind": "salvage", "label": "Relay memory core", "contents": "A company memory core in a cracked housing, still warm, still recording." }
+      ],
+      "reputation": { "deliver": 2, "fail": -2 },
+      "penalty": 60
+    }
+  ]
+}

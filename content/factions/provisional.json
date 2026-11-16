@@ -1,10 +1,65 @@
 {
-  "note": "Factions as stubs (S3.4; brief §11, D-012). Ids are stable; names are provisional working names until S7.4 gives each a look, values, what it buys and bans, and a voice. S3.4 needs them only as clients of contracts and as the people who run the checkpoints, so each has an id, a name and a line. S3.5 fills these out.",
+  "note": "The five factions (S3.4 stubs, filled out in S3.5; brief §11). Ids are stable; names are working names until S7.4 settles them (D-012). Each has a `line` (who they are in a sentence), a `look` (how their ships and docks read on Margo's monitor), `values`, what they `buys` and `bans` (goods are words until Stage 7 makes them content), how they treat `smugglers`, the enemy `ships` they fly (content/ships/), and a `voice` note for writers. Nothing reads look, buys, bans or voice in play yet: Stage 7 gives them prices, inspections and patrols (DF-50).",
   "items": [
-    { "id": "receivers", "name": "The Receivers", "line": "What is left of the company's administrators, reclaiming assets one patrol line at a time." },
-    { "id": "miners-union", "name": "The Outer Stations Union", "line": "The miners' union that keeps the outer stations breathing, and keeps a list." },
-    { "id": "the-order", "name": "The Quiet Order", "line": "A religious order that thinks the emptiness of the Reach is holy and should stay that way." },
-    { "id": "confederation", "name": "The Free Confederation", "line": "Pirate crews with a written code. The code is long, and mostly about shares." },
-    { "id": "collective", "name": "Reach Medical Cooperative", "line": "A medical and research collective that pays well and asks very few questions." }
+    {
+      "id": "receivers",
+      "name": "The Receivers",
+      "line": "What is left of the company's administrators, reclaiming assets one patrol line at a time.",
+      "look": "Company grey with the old crest painted over and painted back. Clean ships, too few of them, every hull number on a list.",
+      "values": "Process, recovery, the idea that the Reach still belongs to someone. They believe the paperwork will save them, and it might.",
+      "buys": ["company property", "machine parts", "records"],
+      "bans": ["weapons", "unlicensed medicine", "anything under a broken company seal"],
+      "smugglers": "Inspect everyone, fine everything, seize what they can carry. They want the cargo more than the crew.",
+      "ships": ["knife-cutter", "bulwark"],
+      "voice": "Polite, procedural, tired. Reads from cards. Says 'asset' where anyone else would say 'ship' or 'person'."
+    },
+    {
+      "id": "miners-union",
+      "name": "The Outer Stations Union",
+      "line": "The miners' union that keeps the outer stations breathing, and keeps a list.",
+      "look": "Patched yellow hulls, hand-lettered names, ore tenders turned into everything else. Docks that smell of hot metal and soup.",
+      "values": "Shares, safety lines, nobody left behind on a rock. Long memories for who paid and who did not.",
+      "buys": ["machine parts", "food", "air scrubbers", "salvage"],
+      "bans": ["strikebreakers", "company debt paper"],
+      "smugglers": "Look the other way for anything that keeps a station running. Turn you over to the Receivers for anything that does not.",
+      "ships": ["salvager-skiff", "grapple-tender"],
+      "voice": "Blunt, warm until it is not. Calls everyone by a first name. Counts things out loud."
+    },
+    {
+      "id": "the-order",
+      "name": "The Quiet Order",
+      "line": "A religious order that thinks the emptiness of the Reach is holy and should stay that way.",
+      "look": "Ships stripped of every light they can live without, hulls scratched with long lines of small writing. Their docks are dim on purpose.",
+      "values": "Silence, distance, letting the dead lie where they fell. They do not trust anything that hums.",
+      "buys": ["relics", "candles and lamp oil", "salvage from the old pilgrim ships"],
+      "bans": ["specimens", "ship minds they have not blessed"],
+      "smugglers": "Do not search. They ask what you carry, and they remember the answer.",
+      "ships": ["drone-carrier"],
+      "voice": "Short sentences, long pauses. Never raises a voice. Refers to Margo as 'your machine'."
+    },
+    {
+      "id": "confederation",
+      "name": "The Free Confederation",
+      "line": "Pirate crews with a written code. The code is long, and mostly about shares.",
+      "look": "Mismatched plating, a different flag on every ship, and the same red stripe on all of them. Docks with more guns than cranes.",
+      "values": "The code, the share, and getting paid. A deal kept is sacred; a deal broken is a debt with interest.",
+      "buys": ["weapons", "contraband", "anything that fell off a company ship"],
+      "bans": ["informants"],
+      "smugglers": "Smugglers are customers. Informants are cargo.",
+      "ships": ["salvager-skiff", "knife-cutter", "grapple-tender"],
+      "voice": "Cheerful, quick, a lot of numbers. Quotes the code by article. Threats delivered as advice."
+    },
+    {
+      "id": "collective",
+      "name": "Reach Medical Cooperative",
+      "line": "A medical and research collective that pays well and asks very few questions.",
+      "look": "White hulls kept white at some cost, cold-chain markings, clinics that are cleaner than anything else in the Reach.",
+      "values": "Research, results, and the patients who pay for both. They mean well about as often as anyone does.",
+      "buys": ["specimens", "medicine", "tissue samples", "data"],
+      "bans": ["unlicensed medicine sold by anyone but them"],
+      "smugglers": "Will hire you to smuggle and report you for smuggling, depending on the cargo.",
+      "ships": ["bulwark", "drone-carrier"],
+      "voice": "Precise, kind in a clinical way. Thanks you for your cooperation before you have given it."
+    }
   ]
 }

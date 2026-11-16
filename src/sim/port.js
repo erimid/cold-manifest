@@ -1,8 +1,9 @@
 // Ports (S3.4, D-114; brief §11, §12). DOM-free.
 //
-// A port is content (content/ports/): what its services cost. Every port on the chart uses the
-// first port definition until S3.5 names the ports; a sim given none has a port that charges
-// nothing, so the sandbox and old tests are unchanged. The services, all paid in credits and all
+// A port is content (content/ports/): its name, who runs it, and what its services cost. At the
+// start of a run every port point on the chart is given one of them (nameChartPorts, S3.5, D-118);
+// a sim given none has ports that charge nothing, so the sandbox and old tests are unchanged.
+// The services, all paid in credits and all
 // settled at once (the clock is stopped on the port screen):
 //   port.refuel   fill the tanks, or as much of them as the money buys
 //   port.repair   mend the hull ("hull") or every damaged system ("systems"), as far as the money goes
@@ -19,11 +20,30 @@ export const SERVICES = Object.freeze(['refuel', 'repair', 'sell', 'hire']);
 export const REPAIRS = Object.freeze(['hull', 'systems']);
 export const SALES = Object.freeze(['salvage', 'contract']);
 
-/** The port we are docked at: its definition, or null when we are not at a port. */
-export function portHere(sim) {
+/** The port at a point of the chart: its definition, or null when the point is not a port. */
+export function portAt(sim, nodeId) {
+  const node = sim.state.run && nodeOf(sim.state.run.map, nodeId);
+  if (node?.kind !== 'port') return null;
+  return sim.ports.find((port) => port.id === node.port) ?? sim.ports[0] ?? FREE_PORT;
+}
+
+/** The port we are docked at, or null when we are not at a port. */
+export const portHere = (sim) => (sim.state.run ? portAt(sim, sim.state.run.at) : null);
+
+/**
+ * Give every port point on the chart a port from content, and its name (S3.5, D-118). The point keeps
+ * its chart designation as `designation`. Dice from the `market` stream, so the chart itself is unchanged.
+ */
+export function nameChartPorts(sim) {
   const run = sim.state.run;
-  if (!run || nodeOf(run.map, run.at)?.kind !== 'port') return null;
-  return sim.ports[0] ?? FREE_PORT;
+  if (!run || !sim.ports.length) return;
+  const pool = sim.rng.stream('market').shuffle([...sim.ports]);
+  run.map.nodes
+    .filter((node) => node.kind === 'port')
+    .forEach((node, i) => {
+      const port = pool[i % pool.length];
+      Object.assign(node, { port: port.id, designation: node.name, name: port.name });
+    });
 }
 
 /** Why no port service can be had right now, or null. */

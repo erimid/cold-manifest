@@ -1,0 +1,508 @@
+{
+  "note": "The second set of transit events (S3.5, D-120): with transit.json and contracts.json, 30 events in all. They lean on the S3.4 facts: what kind of contract we carry, whether contraband is aboard, and how each faction stands with us. The format is described at the top of src/narrative/events.js.",
+  "items": [
+    {
+      "id": "hazard.ion-squall",
+      "at": ["hazard"],
+      "title": "{place}: {hazard}",
+      "text": "The squall shows on the monitor as a smear of static moving faster than the ship. Margo says it will be on top of you in six minutes, and then corrects herself to four.",
+      "choices": [
+        {
+          "id": "ride",
+          "label": "Ride it out with everything powered",
+          "outcomes": [
+            { "weight": 2, "text": "Every light aboard flickers in time with something outside. When it passes, the shields have a bar fewer than they did.", "effects": [{ "do": "damage", "system": "shields", "bars": 1 }] },
+            { "weight": 2, "text": "The squall goes over like weather over a house. The crew stop holding their breath one at a time." },
+            { "weight": 1, "text": "A spark jumps the reactor housing and finds the insulation behind it.", "effects": [{ "do": "fire", "room": "random", "size": 0.3 }] }
+          ]
+        },
+        {
+          "id": "cold",
+          "label": "Shut down to the bones and drift through",
+          "outcomes": [{ "text": "Dark and cold for three hours, with the crew in their coats in the galley. The squall finds nothing worth burning, and the drift costs most of a day.", "effects": [{ "do": "deadline", "add": -1 }] }]
+        },
+        {
+          "id": "outrun",
+          "label": "Burn hard for the edge of it",
+          "requires": { "fact": "fuel", "gte": 2, "label": "2 fuel" },
+          "outcomes": [{ "text": "The engines run hot and the squall runs out of reach behind you. The gauge says what it cost.", "effects": [{ "do": "fuel", "add": -1 }] }]
+        }
+      ]
+    },
+    {
+      "id": "hazard.debris-ring",
+      "at": ["hazard"],
+      "title": "{place}: {hazard}",
+      "text": "Whatever broke up here did it slowly and on purpose. The debris is cut, not torn, and it has settled into a ring with the lane running through the middle of it.",
+      "choices": [
+        {
+          "id": "through",
+          "label": "Take the lane straight through",
+          "outcomes": [
+            { "weight": 3, "text": "A plate the size of a door goes past close enough to read the stencil. Nothing touches you." },
+            { "weight": 2, "text": "The ring takes a bite out of the hold side on the way past.", "effects": [{ "do": "breach", "room": "random", "size": 0.25 }, { "do": "hull", "add": -2 }] }
+          ]
+        },
+        {
+          "id": "pick",
+          "label": "Pick through it for anything worth keeping",
+          "outcomes": [
+            { "weight": 2, "text": "Most of it is hull plate. One piece is a sealed crate with somebody's freight mark burned off.", "effects": [{ "do": "crate", "kind": "salvage", "label": "Crate from the debris ring", "contents": "Bearings in grease paper, sorted by size, and an invoice with the name cut out." }] },
+            { "weight": 1, "text": "The piece you were reaching for was holding up the piece behind it.", "effects": [{ "do": "hull", "add": -3 }] }
+          ]
+        },
+        {
+          "id": "around",
+          "label": "Go the long way round the ring",
+          "outcomes": [{ "text": "The long way is long. The ring stays a ring, off the port side, for most of a watch.", "effects": [{ "do": "fuel", "add": -1 }] }]
+        }
+      ]
+    },
+    {
+      "id": "hazard.dust-veil",
+      "at": ["hazard"],
+      "title": "{place}: {hazard}",
+      "text": "Fine dust, thick enough to blind the sensors and thin enough to fly through. Anything inside it is hard to see from outside it, which is a thought that occurs to everyone on the bridge at once.",
+      "choices": [
+        {
+          "id": "through",
+          "label": "Go through and out the far side",
+          "outcomes": [
+            { "weight": 3, "text": "The dust scours the paint off the bow and the sensors come back with a cough. Nothing else is different." },
+            { "weight": 1, "text": "The dust gets into the sensor mast and stays there.", "effects": [{ "do": "damage", "system": "sensors", "bars": 1 }] }
+          ]
+        },
+        {
+          "id": "sit",
+          "label": "Sit inside it, dark, and let anyone behind go past",
+          "requires": { "fact": "followed", "label": "Someone is following" },
+          "outcomes": [
+            { "weight": 3, "text": "Half a day, dark and quiet. Something big goes past at the edge of the dust and does not stop. When you come out, the lane behind is empty.", "effects": [{ "do": "pursuit", "delay": 2 }, { "do": "deadline", "add": -1 }] },
+            { "weight": 1, "text": "Half a day, dark and quiet, and then a searchlight. They knew the dust as well as you did.", "effects": [{ "do": "deadline", "add": -1 }, { "do": "fight", "ship": "grapple-tender" }] }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "hazard.cold-sun",
+      "at": ["hazard"],
+      "title": "{place}: {hazard}",
+      "text": "The lane bends close to a dim, swollen star. On the chart it is a shortcut. On the hull thermometer it is a number that keeps going up.",
+      "choices": [
+        {
+          "id": "close",
+          "label": "Cut the corner close",
+          "outcomes": [
+            { "weight": 2, "text": "The heat comes through the deck plates and into the soles of everyone's boots. It saves a day, and the medbay is busy for a while after.", "effects": [{ "do": "deadline", "add": 1 }, { "do": "hurt", "crew": "all", "amount": 0.1 }] },
+            { "weight": 1, "text": "It saves a day. Something in the engine room does not survive the saving.", "effects": [{ "do": "deadline", "add": 1 }, { "do": "fire", "room": "random", "size": 0.4 }] }
+          ]
+        },
+        {
+          "id": "wide",
+          "label": "Keep the long way round",
+          "outcomes": [{ "text": "The star stays a dull red coin off the bow. The crew watch it out of the galley port, and nobody suggests going closer." }]
+        },
+        {
+          "id": "slingshot",
+          "label": "Let the pilot use the star to throw us",
+          "requires": { "crew": { "skill": "piloting", "min": 2 }, "as": "pilot" },
+          "outcomes": [{ "text": "{pilot} brings her in at an angle nobody else aboard would have chosen and lets the star do the work. The tanks come out ahead.", "effects": [{ "do": "fuel", "add": 1 }] }]
+        }
+      ]
+    },
+    {
+      "id": "hazard.shear",
+      "at": ["hazard"],
+      "title": "{place}: {hazard}",
+      "text": "Two masses out here disagree about which way is down, and the lane runs along the line where they argue. The frame is already groaning before the bridge has finished reading the warning.",
+      "choices": [
+        {
+          "id": "hold",
+          "label": "Hold the line and let the frame take it",
+          "outcomes": [
+            { "weight": 2, "text": "The frame takes it. A seam opens along the corridor with a sound like a gate.", "effects": [{ "do": "breach", "room": "random", "size": 0.35 }] },
+            { "weight": 2, "text": "The groaning stops as suddenly as it started. A few fittings have moved where they will never move back." }
+          ]
+        },
+        {
+          "id": "engines",
+          "label": "Push the engines against it",
+          "requires": { "fact": "system.usable", "system": "engines", "gte": 2, "label": "Engines 2" },
+          "outcomes": [{ "text": "The engines whine at a note nobody likes, and hold the ship steady through the worst of it. One bar of them does not come back.", "effects": [{ "do": "damage", "system": "engines", "bars": 1 }] }]
+        }
+      ]
+    },
+    {
+      "id": "derelict.lifeboat",
+      "at": ["derelict"],
+      "title": "A lifeboat at {place}",
+      "text": "A lifeboat with its beacon long dead, still sealed. The pressure light on the hatch is green. {scout} raps on the hull twice, and something inside raps back once.",
+      "cast": { "scout": { "pick": "random" } },
+      "choices": [
+        {
+          "id": "open",
+          "label": "Open it up",
+          "outcomes": [
+            { "weight": 2, "text": "One survivor, thin and furious and very glad. They leave at the next port with your coffee, a blanket and a debt. Somebody somewhere will hear the ship's name said kindly.", "effects": [{ "do": "reputation", "faction": "collective", "add": 1 }, { "do": "trust", "add": 1 }] },
+            { "weight": 1, "text": "The knock was the boat settling. Inside there are two bodies in their suits, and a sealed case one of them was holding. {scout} brings the case and leaves the rest.", "effects": [{ "do": "money", "add": 50 }, { "do": "remember", "crew": "$scout", "memory": "scare" }] }
+          ]
+        },
+        {
+          "id": "medic",
+          "label": "Open it with a medic waiting at the lock",
+          "requires": { "crew": { "skill": "medicine", "min": 1 }, "as": "medic" },
+          "outcomes": [{ "text": "{medic} is in the hatch before it is fully open. The survivor lives, and talks, at length, about who left them there.", "effects": [{ "do": "reputation", "faction": "collective", "add": 1 }, { "do": "intel", "text": "A lifeboat survivor near {place} names a Receivers cutter that left their crew adrift." }] }]
+        },
+        {
+          "id": "leave",
+          "label": "Leave it sealed",
+          "outcomes": [{ "text": "You leave it as you found it. Nobody raps on anything for the rest of the crossing." }]
+        }
+      ]
+    },
+    {
+      "id": "derelict.ore-barge",
+      "at": ["derelict"],
+      "title": "An ore barge at {place}",
+      "text": "A Union ore barge, nose-down and gutted, with her hold doors open to the stars. Her name has been painted out. The Union does that to ships it is ashamed of, or to ships it wants back.",
+      "choices": [
+        {
+          "id": "strip",
+          "label": "Strip what is left",
+          "outcomes": [
+            { "weight": 2, "text": "Two crates of instruments from the survey deck, still in their foam. The Union would want those back, if anybody tells them.", "effects": [{ "do": "crate", "kind": "salvage", "count": 2, "label": "Survey instruments", "contents": "Gravimeters in fitted foam, calibration slips, and a crew photograph tucked into one lid." }, { "do": "reputation", "faction": "miners-union", "add": -1 }] },
+            { "weight": 1, "text": "The barge's last owners left something in the hold to discourage visitors. It works.", "effects": [{ "do": "hurt", "crew": "random", "amount": 0.4 }] }
+          ]
+        },
+        {
+          "id": "report",
+          "label": "Send her position to the Union",
+          "outcomes": [{ "text": "The Union answers in under an hour, with a thank you and a credit transfer smaller than the instruments would have fetched.", "effects": [{ "do": "reputation", "faction": "miners-union", "add": 2 }, { "do": "money", "add": 30 }] }]
+        },
+        {
+          "id": "fuel",
+          "label": "Drain her tanks",
+          "requires": { "crew": { "skill": "engineering", "min": 1 }, "as": "cutter" },
+          "outcomes": [
+            { "when": { "fact": "fuel.room", "gte": 1 }, "text": "{cutter} finds the tank valves frozen, and then not frozen. Two units, slightly brown.", "effects": [{ "do": "fuel", "add": 2 }] },
+            { "fallback": true, "text": "{cutter} gets the valves open, and the tanks are full already. The barge's fuel stays in the barge." }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "derelict.quarantine",
+      "at": ["derelict"],
+      "title": "A marked hull at {place}",
+      "text": "A small hauler, intact, with a yellow quarantine band painted round her middle and the same word stencilled on every hatch in four languages. Her transponder still reads, and her manifest says medical supplies.",
+      "choices": [
+        {
+          "id": "pass",
+          "label": "Respect the band and pass by",
+          "outcomes": [{ "text": "You give her a wide berth. Margo logs the band and the transponder without being asked." }]
+        },
+        {
+          "id": "board",
+          "label": "Board her anyway, suits sealed",
+          "outcomes": [
+            { "weight": 2, "text": "The medical supplies are real, and still good. Nobody aboard her is. You take the crates and decontaminate the suits twice.", "effects": [{ "do": "crate", "kind": "salvage", "count": 2, "label": "Medical stores, quarantine stamp", "contents": "Sterile packs, antiviral ampoules in a cold case, and a quarantine order signed by nobody." }, { "do": "remember", "crew": "random", "memory": "scare" }] },
+            { "weight": 1, "text": "The suits were sealed. Afterwards, the air scrubbers run harder than they should for days, and there is a smell in the crawlway nobody can place.", "effects": [{ "do": "threat" }, { "do": "hurt", "crew": "random", "amount": 0.2 }] }
+          ]
+        },
+        {
+          "id": "test",
+          "label": "Have the medic sample her air first",
+          "requires": { "crew": { "skill": "medicine", "min": 2 }, "as": "medic" },
+          "outcomes": [{ "text": "{medic} reads the sample twice and says it is only an old band on a clean ship. The crates come aboard without anyone holding their breath.", "effects": [{ "do": "crate", "kind": "salvage", "count": 2, "label": "Medical stores, quarantine stamp", "contents": "Sterile packs, antiviral ampoules in a cold case, and a quarantine order signed by nobody." }] }]
+        }
+      ]
+    },
+    {
+      "id": "derelict.wayside-shrine",
+      "at": ["derelict"],
+      "title": "A wayside shrine at {place}",
+      "text": "An Order shrine, a sealed can the size of a cabin with a lamp in its window, anchored where the lane bends. Ships leave things here. Some of them come back for what they left.",
+      "choices": [
+        {
+          "id": "leave-something",
+          "label": "Leave something at the shrine",
+          "requires": { "fact": "money", "gte": 20, "label": "20 credits" },
+          "outcomes": [{ "text": "A credit chit under the lamp, with the ship's name on it. Somewhere the Order will hear about it, because the Order hears about everything left at its shrines.", "effects": [{ "do": "money", "add": -20 }, { "do": "reputation", "faction": "the-order", "add": 1 }] }]
+        },
+        {
+          "id": "take",
+          "label": "Take what other ships have left",
+          "outcomes": [
+            { "weight": 2, "text": "Coins, a ring, a child's drawing of a ship, and a credit chit. You take the chit.", "effects": [{ "do": "money", "add": 45 }, { "do": "reputation", "faction": "the-order", "add": -2 }] },
+            { "weight": 1, "text": "The shrine has a camera in the lamp. The Order sends the picture to everyone it knows.", "effects": [{ "do": "money", "add": 45 }, { "do": "reputation", "faction": "the-order", "add": -4 }] }
+          ]
+        },
+        {
+          "id": "pass",
+          "label": "Pass by",
+          "outcomes": [{ "text": "The lamp follows you down the lane for an hour before the range takes it." }]
+        }
+      ]
+    },
+    {
+      "id": "checkpoint.union-toll",
+      "at": ["checkpoint"],
+      "title": "Union toll at {place}",
+      "text": "A tug in Union orange sits across the lane, with a boom out and a sign on it. The sign gives the toll, the reason for the toll, and the name of the man who will be very disappointed if it is not paid.",
+      "choices": [
+        {
+          "id": "pay",
+          "label": "Pay the toll",
+          "requires": { "fact": "money", "gte": 40, "label": "40 credits" },
+          "outcomes": [{ "text": "The boom swings up. The tug's crew wave, and one of them holds up a hand-lettered card that says the dues are going to a widows' fund.", "effects": [{ "do": "money", "add": -40 }, { "do": "reputation", "faction": "miners-union", "add": 1 }] }]
+        },
+        {
+          "id": "friends",
+          "label": "Remind them we are friends of the Union",
+          "requires": { "fact": "reputation", "faction": "miners-union", "gte": 2, "label": "Union standing 2" },
+          "outcomes": [{ "text": "The boom is up before you finish the sentence. A voice on the channel says the toll is for strangers." }]
+        },
+        {
+          "id": "refuse",
+          "label": "Refuse and go round the boom",
+          "outcomes": [
+            { "weight": 2, "text": "The tug does nothing at all. The Union will remember the ship's name, which is what it does instead.", "effects": [{ "do": "reputation", "faction": "miners-union", "add": -2 }] },
+            { "weight": 1, "text": "The tug has friends further down the lane.", "effects": [{ "do": "reputation", "faction": "miners-union", "add": -2 }, { "do": "fight", "ship": "salvager-skiff" }] }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "checkpoint.blessing",
+      "at": ["checkpoint"],
+      "title": "The Order's gate at {place}",
+      "text": "Two Order ships hold the lane, with a hymn going out on every channel at once. A brother on the open line asks, kindly, what you carry and for whom, and whether you would like the ship blessed.",
+      "choices": [
+        {
+          "id": "blessing",
+          "label": "Accept the blessing",
+          "outcomes": [
+            { "weight": 3, "text": "The brother reads a long passage over the channel and the ships part. The crew pretend not to have listened, and are quieter after.", "effects": [{ "do": "reputation", "faction": "the-order", "add": 1 }] },
+            { "when": { "fact": "contraband", "gte": 1 }, "weight": 2, "text": "The blessing comes with a boarding party, who bless the hold, crate by crate, and take away the crates they find unholy.", "effects": [{ "do": "contract.seize" }, { "do": "reputation", "faction": "the-order", "add": -1 }] }
+          ]
+        },
+        {
+          "id": "decline",
+          "label": "Decline politely and go through",
+          "outcomes": [{ "text": "\"Then go with nothing,\" says the brother, without any malice, and the ships part.", "effects": [{ "do": "reputation", "faction": "the-order", "add": -1 }] }]
+        },
+        {
+          "id": "carrying",
+          "label": "Tell him we carry the Order's own freight",
+          "requires": { "fact": "reputation", "faction": "the-order", "gte": 1, "label": "Order standing 1" },
+          "outcomes": [{ "text": "The hymn changes key. The ships part wide, and the brother asks to be remembered to the cantor." }]
+        }
+      ]
+    },
+    {
+      "id": "checkpoint.census",
+      "at": ["checkpoint"],
+      "title": "Confederation census at {place}",
+      "text": "A Confederation launch wants a crew count, names, places of birth, and a signature from everyone aboard, in triplicate. The clerk apologises for the triplicate. The clerk does not apologise for anything else.",
+      "choices": [
+        {
+          "id": "comply",
+          "label": "Fill the forms in honestly",
+          "outcomes": [{ "text": "It takes two hours and every pen aboard. The clerk stamps the last sheet and sends a copy of the stamp.", "effects": [{ "do": "deadline", "add": -1 }, { "do": "reputation", "faction": "confederation", "add": 1 }] }]
+        },
+        {
+          "id": "fudge",
+          "label": "Fill the forms in quickly",
+          "outcomes": [
+            { "weight": 3, "text": "Nobody reads them. The launch turns away before the ink is dry." },
+            { "weight": 1, "text": "Somebody reads them. Two of the crew are born in the same year on a station that was closed at the time. There is a fine, and a note in a file.", "effects": [{ "do": "money", "add": -50 }, { "do": "reputation", "faction": "confederation", "add": -2 }] }
+          ]
+        },
+        {
+          "id": "talk",
+          "label": "Talk the clerk down to one copy",
+          "requires": { "crew": { "skill": "negotiation", "min": 1 }, "as": "voice" },
+          "outcomes": [{ "text": "{voice} discovers that the clerk has a sister on a Union rig, and that the third copy goes into a drawer nobody opens. One copy is enough." }]
+        }
+      ]
+    },
+    {
+      "id": "checkpoint.priority-lane",
+      "at": ["checkpoint"],
+      "when": { "fact": "contract.type", "eq": "courier" },
+      "title": "Priority lane at {place}",
+      "text": "The checkpoint runs a priority lane for sealed courier freight, and a queue for everyone else. The queue is long. The priority lane wants the courier's papers and a fee for the stamp.",
+      "choices": [
+        {
+          "id": "papers",
+          "label": "Show the courier's papers and pay for the stamp",
+          "requires": { "fact": "money", "gte": 30, "label": "30 credits" },
+          "outcomes": [{ "text": "The stamp goes on the papers with a thump you hear over the channel. You are through in minutes, ahead of the queue.", "effects": [{ "do": "money", "add": -30 }, { "do": "deadline", "add": 1 }] }]
+        },
+        {
+          "id": "queue",
+          "label": "Wait in the queue",
+          "outcomes": [{ "text": "The queue moves like a queue. The ship behind you plays the same song on its hull speaker for six hours.", "effects": [{ "do": "deadline", "add": -1 }] }]
+        },
+        {
+          "id": "client",
+          "label": "Drop the client's name",
+          "requires": { "fact": "reputation", "faction": "client", "gte": 1, "label": "Client standing 1" },
+          "outcomes": [{ "text": "The name is enough. The stamp is free, and the officer asks you to pass on regards nobody will remember to pass on.", "effects": [{ "do": "deadline", "add": 1 }] }]
+        }
+      ]
+    },
+    {
+      "id": "empty.drifting-crate",
+      "at": ["empty"],
+      "title": "A crate at {place}",
+      "text": "A cargo crate tumbling end over end through empty space, a long way from anything. Its marker light still works. Its seal still holds.",
+      "choices": [
+        {
+          "id": "take",
+          "label": "Bring it aboard",
+          "outcomes": [
+            { "weight": 3, "text": "It comes in through the lock with frost on it. The seal says it was lost by someone careless.", "effects": [{ "do": "crate", "kind": "salvage", "label": "Drifting crate", "contents": "Wire spools, a sealed tin of tea, and someone's spare boots." }] },
+            { "weight": 1, "text": "The crate was bait, and the line attached to it runs back to a skiff hiding in its shadow.", "effects": [{ "do": "fight", "ship": "salvager-skiff" }] }
+          ]
+        },
+        {
+          "id": "leave",
+          "label": "Leave it tumbling",
+          "outcomes": [{ "text": "The marker light blinks out of range. Whoever lost it can keep on losing it." }]
+        }
+      ]
+    },
+    {
+      "id": "empty.fuel-trader",
+      "at": ["empty"],
+      "title": "A tanker at {place}",
+      "text": "A tanker sits in the dark with her running lights on, selling fuel to anyone who stops. Her captain names a price that is too high, and then a lower one, before you have answered.",
+      "choices": [
+        {
+          "id": "buy",
+          "label": "Buy two units",
+          "requires": [{ "fact": "money", "gte": 50, "label": "50 credits" }, { "fact": "fuel.room", "gte": 2, "label": "Room in the tanks" }],
+          "outcomes": [
+            { "weight": 3, "text": "The hose goes across, the fuel comes over, the money goes back. Her captain asks if you have any news, and does not wait for it.", "effects": [{ "do": "money", "add": -50 }, { "do": "fuel", "add": 2 }] },
+            { "weight": 1, "text": "The fuel comes over, the money goes back, and the gauge says one unit, not two. The tanker is already pulling away.", "effects": [{ "do": "money", "add": -50 }, { "do": "fuel", "add": 1 }] }
+          ]
+        },
+        {
+          "id": "sell",
+          "label": "Sell her a unit",
+          "requires": { "fact": "fuel", "gte": 3, "label": "3 fuel" },
+          "outcomes": [{ "text": "She buys it back at less than she sells it for, which is how she has a tanker.", "effects": [{ "do": "fuel", "add": -1 }, { "do": "money", "add": 15 }] }]
+        },
+        {
+          "id": "pass",
+          "label": "Pass by",
+          "outcomes": [{ "text": "Her lights go on blinking in the dark behind you, open for business." }]
+        }
+      ]
+    },
+    {
+      "id": "empty.distress",
+      "at": ["empty"],
+      "title": "Distress call at {place}",
+      "text": "A distress call on the common channel: a skiff with a cracked reactor shield and three aboard. The voice is calm in the way of someone who has decided to be.",
+      "choices": [
+        {
+          "id": "help",
+          "label": "Go to them",
+          "outcomes": [
+            { "weight": 3, "text": "The reactor shield is cracked, and the three aboard are glad to see anyone. They pay in fuel, which is the only thing they have plenty of.", "effects": [{ "do": "fuel", "add": 1 }, { "do": "deadline", "add": -1 }, { "do": "reputation", "faction": "collective", "add": 1 }] },
+            { "weight": 1, "text": "The reactor shield is fine. The three aboard have guns.", "effects": [{ "do": "fight", "ship": "salvager-skiff" }] }
+          ]
+        },
+        {
+          "id": "check",
+          "label": "Have the sensors look before we go",
+          "requires": { "fact": "system.usable", "system": "sensors", "gte": 1, "label": "Sensors working" },
+          "outcomes": [
+            { "weight": 3, "text": "The skiff's reactor really is leaking. You go to them, and they pay in fuel and gratitude.", "effects": [{ "do": "fuel", "add": 1 }, { "do": "deadline", "add": -1 }, { "do": "reputation", "faction": "collective", "add": 1 }] },
+            { "weight": 1, "text": "The skiff's reactor is cold and her weapons are warm. You leave her calling.", "effects": [{ "do": "intel", "text": "A false distress call is being used to draw ships near {place}." }] }
+          ]
+        },
+        {
+          "id": "ignore",
+          "label": "Keep going",
+          "outcomes": [{ "text": "The call goes on behind you, calm, until the range takes it. The crew do not look at each other for a while.", "effects": [{ "do": "remember", "crew": "random", "memory": "scare" }] }]
+        }
+      ]
+    },
+    {
+      "id": "empty.quiet-watch",
+      "at": ["empty"],
+      "title": "A quiet watch at {place}",
+      "text": "Nothing out here at all. The ship ticks and hums. {sleeper} is asleep in the galley with a cup going cold, and nobody wants to be the one who wakes them.",
+      "cast": { "sleeper": { "pick": "random" } },
+      "choices": [
+        {
+          "id": "let",
+          "label": "Let them sleep",
+          "outcomes": [{ "text": "{sleeper} sleeps through the watch and wakes up embarrassed and better for it.", "effects": [{ "do": "heal", "crew": "$sleeper", "amount": 0.15 }] }]
+        },
+        {
+          "id": "drill",
+          "label": "Run a fire drill while it is quiet",
+          "outcomes": [{ "text": "The drill goes badly, then less badly, then well. {sleeper} complains the whole time.", "effects": [{ "do": "flag", "name": "drilled", "add": 1 }] }]
+        }
+      ]
+    },
+    {
+      "id": "empty.collective-signal",
+      "at": ["empty"],
+      "title": "A signal at {place}",
+      "text": "Something is sending on a band nobody uses, in pulses too regular to be a star and too slow to be a ship. Margo says it is a Collective relay. She says it a little too quickly.",
+      "choices": [
+        {
+          "id": "answer",
+          "label": "Answer it",
+          "outcomes": [
+            { "weight": 2, "text": "The relay answers back with a chart of the lanes ahead, marked with things nobody else marks. Margo takes it, files it, and says nothing about it.", "effects": [{ "do": "reputation", "faction": "collective", "add": 1 }, { "do": "intel", "text": "A Collective relay near {place} marks the lanes ahead with its own signs." }] },
+            { "weight": 1, "text": "The relay answers back by asking for the ship's name, and then for Margo's.", "effects": [{ "do": "trust", "add": -2 }, { "do": "reputation", "faction": "collective", "add": 1 }] }
+          ]
+        },
+        {
+          "id": "jam",
+          "label": "Jam it and move on",
+          "outcomes": [{ "text": "It goes quiet. Margo goes quiet as well, for longer than the relay does.", "effects": [{ "do": "trust", "add": -1 }, { "do": "reputation", "faction": "collective", "add": -1 }] }]
+        },
+        {
+          "id": "ignore",
+          "label": "Leave it pulsing",
+          "outcomes": [{ "text": "The pulses go on behind you, regular as breathing." }]
+        }
+      ]
+    },
+    {
+      "id": "empty.fence",
+      "at": ["empty"],
+      "when": { "fact": "contraband", "gte": 1 },
+      "title": "A fence at {place}",
+      "text": "A hauler with no transponder pulls alongside and asks, very politely, what is in the hold. It is the kind of politeness that already knows the answer and has a price in mind.",
+      "choices": [
+        {
+          "id": "nothing",
+          "label": "Tell them nothing",
+          "outcomes": [
+            { "weight": 3, "text": "\"Shame,\" says the hauler, and pulls away, and makes a note somewhere." },
+            { "weight": 1, "text": "\"Shame,\" says the hauler, and sends your heading to someone who will be less polite.", "effects": [{ "do": "pursuit", "on": true }] }
+          ]
+        },
+        {
+          "id": "sell",
+          "label": "Sell them the contraband",
+          "outcomes": [{ "text": "The crates go across for more than they are worth to anyone but the client. The client will be told the crates were seized. The client will not believe it.", "effects": [{ "do": "contract.seize" }, { "do": "money", "add": 200 }, { "do": "reputation", "faction": "client", "add": -3 }] }]
+        },
+        {
+          "id": "route",
+          "label": "Ask them about the checkpoints ahead",
+          "requires": { "crew": { "skill": "negotiation", "min": 1 }, "as": "voice" },
+          "outcomes": [{ "text": "{voice} trades them news of a patrol for news of a better lane. Both sides think they did well.", "effects": [{ "do": "intel", "text": "A fence near {place} says the checkpoint patrols change crews at the end of each week." }] }]
+        }
+      ]
+    }
+  ]
+}

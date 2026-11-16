@@ -12,7 +12,12 @@ import { CATALOG, CREW, SHIP, content } from './helpers.js';
 const CONTRACTS = content.all('contracts');
 const FACTIONS = content.all('factions');
 const PORTS = content.all('ports');
-const contractSim = (id, seed = 'flow') => createSim({ seed, ship: SHIP, crew: CREW, ...CATALOG, sector: content.require('sectors', 'the-reach'), run: { pursuit: false }, contract: content.require('contracts', id), ports: PORTS });
+/** A run carrying a contract, docked at Kessel Port (fuel 11, hull 10). */
+function contractSim(id, seed = 'flow') {
+  const sim = createSim({ seed, ship: SHIP, crew: CREW, ...CATALOG, sector: content.require('sectors', 'the-reach'), run: { pursuit: false }, contract: content.require('contracts', id), ports: PORTS });
+  sim.state.run.map.nodes.find((node) => node.id === sim.state.run.at).port = 'kessel';
+  return sim;
+}
 
 const REACH = content.require('sectors', 'the-reach');
 const runSim = (seed = 'flow') => createSim({ seed, ship: SHIP, crew: CREW, ...CATALOG, sector: REACH, run: { pursuit: false } });
@@ -99,7 +104,7 @@ test('the port screen offers every service with its price or the reason it canno
   const by = Object.fromEntries(view.services.map((service) => [service.id, service]));
   assert.deepEqual(Object.keys(by), ['refuel', 'repair-hull', 'repair-systems', 'sell-salvage', 'sell-contract', 'abandon']);
   assert.equal(by.refuel.why, null);
-  assert.match(by.refuel.detail, /6 units, 72 credits/);
+  assert.match(by.refuel.detail, /6 units, 66 credits/);
   assert.match(by['repair-hull'].detail, /3 points, 30 credits/);
   assert.match(by['repair-systems'].why, /nothing aboard is damaged/);
   assert.match(by['sell-salvage'].why, /no salvage/);
@@ -111,7 +116,7 @@ test('the port screen offers every service with its price or the reason it canno
   assert.match(Object.fromEntries(view.facts).Contract, /Smuggling: 4 of 4 crates aboard/);
   // Money short: as much fuel as it buys.
   sim.state.money = 30;
-  assert.match(portView(sim).services[0].detail, /All we can pay for: 2 of 6, 24 credits/);
+  assert.match(portView(sim).services[0].detail, /All we can pay for: 2 of 6, 22 credits/);
   // At the drop: the hand-over, with what it pays, and no selling or walking away.
   run.at = run.map.delivery;
   view = portView(sim);

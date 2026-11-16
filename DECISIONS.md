@@ -526,6 +526,13 @@ Items here are known shortcuts. Each names the stage that must clear it.
 
 ---
 
+### D-118 S3.5 stopped before merge; its content is kept on a branch for reuse (S3.5, 2026-11-16)
+Eric chose four deep changes (stealth encounters, a lived voyage replacing the node map, crew time replacing power bars, a people-first screen), so S3.5 as node events was cancelled part way. The unmerged branch `claude/project-thread-8xkaob` holds what was done, for the re-planned content work to take from:
+- **Reusable as is:** the five factions filled out (`content/factions/provisional.json`: line, look, values, buys, bans, smugglers, ships, voice) with checker rules; 18 named ports of the Reach (`content/ports/the-reach.json`: faction, text, prices, services); seven more contract templates (`content/contracts/second-set.json`, ten in all, across all five factions).
+- **Reusable as writing, not as structure:** 21 more node events (`content/events/second-set.json`, two claim events in `content/events/contracts.json`). Their situations, choices and text can move into whatever replaces node events; the `at` node kinds and the chart hooks will not survive.
+- **Tied to the node map:** `nameChartPorts` (src/sim/port.js) gives each port point on the chart a named port from the `market` dice; the e2e run-loop checks were loosened so they read prices and contract terms from content rather than fixed numbers.
+State when stopped: content checker passes (30 events), 337 unit tests pass, 132 of 134 browser checks pass (two assertions in the run-loop suite still name the first contract set's client and title), autoplay not run.
+
 ## Stage notes
 
 ### Stage 1: the ship is alive (built 2026-11-15 to 2026-11-16)
