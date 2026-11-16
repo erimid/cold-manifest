@@ -4,9 +4,12 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { BIG_FIRE, OBJECTION_SECONDS, REFUSALS_PER_RUN, TRUST, WAIVE_SECONDS, riskOf } from '../src/ai/judgement.js';
+import { OBJECTION_SECONDS, REFUSALS_PER_RUN, TRUST, WAIVE_SECONDS, riskOf } from '../src/ai/judgement.js';
 import { TICK_RATE, checkInvariants } from '../src/sim/sim.js';
-import { newCrewedSim, newTalkingSim } from './helpers.js';
+import { content, newCrewedSim, newTalkingSim } from './helpers.js';
+
+/** The fire she will not see anyone walk into unsuited, as her rule in content/ has it. */
+const BIG_FIRE = content.require('risks', 'into_fire').when.find((cond) => cond.fact === 'seen.fire').gte;
 
 const seconds = (sim, s) => {
   for (let i = 0; i < Math.round(s * TICK_RATE); i++) sim.step();

@@ -231,6 +231,7 @@ export function enemyOf(sim) {
       catalog: sim.catalog,
       rng: sim.rng,
       lines: [],
+      rules: sim.rules, // our boarders remember aboard their ship as they do aboard ours
       // What happens aboard the enemy is announced apart from the player's ship, so alarms and the AI are not fooled.
       // News about a crew member goes straight to the bus, named by whose crew they are (crewEmit).
       events: { emit: (type, payload) => sim.events.emit(`enemy.${type}`, payload), bus: sim.events },

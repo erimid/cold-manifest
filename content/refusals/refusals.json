@@ -1,0 +1,53 @@
+{
+  "note": "Orders to walk into a room that a crew member will not take, because of what they remember (S2.10, moved into content in S3.3; D-102, D-110). Tried in `order`; the first that fits is the reason shown. $crew is who was ordered, $room is where. Every rule has a way round it that is itself play: a suit, a lamp, a crewmate, someone else, or time.",
+  "items": [
+    {
+      "id": "grave",
+      "order": 1,
+      "note": "Where a crewmate died, while whatever is wrong in there is still wrong.",
+      "when": [
+        { "memory": { "type": "death", "room": "$room" }, "as": "memory" },
+        {
+          "any": [
+            { "fact": "room.fire", "room": "$room", "gt": 0 },
+            { "fact": "room.breach", "room": "$room", "gt": 0 },
+            { "fact": "room.oxygen", "room": "$room", "lt": 0.5 },
+            { "fact": "room.dark", "room": "$room" },
+            { "fact": "room.foes", "room": "$room" }
+          ]
+        }
+      ],
+      "reason": "{crew} won't go back into {room}. Not after what happened to {memory.who}."
+    },
+    {
+      "id": "burn",
+      "order": 2,
+      "when": [{ "memory": { "type": "burn" }, "as": "memory" }, { "fact": "crew.suit", "crew": "$crew", "eq": false }, { "fact": "room.fire", "room": "$room", "gte": 0.2 }],
+      "reason": "{crew} won't walk into the fire in {room} without a suit. Not after the burns from {memory.room}."
+    },
+    {
+      "id": "choke",
+      "order": 3,
+      "when": [{ "memory": { "type": "choke" }, "as": "memory" }, { "fact": "crew.suit", "crew": "$crew", "eq": false }, { "fact": "room.oxygen", "room": "$room", "lt": 0.5 }],
+      "reason": "{crew} won't go into {room} without a suit. Not after running out of air in {memory.room}."
+    },
+    {
+      "id": "dark",
+      "order": 4,
+      "note": "An unlit room with none of ours in it, for anyone with a bad memory of the dark.",
+      "when": [{ "memory": { "shadow": true }, "as": "memory" }, { "fact": "room.dark", "room": "$room" }, { "not": { "fact": "room.friends", "room": "$room", "crew": "$crew" } }],
+      "reason": "{crew} won't go into {room} alone in the dark. Not after {memory.shadow}."
+    },
+    {
+      "id": "override",
+      "order": 5,
+      "note": "A big fire or an airless room, unsuited, on the word of a captain they watched override Margo.",
+      "when": [
+        { "memory": { "type": "override" }, "as": "memory" },
+        { "fact": "crew.suit", "crew": "$crew", "eq": false },
+        { "any": [{ "fact": "room.fire", "room": "$room", "gte": 0.5 }, { "fact": "room.oxygen", "room": "$room", "lt": 0.15 }] }
+      ],
+      "reason": "{crew} won't walk into {room} on the captain's word. Not after the captain overrode Margo over {memory.room}."
+    }
+  ]
+}

@@ -1,0 +1,208 @@
+{
+  "note": "Transit events (S3.3, D-111; brief §15). The format is described at the top of src/narrative/events.js, conditions in src/narrative/conditions.js, effects in src/narrative/effects.js. These first seven show every part of the format at work; S3.5 brings the count to 30.",
+  "items": [
+    {
+      "id": "hazard.loud-lane",
+      "at": ["hazard"],
+      "title": "{place}: {hazard}",
+      "text": "The lane runs straight through {hazard}. The chart, last updated by a company that no longer exists, calls it navigable. The hull has started to tick.",
+      "choices": [
+        {
+          "id": "press-on",
+          "label": "Hold the course and take what comes",
+          "outcomes": [
+            { "weight": 2, "text": "It is loud for four minutes and then it is not. Nothing you can find is broken." },
+            { "weight": 2, "text": "Something the size of a fist goes through the outer skin and keeps going. The ship is a little less of a ship than it was.", "effects": [{ "do": "breach", "room": "random", "size": 0.3 }, { "do": "hull", "add": -1 }] },
+            { "weight": 1, "text": "A surge comes up through the frame and finds the sensor mast. One bar of it is slag.", "effects": [{ "do": "damage", "system": "sensors", "bars": 1 }] }
+          ]
+        },
+        {
+          "id": "sweep",
+          "label": "Slow to a crawl and sweep ahead",
+          "requires": { "fact": "system.power", "system": "sensors", "gte": 1, "label": "Sensors powered" },
+          "outcomes": [{ "text": "The sensors pick a way through, one clear pocket at a time. It costs the better part of a day you had been counting on.", "effects": [{ "do": "deadline", "add": -1 }] }]
+        },
+        {
+          "id": "thread",
+          "label": "Let the best hands aboard fly it",
+          "requires": { "crew": { "skill": "piloting", "min": 2 }, "as": "pilot" },
+          "outcomes": [{ "text": "{pilot} takes the helm and does not speak for twenty minutes. When it is over there is not a mark on the hull, and {pilot} needs a moment before standing up." }]
+        }
+      ]
+    },
+    {
+      "id": "derelict.cold-hull",
+      "at": ["derelict"],
+      "title": "A dead hull at {place}",
+      "text": "A freighter of the old company pattern turns slowly in the lane. No lights, no transponder, one airlock standing open. {scout} is already looking at it the way people look at an unlocked door.",
+      "cast": { "scout": { "pick": "random" } },
+      "choices": [
+        { "id": "leave", "label": "Leave it turning", "outcomes": [{ "text": "You log the position and go on. Whatever is in there stays in there." }] },
+        {
+          "id": "board",
+          "label": "Send {scout} across with a line and a lamp",
+          "outcomes": [
+            {
+              "weight": 3,
+              "text": "{scout} comes back with a crate under one arm and frost on the faceplate. \"Galley's intact. Somebody set the table.\" There is a strongbox too.",
+              "effects": [{ "do": "crate", "kind": "salvage", "label": "Salvage from a dead hull", "contents": "Sealed ration tins, a kettle, and a table setting for six, wrapped in a company-issue blanket." }, { "do": "money", "add": 60 }]
+            },
+            {
+              "weight": 2,
+              "text": "A deck plate lets go under {scout} two compartments in. The line holds. The leg mostly holds. Nothing comes back but {scout}.",
+              "effects": [{ "do": "hurt", "crew": "$scout", "amount": 0.55 }]
+            },
+            {
+              "weight": 1,
+              "text": "{scout} is back early and seals the lock by hand. \"There's a log on the bridge. You should hear it before we go anywhere.\"",
+              "effects": [{ "do": "flag", "name": "heard_the_log" }, { "do": "event", "event": "derelict.the-log" }]
+            }
+          ]
+        },
+        {
+          "id": "strip",
+          "label": "Have an engineer cut the fuel cell out",
+          "requires": { "crew": { "skill": "engineering", "min": 2 }, "as": "cutter" },
+          "outcomes": [
+            { "when": { "fact": "fuel.room", "gte": 1 }, "text": "{cutter} is across and back inside the hour, towing a cell with the old company's stencil still on it. It reads a third full, which is a third more than it had any right to.", "effects": [{ "do": "fuel", "add": 2 }] },
+            { "fallback": true, "text": "{cutter} gets the cell out clean, and then there is nowhere to put it. The tanks are full. It goes back out of the lock, still worth something to somebody." }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "derelict.the-log",
+      "title": "The last entry",
+      "text": "The recording is eleven seconds long. A woman reads a manifest number twice, slowly, the way you read something to a person who is not listening. Then a door closes somewhere behind her and she stops reading.",
+      "choices": [
+        {
+          "id": "keep",
+          "label": "Keep the recording",
+          "outcomes": [{ "text": "Margo files it under the manifest number. She does not say anything about the number, and you notice that she does not.", "effects": [{ "do": "intel", "text": "A dead freighter at {place} logged a manifest number twice before the recording stopped." }, { "do": "trust", "add": 1 }] }]
+        },
+        {
+          "id": "wipe",
+          "label": "Wipe it and go",
+          "outcomes": [
+            { "weight": 2, "text": "It is gone. The crew are quieter than they were an hour ago." },
+            { "weight": 1, "text": "It is gone. That night there is a sound in the crawlway that the pumps do not account for, and nobody mentions it at breakfast.", "effects": [{ "do": "threat" }] }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "checkpoint.patrol-line",
+      "at": ["checkpoint"],
+      "title": "Patrol line at {place}",
+      "text": "A cutter with fresh paint over an old company crest holds the lane. The voice on the channel is young, bored, and reading from a card. It wants your manifest, your registry, and a transit fee that was not on any chart.",
+      "choices": [
+        {
+          "id": "manifest",
+          "label": "Send the manifest and wait",
+          "outcomes": [
+            { "weight": 2, "text": "A long pause. \"Proceed.\" The card evidently had nothing more on it." },
+            { "weight": 1, "when": { "fact": "money", "gte": 40 }, "text": "\"There is a discrepancy fee.\" There is no discrepancy. There is a fee.", "effects": [{ "do": "money", "add": -40 }] }
+          ]
+        },
+        {
+          "id": "pay",
+          "label": "Pay the fee and keep the receipt",
+          "requires": { "fact": "money", "gte": 60, "label": "60 credits" },
+          "outcomes": [{ "text": "The receipt is stamped with a seal belonging to an office that closed nine years ago. They wave you through before you can read the rest.", "effects": [{ "do": "money", "add": -60 }] }]
+        },
+        {
+          "id": "talk",
+          "label": "Put someone on the channel who can talk",
+          "requires": { "crew": { "skill": "negotiation" }, "as": "voice" },
+          "outcomes": [
+            { "weight": 3, "text": "{voice} asks the officer's name, then the officer's captain's name, then whether the captain knows about the fee. The lane is clear in under a minute." },
+            { "weight": 1, "text": "{voice} pushes one question too far. The channel goes quiet, and then the cutter's guns come round.", "effects": [{ "do": "fight", "ship": "knife-cutter" }] }
+          ]
+        },
+        {
+          "id": "run",
+          "label": "Say nothing and burn through the line",
+          "outcomes": [
+            { "weight": 1, "text": "They were not expecting it. By the time anyone on that cutter has put down a cup, you are a heat trace and a bad report." },
+            { "weight": 2, "text": "They were expecting it. The cutter is already turning.", "effects": [{ "do": "fight", "ship": "knife-cutter" }] }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "empty.beacon",
+      "at": ["empty"],
+      "title": "A beacon in the dark",
+      "text": "A distress beacon, low power, repeating a ship's name nobody aboard recognises. It is four minutes off the lane. Beacons in the Reach are sometimes what they say they are.",
+      "choices": [
+        { "id": "pass", "label": "Log it and pass by", "outcomes": [{ "text": "The beacon repeats itself behind you until the range opens and it is only noise." }] },
+        {
+          "id": "answer",
+          "label": "Answer it",
+          "outcomes": [
+            {
+              "weight": 2,
+              "text": "A lifeboat, long empty, its locker still sealed. Somebody packed it for a fight they did not get to have.",
+              "effects": [{ "do": "crate", "kind": "ammo", "label": "Ordnance crate, lifeboat issue" }]
+            },
+            { "weight": 2, "text": "The beacon is bolted to a rock. The skiff behind the rock has been waiting some time.", "effects": [{ "do": "fight", "ship": "salvager-skiff" }] },
+            { "weight": 1, "text": "By the time you match the drift the beacon has stopped. There is nothing on the sensors, and there was nothing on them before." }
+          ]
+        },
+        {
+          "id": "listen",
+          "label": "Hold off and listen first",
+          "requires": { "fact": "system.power", "system": "sensors", "gte": 2, "label": "Sensors at 2 bars" },
+          "hidden": true,
+          "outcomes": [{ "text": "With the gain up there is a second signature tucked in behind the beacon: a small drive, banked low and warm. You leave it sitting there.", "effects": [{ "do": "intel", "text": "Somebody is using a false beacon near {place}." }] }]
+        }
+      ]
+    },
+    {
+      "id": "empty.bad-air",
+      "at": ["empty"],
+      "title": "A cough in the mess",
+      "text": "{patient} has had a cough since the last port and has stopped pretending otherwise. It is probably the scrubbers. On this ship it is usually the scrubbers.",
+      "cast": { "patient": { "pick": "random" } },
+      "choices": [
+        {
+          "id": "rest",
+          "label": "Tell {patient} to sleep it off",
+          "outcomes": [
+            { "weight": 2, "text": "A day in a bunk does what a day in a bunk does. The cough moves on." },
+            { "weight": 1, "text": "It is not the scrubbers. {patient} is grey by the next watch and angry about being asked.", "effects": [{ "do": "hurt", "crew": "$patient", "amount": 0.3 }] }
+          ]
+        },
+        {
+          "id": "treat",
+          "label": "Have someone who knows medicine take a look",
+          "requires": { "crew": { "skill": "medicine", "not": "$patient" }, "as": "medic" },
+          "outcomes": [{ "text": "{medic} listens to {patient}'s chest for a long time, says a word nobody else knows, and comes back from the medbay with something that works.", "effects": [{ "do": "heal", "crew": "$patient", "amount": 0.25 }] }]
+        },
+        {
+          "id": "scrubbers",
+          "label": "Pull a bar from life support and strip the scrubbers",
+          "requires": { "fact": "system.power", "system": "life_support", "gte": 1, "label": "Life support powered" },
+          "outcomes": [{ "text": "The filter that comes out is the colour of the inside of a chimney. The new one is the last new one.", "effects": [{ "do": "flag", "name": "scrubbers_changed" }, { "do": "heal", "crew": "all", "amount": 0.05 }] }]
+        }
+      ]
+    },
+    {
+      "id": "empty.wake",
+      "at": ["empty"],
+      "weight": 2,
+      "when": { "fact": "followed" },
+      "title": "Somebody's wake",
+      "text": "Margo puts a trace on the monitor without being asked: a drive signature, hours old, laid over your own track like a second line of handwriting. Whoever it is, they are not in a hurry.",
+      "choices": [
+        { "id": "note", "label": "Note it and keep moving", "outcomes": [{ "text": "You keep moving. The trace stays on the monitor a little longer than it needs to." }] },
+        {
+          "id": "dark",
+          "label": "Vent the drive plume and cut a false trail",
+          "requires": { "fact": "fuel", "gte": 3, "label": "3 fuel" },
+          "outcomes": [{ "text": "Two units of fuel go out as a bright smear pointing the wrong way. It should cost whoever is back there a couple of jumps working out which line is yours.", "effects": [{ "do": "fuel", "add": -2 }, { "do": "pursuit", "delay": 2 }] }]
+        }
+      ]
+    }
+  ]
+}

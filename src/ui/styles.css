@@ -1710,3 +1710,28 @@ body {
   border-color: var(--amber);
   color: var(--paper);
 }
+
+/* The event view (S3.3): a choice's requirement tag, a locked choice, and the outcome. */
+.choice {
+  text-align: left;
+}
+.choice__tag {
+  color: var(--amber, #ffb347);
+  font-weight: 700;
+  white-space: nowrap;
+}
+.choice--locked,
+.choice--locked:disabled {
+  opacity: 0.55;
+}
+.choice--locked .choice__tag {
+  color: inherit;
+}
+.event__result {
+  border-top: 1px solid rgba(255, 179, 71, 0.25);
+  margin-top: 0.75rem;
+  padding-top: 0.25rem;
+}
+.event__result .menu {
+  margin-top: 1rem;
+}

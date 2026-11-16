@@ -1,5 +1,5 @@
 {
-  "note": "Sector definitions for the map generator (S3.1, D-104). A sector is a band of space crossed from an origin port on the left to a delivery port on the right, in columns. `nodes` is the range of points on the chart, `columns` the range of columns they sit in (origin and delivery are columns of their own). `kinds` weights what each point in between is; `minimum` makes sure each kind turns up at least that often. `hazards` are the names a hazard point is given. `designations` are the letter codes on Margo's company chart. `pursuit` is the chance a run's contract is followed, which ship follows, how many jumps late it sets out, and how far away Margo can see it. Port names stay as chart designations until ports become content in S3.4 and S3.5 (DF-47).",
+  "note": "Sector definitions for the map generator (S3.1, D-104). A sector is a band of space crossed from an origin port on the left to a delivery port on the right, in columns. `nodes` is the range of points on the chart, `columns` the range of columns they sit in (origin and delivery are columns of their own). `kinds` weights what each point in between is; `minimum` makes sure each kind turns up at least that often. `hazards` are the names a hazard point is given. `designations` are the letter codes on Margo's company chart. `pursuit` is the chance a run's contract is followed, which ship follows, how many jumps late it sets out, and how far away Margo can see it. `events` is the chance that arriving at each kind of point for the first time brings a transit event (S3.3; ports open the port instead). Port names stay as chart designations until ports become content in S3.4 and S3.5 (DF-47).",
   "items": [
     {
       "id": "the-reach",
@@ -20,7 +20,8 @@
       "sideLanes": 0.25,
       "fuel": { "start": 10, "max": 12 },
       "slack": [2, 3],
-      "pursuit": { "chance": 0.5, "ship": "knife-cutter", "lead": 2, "sight": 2 }
+      "pursuit": { "chance": 0.5, "ship": "knife-cutter", "lead": 2, "sight": 2 },
+      "events": { "empty": 0.35, "hazard": 1, "derelict": 1, "checkpoint": 1 }
     }
   ]
 }

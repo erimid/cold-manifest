@@ -1,7 +1,7 @@
 // The screens around the ship (S3.2, brief §18): records hub, contract board, port,
 // event view, scene view and run summary. Each is a plain function that fills `root`
 // and calls back; main.js owns which one is up. All of them are working stubs: real
-// content arrives with S3.3 (events), S3.4 (contracts, ports) and Stage 4 (scenes).
+// content arrives with S3.4 (contracts, ports) and Stage 4 (scenes). The event view is real since S3.3.
 
 import { el } from './dom.js';
 
@@ -97,19 +97,28 @@ export function renderPort(root, { node, fuel, fuelMax, isDrop, onRefuel, onBar,
   );
 }
 
-/** The event view: a title, some text and choices. Every choice does nothing yet. */
-export function renderEvent(root, { event, onChoose }) {
+/**
+ * The event view (S3.3, brief §15, §18). `view` comes from narrative/events.js eventView: the title,
+ * the text, and the choices, each with the tag for what it requires ("[Ilse, Piloting]") and locked
+ * when the requirement is not met. Once a choice is made the outcome is told and one button goes on.
+ */
+export function renderEvent(root, { view, onChoose, onContinue }) {
+  const choice = (one) =>
+    el(
+      'button',
+      { class: `btn choice${one.available ? '' : ' choice--locked'}`, type: 'button', id: `choice-${one.id}`, disabled: !one.available, press: () => onChoose(one) },
+      one.tag && el('span', { class: 'choice__tag' }, one.tag, ' '),
+      one.label,
+    );
   root.replaceChildren(
     screen(
       'event',
       tag('Event'),
-      el('h2', {}, event.title),
-      el('p', {}, event.text),
-      el(
-        'div',
-        { class: 'menu' },
-        event.choices.map((choice) => el('button', { class: 'btn', type: 'button', id: `choice-${choice.id}`, press: () => onChoose(choice) }, choice.label, choice.note && el('small', {}, choice.note))),
-      ),
+      el('h2', { id: 'event-title' }, view.title),
+      el('p', { id: 'event-text' }, view.text),
+      view.result
+        ? el('div', { class: 'event__result' }, el('p', { id: 'event-result' }, view.result.text), el('div', { class: 'menu' }, el('button', { class: 'btn', type: 'button', id: 'btn-event-continue', press: onContinue }, 'Continue')))
+        : el('div', { class: 'menu', id: 'event-choices' }, view.choices.map(choice)),
     ),
   );
 }

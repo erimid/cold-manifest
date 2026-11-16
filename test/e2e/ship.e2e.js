@@ -45,6 +45,19 @@ async function startServer() {
 
 // ---------- helpers that run against the page ----------
 
+/** Choices that cannot start a fight or kill anyone, in the order to prefer them, for flying through events (S3.3). */
+const SAFE_CHOICES = ['leave', 'pass', 'note', 'thread', 'sweep', 'manifest', 'rest', 'keep', 'press-on'];
+/** Answer whatever event is on the screen with a safe choice, read the outcome, and go on (a follow-up event is answered too). */
+async function answerEvents(page) {
+  for (let i = 0; i < 4 && (await page.evaluate(() => window.coldManifest.machine.state)) === 'event'; i++) {
+    if (!(await page.isVisible('#btn-event-continue'))) {
+      const open = await page.$$eval('#event-choices .btn:not([disabled])', (list) => list.map((b) => b.id.replace('choice-', '')));
+      await page.tap(`#choice-${SAFE_CHOICES.find((id) => open.includes(id)) ?? open[0]}`);
+    }
+    await page.tap('#btn-event-continue');
+  }
+}
+
 const game = (page, fn, arg) => page.evaluate(fn, arg);
 const tick = (page) => game(page, () => window.coldManifest.sim.state.tick);
 const door = (page, id) => game(page, (did) => ({ ...window.coldManifest.sim.state.doors[did] }), id);
@@ -1623,7 +1636,8 @@ async function chartTests(browser) {
     // On a contract the arrival may open a port or an event (S3.2): leave it, and the chart is back up.
     await sleep(300);
     if ((await game(page, () => window.coldManifest.machine.state)) !== 'ship') {
-      await page.locator('#btn-depart, #event .btn').first().tap();
+      if ((await game(page, () => window.coldManifest.machine.state)) === 'event') await answerEvents(page);
+      else await page.tap('#btn-depart');
       await page.waitForFunction(() => window.coldManifest.machine.state === 'ship');
     }
     const after = await run();
@@ -1780,6 +1794,7 @@ async function loopTests(browser) {
 
   let sawPort = false;
   let sawEvent = false;
+  const metKinds = new Set();
   await check('every arrival opens its screen and leaves for the ship again: events, ports with refuel and the bar, open space quiet', async () => {
     const path = await route();
     for (let i = 0; i < path.length; i++) {
@@ -1811,18 +1826,63 @@ async function loopTests(browser) {
           await big('#screen button');
         }
         await page.tap('#btn-depart');
-      } else if (['hazard', 'derelict', 'checkpoint'].includes(kind)) {
-        assert.equal(now, 'event', `${kind} opens an event`);
-        if (!sawEvent) {
-          sawEvent = true;
-          await shot('s3-2-event-ipad');
-          await big('#screen button');
+      } else {
+        // Hazards, derelicts and checkpoints always bring an event from content (S3.3); open space sometimes does.
+        // (A kind of point whose events have all been met this run is quiet too, until S3.5 writes more.)
+        const open = await game(page, () => Boolean(window.coldManifest.sim.state.run.events.open));
+        assert.equal(now, open ? 'event' : 'ship', `at a ${kind}: the screen follows the sim`);
+        if (['hazard', 'derelict', 'checkpoint'].includes(kind) && !metKinds.has(kind)) assert.equal(now, 'event', `the first ${kind} opens an event`);
+        metKinds.add(kind);
+        if (now === 'event') {
+          const view = await game(page, () => window.coldManifest.sim.state.run.events.open.id);
+          assert.ok(await game(page, ([id, k]) => window.coldManifest.content.get('events', id).at.includes(k), [view, kind]), `${view} belongs at a ${kind}`);
+          assert.ok((await page.locator('#event-choices .btn').count()) >= 2);
+          assert.equal(/[{}]/.test(await page.textContent('#event')), false, 'every name in the text is filled in');
+          if (!sawEvent) {
+            sawEvent = true;
+            await shot('s3-3-event-ipad');
+            await big('#screen button');
+          }
+          await answerEvents(page);
         }
-        await page.locator('#event .btn').first().tap();
-      } else assert.equal(now, 'ship', 'open space opens nothing');
+      }
       await page.waitForFunction(() => window.coldManifest.machine.state === 'ship');
       assert.equal(await page.isVisible('#chart'), true, 'back on the ship with the chart up');
     }
+  });
+
+  await check('an event shows who meets a choice, locks what the crew cannot do, tells the outcome and goes back to the ship', async () => {
+    assert.ok(sawEvent, 'the way across met at least one event');
+    await page.tap('#btn-depart');
+    await page.waitForFunction(() => window.coldManifest.machine.state === 'ship');
+    // Put the hazard event on the table with the sensors dark: one choice is met by Ilse, one is locked.
+    await game(page, () => {
+      const { sim } = window.coldManifest;
+      while (sim.state.systems.sensors.power > 0) {
+        sim.enqueue({ type: 'power.add', system: 'sensors', delta: -1 });
+        sim.step();
+      }
+      sim.enqueue({ type: 'debug.event', event: 'hazard.loud-lane' });
+    });
+    await page.waitForFunction(() => window.coldManifest.machine.state === 'event', null, { timeout: 3000 });
+    assert.match(await page.textContent('#choice-thread'), /^\[Ilse, Piloting\] /);
+    assert.equal(await page.isDisabled('#choice-thread'), false);
+    assert.match(await page.textContent('#choice-sweep'), /^\[Needs Sensors powered\] /);
+    assert.equal(await page.isDisabled('#choice-sweep'), true);
+    assert.equal(await page.textContent('#choice-press-on'), 'Hold the course and take what comes');
+    await shot('s3-3-event-tags-ipad');
+    await big('#event-choices .btn');
+    await page.tap('#choice-sweep', { force: true }); // locked: nothing happens
+    assert.equal(await page.isVisible('#btn-event-continue'), false);
+    await page.tap('#choice-thread');
+    assert.match(await page.textContent('#event-result'), /Ilse takes the helm/);
+    assert.equal(await page.locator('#event-choices').count(), 0, 'the choices are gone once one is made');
+    await shot('s3-3-event-outcome-ipad');
+    await page.tap('#btn-event-continue');
+    await page.waitForFunction(() => window.coldManifest.machine.state === 'ship');
+    assert.equal(await game(page, () => window.coldManifest.sim.state.run.events.open), null);
+    // Back to the drop's port screen for the hand-over.
+    await game(page, () => window.coldManifest.machine.go('port', { node: window.coldManifest.sim.state.run.at }));
   });
 
   await check('the drop: handing over the cargo ends the run with a summary that adds up', async () => {

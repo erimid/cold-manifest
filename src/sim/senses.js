@@ -140,6 +140,8 @@ export function burn(ship) {
   return engines.absent ? 0 : engines.power / engines.level;
 }
 
+/** Below this light a room is dark to stand in (the same line a dark walk uses, crew.js). A fire lights its own room. */
+export const DARK_ROOM = 0.2;
 /** The light in a room: its lamps, or a fire's glow. */
 export const lightIn = (r) => Math.max(r.light, clamp01(r.fire * 2) * FIRE_GLOW);
 

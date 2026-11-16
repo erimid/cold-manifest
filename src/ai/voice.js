@@ -12,6 +12,7 @@
 // for Stage 5.
 
 import { slotsIn } from '../engine/content-schema.js';
+import { holds } from '../narrative/conditions.js';
 import { findCrew } from '../sim/combat.js';
 import { aiCoreStatus } from '../sim/power.js';
 import { newJudgementState } from './judgement.js';
@@ -137,9 +138,11 @@ export function requestLine(sim, trigger, event = {}) {
 }
 
 /** The lines that fit a remark: right category, right trigger, and every slot they use is known. */
-export function candidates(lines, entry) {
+export function candidates(lines, entry, sim = null) {
   const rule = TRIGGERS[entry.trigger];
   return lines.filter((line) => {
+    // Anything else the line asks of the world, in the condition language (S3.3; the selector proper is S5.2).
+    if (line.conditions?.when !== undefined && sim && !holds(line.conditions.when, { sim, vars: {} })) return false;
     if (line.category !== rule.category) return false;
     const wanted = line.conditions?.trigger;
     if (wanted !== undefined ? wanted !== entry.trigger : rule.own) return false;
@@ -152,7 +155,7 @@ export function candidates(lines, entry) {
 
 /** Pick a line: one not heard this run if there is one, otherwise the ones heard longest ago (brief §9). */
 function pickLine(sim, entry) {
-  const pool = candidates(sim.lines, entry);
+  const pool = candidates(sim.lines, entry, sim);
   if (!pool.length) return null;
   const { heard } = sim.state.ai;
   let choices = pool.filter((line) => heard[line.id] === undefined);

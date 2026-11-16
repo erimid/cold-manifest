@@ -377,6 +377,13 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
           button('btn-dbg-chase', sim.state.run.pursuit ? 'Nobody follows' : 'Someone follows', act(() => order({ type: 'debug.run', pursuit: sim.state.run.pursuit ? 'off' : 'on' })), 'btn--debug'),
           button('btn-dbg-caught', 'Pursuer alongside', act(() => order({ type: 'debug.run', pursuit: 'catch' })), 'btn--debug'),
         ),
+      sim.transit.all.length > 0 && el('div', { class: 'stencil sheet__sub' }, `Events: ${sim.state.run?.events.count ?? 0} met this run`),
+      sim.transit.all.length > 0 &&
+        el(
+          'div',
+          { class: 'sheet__grid' },
+          sim.transit.all.map((event) => button(`btn-dbg-event-${event.id.replace(/\./g, '-')}`, event.id, act(() => order({ type: 'debug.event', event: event.id })), 'btn--debug')),
+        ),
       el('div', { class: 'stencil sheet__sub' }, 'View'),
       el('div', { class: 'sheet__grid' }, button('btn-crawlways', showCrawlways ? 'Hide crawlways' : 'Show crawlways', () => {
         showCrawlways = !showCrawlways;

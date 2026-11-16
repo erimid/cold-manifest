@@ -12,7 +12,8 @@ import { createInput } from './engine/input.js';
 import { createRng, newRunSeed } from './engine/rng.js';
 import { createStateMachine } from './engine/state-machine.js';
 import { findCrew, ourCrew } from './sim/combat.js';
-import { STUB_CONTRACTS, lostEnding, screenForArrival, stubEvent, summarize } from './sim/runflow.js';
+import { eventView } from './narrative/events.js';
+import { STUB_CONTRACTS, lostEnding, screenForArrival, summarize } from './sim/runflow.js';
 import { nodeOf } from './sim/sector.js';
 import { unseen } from './sim/senses.js';
 import { TICK_SECONDS, createSim } from './sim/sim.js';
@@ -23,7 +24,7 @@ import { createShipView } from './ui/shipview.js';
 import { renderContracts, renderEvent, renderHub, renderPort, renderScene, renderSummary } from './ui/screens.js';
 import { renderTitle } from './ui/title.js';
 
-const VERSION = '0.19.0';
+const VERSION = '0.20.0';
 
 const params = new URLSearchParams(window.location.search);
 const flags = {
@@ -60,7 +61,9 @@ setPressBinder(input.press);
 // and everything that listens to a sim is wired there. The first is the sandbox the title's "Walk the ship"
 // opens; it has no contract, so arriving somewhere does not open a screen.
 // Placeholder crew until Stage 4 generates them (DECISIONS DF-03, DF-23).
-const crew = content.all('crew').map(({ id, name, engineer }) => ({ id, name, engineer }));
+const crew = content.all('crew').map(({ id, name, engineer, skills, traits }) => ({ id, name, engineer, skills, traits }));
+// What the crew remember and refuse and what Margo objects to are content too (S3.3).
+const rules = { memories: content.all('memories'), refusals: content.all('refusals'), risks: content.all('risks') };
 const crewReplies = Object.fromEntries(content.all('crew').map(({ id, replies }) => [id, replies]));
 
 // Sound. Nothing can play until the first touch or key press (an iOS rule, and a polite one).
@@ -112,7 +115,8 @@ let runCount = 0;
 
 /** Build a sim, its clock and its ship view, and wire the sound, auto-pause and run events to them. */
 function newGame(seed, { contract = null, pursuit } = {}) {
-  sim = createSim({ seed, ship: content.require('ships', 'margin-of-error'), crew, lines: content.all('ai-lines'), weapons: content.all('weapons'), ships: content.all('ships'), sector: content.require('sectors', 'the-reach'), run: pursuit === undefined ? {} : { pursuit } });
+  // Only a run with a contract meets events: the sandbox has nowhere to show them.
+  sim = createSim({ seed, ship: content.require('ships', 'margin-of-error'), crew, lines: content.all('ai-lines'), weapons: content.all('weapons'), ships: content.all('ships'), rules, events: contract ? content.all('events') : [], sector: content.require('sectors', 'the-reach'), run: pursuit === undefined ? {} : { pursuit } });
   clock = createClock({ sim, tickSeconds: TICK_SECONDS });
   clock.onChange(() => audio.play('pause'));
   runInfo = { contract, seed, seen: new Set([sim.state.run.at]), pending: null, doom: null, handedOver: false };
@@ -171,7 +175,8 @@ function backToShip() {
   if (doom) finishRun(doom);
   else {
     machine.go('ship');
-    shipView.openChart(true);
+    // An event can leave us in a fight: the chart stays down so the fight is what the captain sees.
+    shipView.openChart(!(sim.state.fight && !sim.state.fight.over));
   }
 }
 
@@ -181,7 +186,10 @@ function settleRun() {
   const lost = runInfo.doom === 'destroyed' ? 'destroyed' : lostEnding(sim);
   if (lost) return finishRun(lost);
   const fightLive = sim.state.fight && !sim.state.fight.over;
-  if (!runInfo.pending || fightLive) return;
+  if (fightLive) return;
+  // An event the sim has put on the table (S3.3) comes before anything else the arrival opens.
+  if (eventView(sim)) return machine.go('event');
+  if (!runInfo.pending) return;
   const { screen: next, node } = runInfo.pending;
   runInfo.pending = null;
   machine.go(next, { node });
@@ -266,8 +274,29 @@ const machine = createStateMachine({
     },
   },
   event: {
-    enter({ params }) {
-      renderEvent(root, { event: stubEvent(portNode(params.node)), onChoose: backToShip });
+    enter() {
+      // The clock is stopped on this screen; one tick carries out each answer (the same way the port refuels).
+      const give = (command) => {
+        if (sim.whyNot(command)) return;
+        sim.enqueue(command);
+        sim.step();
+      };
+      const draw = () => {
+        const view = eventView(sim);
+        if (!view) return backToShip();
+        renderEvent(root, {
+          view,
+          onChoose: (choice) => {
+            give({ type: 'event.choose', choice: choice.id });
+            draw();
+          },
+          onContinue: () => {
+            give({ type: 'event.dismiss' });
+            draw(); // a follow-up event, or back to the ship
+          },
+        });
+      };
+      draw();
     },
   },
   scene: {
@@ -323,6 +352,7 @@ function frame(now) {
         `fires  ${Object.values(sim.state.rooms).filter((r) => r.fire > 0).length}`,
         `fight  ${sim.state.fight ? `${sim.state.fight.enemy.ship} ${sim.state.fight.enemy.hull.points}hp, ${sim.state.fight.shots.length} shots` : 'none'}`,
         `margo  ${sim.state.ai.said} said, ${sim.state.ai.queue.length} waiting`,
+        `event  ${sim.state.run?.events.open ? `${sim.state.run.events.open.id}${sim.state.run.events.open.result ? ' (answered)' : ''}` : 'none'}, ${sim.state.run?.events.count ?? 0} met`,
         `chart  ${sim.state.run ? `${sim.state.run.at} fuel ${sim.state.run.fuel} jump ${sim.state.run.jumps}/${sim.state.run.deadline}${sim.state.run.pursuit ? ` chase@${sim.state.run.pursuit.at}` : ''}` : 'none'}`,
         `trust  ${Math.round(sim.state.ai.trust)}, refused ${sim.state.ai.refusals}${sim.state.ai.objection ? `, holding ${sim.state.ai.objection.command.type}` : ''}`,
         `sound  ${audio.muted ? 'off' : audio.unlocked ? 'on' : 'locked'}`,

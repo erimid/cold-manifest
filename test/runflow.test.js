@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { ENDINGS, STUB_CONTRACTS, lostEnding, payFor, screenForArrival, stubEvent, summarize } from '../src/sim/runflow.js';
+import { ENDINGS, STUB_CONTRACTS, lostEnding, payFor, screenForArrival, summarize } from '../src/sim/runflow.js';
 import { NODE_KINDS, whyNoRefuel } from '../src/sim/sector.js';
 import { createSim } from '../src/sim/sim.js';
 import { CATALOG, CREW, SHIP, content } from './helpers.js';
@@ -11,21 +11,9 @@ import { CATALOG, CREW, SHIP, content } from './helpers.js';
 const REACH = content.require('sectors', 'the-reach');
 const runSim = (seed = 'flow') => createSim({ seed, ship: SHIP, crew: CREW, ...CATALOG, sector: REACH, run: { pursuit: false } });
 
-test('ports open the port and hazards, derelicts and checkpoints open an event; open space is quiet', () => {
+test('a port opens the port screen; everywhere else it is the sim that decides whether an event opens', () => {
   assert.equal(screenForArrival('port'), 'port');
-  for (const kind of ['hazard', 'derelict', 'checkpoint']) assert.equal(screenForArrival(kind), 'event');
-  assert.equal(screenForArrival('empty'), null);
-  for (const kind of Object.keys(NODE_KINDS)) assert.ok(screenForArrival(kind) !== undefined);
-});
-
-test('every point that opens an event has a stub event with a title, text and at least two choices', () => {
-  for (const kind of ['hazard', 'derelict', 'checkpoint']) {
-    const event = stubEvent({ kind, hazard: 'Ion squall' });
-    assert.ok(event.title && event.text);
-    assert.ok(event.choices.length >= 2);
-    for (const choice of event.choices) assert.ok(choice.id && choice.label);
-  }
-  assert.equal(stubEvent({ kind: 'hazard', hazard: 'Dust tide' }).title, 'Dust tide');
+  for (const kind of Object.keys(NODE_KINDS)) if (kind !== 'port') assert.equal(screenForArrival(kind), null);
 });
 
 test('the stub contracts cover the three first types, and each says whether it is followed', () => {

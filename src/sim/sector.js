@@ -285,7 +285,7 @@ export function newRunState(def, rng, { pursuit } = {}) {
   };
 }
 
-function newPursuit(rule, at) {
+export function newPursuit(rule, at) {
   return {
     ship: rule.ship,
     at,

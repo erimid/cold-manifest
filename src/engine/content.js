@@ -23,6 +23,9 @@ export const CONTENT_TYPES = Object.freeze([
   'ships',
   'weapons',
   'sectors',
+  'memories',
+  'refusals',
+  'risks',
 ]);
 
 /** The content type of a file, from its path, or null if it is not in a known folder. */

@@ -12,23 +12,22 @@
 // dark. When it gets too much they put the lamp on themselves, and for a
 // while they will not have it switched off again.
 //
-// The memory types and the refusal rules are hard-coded until S3.3 moves
-// them into the condition language; S4.3 adds weights, opinions and text
-// templates from content, and S4.5 widens refusal into mutiny.
+// What counts as a memory, which bus events write one, and which orders are
+// refused because of one are content (content/memories/ and content/refusals/, S3.3, D-110), written in
+// the condition language. This file carries them out. A sim given no rules
+// has a crew who remember nothing. S4.3 adds weights, opinions and decay;
+// S4.5 widens refusal into mutiny.
 
-import { BREATHABLE_O2, crewEmit } from './atmosphere.js';
+import { fillText, isFresh, match, memoryMatching, memoryText, vars } from '../narrative/conditions.js';
+import { crewEmit } from './atmosphere.js';
 import { lightsNeedPower } from './power.js';
-import { lightIn } from './senses.js';
+import { DARK_ROOM, lightIn } from './senses.js';
 
 const TICKS = 20; // per second (DECISIONS D-002)
 
-/** How many memories one person keeps, and how many seconds each kind lasts. */
+/** How many memories one person keeps. How long each kind lasts is in content/memories/. */
 export const MEMORY_MAX = 8;
-export const MEMORY_SECONDS = Object.freeze({ death: 300, burn: 240, choke: 240, wound: 240, scare: 300, override: 420 });
-export const MEMORY_TYPES = Object.freeze(Object.keys(MEMORY_SECONDS));
-
-/** Below this light a room is dark to stand in (the same line a dark walk uses, crew.js). A fire lights its own room. */
-export const DARK_ROOM = 0.2;
+export { DARK_ROOM };
 /**
  * Nerve in the dark. `seconds` alone in an unlit room fills dread from 0 to 1;
  * company slows it to `company` of that, a bad memory of the dark multiplies
@@ -36,22 +35,19 @@ export const DARK_ROOM = 0.2;
  * they light the lamp and hold it on for `hold` seconds.
  */
 export const DREAD = Object.freeze({ seconds: 75, company: 0.4, remembered: 2, calm: 20, hold: 45 });
-/** What the refusal rules count as too much: a fire worth fearing, air too thin to work in, and danger nobody walks into on the captain's word alone. */
-export const FEARED_FIRE = 0.2;
-export const FEARED_AIR = 0.5;
-export const RECKLESS_FIRE = 0.5;
 
 const isOurs = (ship, member) => (ship.side ?? 'player') === 'player' && member.owner === 'player';
 const isDark = (r) => !r.jettisoned && lightIn(r) < DARK_ROOM;
-/** A room by its stencilled name, used bare the way the crew and Margo say it: "Fire in Engines." */
-const the = (ship, roomId) => ship.layout.room(roomId)?.name ?? 'the ship';
-const fresh = (ship, entry) => ship.state.tick - entry.tick < MEMORY_SECONDS[entry.type] * TICKS;
+const kinds = (ship) => ship.rules?.memory ?? {};
+
+/** The kinds of memory this ship's crew can hold. */
+export const memoryTypes = (ship) => Object.keys(kinds(ship));
 
 /** Write something into a crew member's memory. The oldest go first when the log is full. */
 export function remember(ship, member, type, { room = null, who = null } = {}) {
-  if (!MEMORY_SECONDS[type]) throw new Error(`Unknown memory type "${type}"`);
+  if (!kinds(ship)[type]) throw new Error(`Unknown memory type "${type}"`);
   const entry = { type, tick: ship.state.tick, room, who, dark: room !== null && ship.state.rooms[room] ? isDark(ship.state.rooms[room]) : false };
-  member.memories = member.memories.filter((old) => fresh(ship, old));
+  member.memories = member.memories.filter((old) => isFresh(ship, old));
   member.memories.push(entry);
   if (member.memories.length > MEMORY_MAX) member.memories.shift();
   return entry;
@@ -61,32 +57,16 @@ export function remember(ship, member, type, { room = null, who = null } = {}) {
 export function recall(ship, member, type, fits = () => true) {
   for (let i = member.memories.length - 1; i >= 0; i--) {
     const entry = member.memories[i];
-    if ((type === null || entry.type === type) && fresh(ship, entry) && fits(entry)) return entry;
+    if ((type === null || entry.type === type) && isFresh(ship, entry) && fits(entry)) return entry;
   }
   return null;
 }
 
-/** Their newest bad memory of the dark: a scare, or anything that happened to them in an unlit room. */
-export const darkMemory = (ship, member) => recall(ship, member, null, (entry) => entry.type === 'scare' || (entry.dark && entry.type !== 'override'));
+/** Their newest bad memory of the dark: each kind of memory says whether it counts (its `shadow`). */
+export const darkMemory = (ship, member) => memoryMatching({ shadow: true }, member, { sim: ship, vars: {} });
 
 /** A memory in a few words, for the crew panel: "Okoro dying in Main hold". */
-export function describeMemory(ship, entry) {
-  const where = entry.room ? ` in ${the(ship, entry.room)}` : '';
-  switch (entry.type) {
-    case 'death':
-      return `${entry.who ?? 'someone'} dying${entry.room ? where : ' aboard their ship'}`;
-    case 'burn':
-      return `burns${where}`;
-    case 'choke':
-      return `no air${where}`;
-    case 'wound':
-      return `a wound${where}`;
-    case 'scare':
-      return `the dark${where}`;
-    default:
-      return `the captain overriding Margo${where}`;
-  }
-}
+export const describeMemory = (ship, entry) => memoryText(ship, entry);
 
 /** What they hold on to most right now, for the crew panel, or null. */
 export function topMemory(ship, member) {
@@ -101,40 +81,19 @@ export function nerveWord(member) {
 
 /**
  * Would this crew member refuse to walk into this room, and why? Returns
- * { rule, memory, reason } or null. The reason is a whole sentence for the
- * screen and names what they remember (brief §8).
+ * { rule, memory, reason } or null. The rules are content (content/refusals/),
+ * tried in order; the reason is a whole sentence for the screen and names
+ * what they remember (brief §8).
  */
 export function refusalOf(ship, member, roomId) {
-  if (!isOurs(ship, member) || member.room === roomId || !member.memories.length) return null;
+  if (!isOurs(ship, member) || member.room === roomId) return null;
   const r = ship.state.rooms[roomId];
   if (!r || r.jettisoned) return null;
-  const { name } = member;
-  const room = the(ship, roomId);
-  const dark = isDark(r);
-  const others = Object.values(ship.state.crew).filter((other) => other !== member && other.alive && other.room === roomId);
-  const foes = others.some((other) => other.owner !== member.owner);
-  const friends = others.some((other) => other.owner === member.owner);
-  const no = (rule, memory, reason) => ({ rule, memory, reason });
-
-  // Where a crewmate died, while whatever is wrong in there is still wrong.
-  const grave = recall(ship, member, 'death', (entry) => entry.room === roomId);
-  if (grave && (r.fire > 0 || r.breach > 0 || r.oxygen < FEARED_AIR || dark || foes)) return no('grave', grave, `${name} won't go back into ${room}. Not after what happened to ${grave.who}.`);
-
-  const burn = recall(ship, member, 'burn');
-  if (burn && !member.suit && r.fire >= FEARED_FIRE) return no('burn', burn, `${name} won't walk into the fire in ${room} without a suit. Not after the burns from ${the(ship, burn.room)}.`);
-
-  const choke = recall(ship, member, 'choke');
-  if (choke && !member.suit && r.oxygen < FEARED_AIR) return no('choke', choke, `${name} won't go into ${room} without a suit. Not after running out of air in ${the(ship, choke.room)}.`);
-
-  const shadow = darkMemory(ship, member);
-  if (shadow && dark && !friends) {
-    const after = shadow.type === 'death' ? `${shadow.who} died in the dark` : shadow.type === 'scare' ? `the dark in ${the(ship, shadow.room)}` : `getting hurt in the dark in ${the(ship, shadow.room)}`;
-    return no('dark', shadow, `${name} won't go into ${room} alone in the dark. Not after ${after}.`);
+  const reach = vars({ crew: ['crew', member.id], room: ['room', roomId] });
+  for (const rule of ship.rules?.refusals ?? []) {
+    const found = match(rule.when, { sim: ship, vars: reach });
+    if (found) return { rule: rule.id, memory: found.memory?.value ?? null, reason: fillText(rule.reason, { sim: ship, vars: found }) };
   }
-
-  const order = recall(ship, member, 'override');
-  if (order && !member.suit && (r.fire >= RECKLESS_FIRE || r.oxygen < BREATHABLE_O2)) return no('override', order, `${name} won't walk into ${room} on the captain's word. Not after the captain overrode Margo over ${the(ship, order.room)}.`);
-
   return null;
 }
 
@@ -148,8 +107,8 @@ export function lampHolder(ship, roomId) {
 export function whyKeepLamp(ship, roomId) {
   const holder = lampHolder(ship, roomId);
   if (!holder) return null;
-  const scare = recall(ship, holder, 'scare');
-  return `${holder.name} wants the lamp on${scare ? `. Not after the dark in ${the(ship, scare.room)}` : ''}`;
+  const scare = darkMemory(ship, holder);
+  return `${holder.name} wants the lamp on${scare ? `. Not after ${memoryText(ship, scare, 'shadow')}` : ''}`;
 }
 
 /** Put the lamp on in the room they stand in, if there is power for it. */
@@ -183,30 +142,31 @@ export function stepNerve(ship, seconds) {
     if (member.dread < 1) continue;
     member.dread = 0;
     member.lampUntil = ship.state.tick + DREAD.hold * TICKS;
-    remember(ship, member, 'scare', { room: member.room });
     const lit = lightLamp(ship, member);
     crewEmit(ship, member, 'crew.spooked', { crew: member.id, room: member.room, lit, tick: ship.state.tick });
   }
 }
 
-/** Write memories as things happen. Called once when the sim is created; everything it hears is emitted inside a tick. */
+/**
+ * Write memories as things happen: each kind of memory lists the bus events that write it
+ * (its `on`, content/memories/). Called once when the sim is created; everything it hears is
+ * emitted inside a tick.
+ */
 export function attachMemory(sim) {
   const living = () => Object.values(sim.state.crew).filter((member) => member.alive && member.owner === 'player');
   const nameOf = (id) => sim.state.crew[id]?.name ?? id;
-  sim.events.on('crew.died', (event) => {
-    // Aboard their ship the room means nothing here; it is remembered as a death, not a place.
-    const room = event.aboard === 'player' && sim.state.rooms[event.room] ? event.room : null;
-    for (const member of living()) remember(sim, member, 'death', { room, who: nameOf(event.crew) });
-  });
-  sim.events.on('crew.hurt', (event) => {
-    const member = sim.state.crew[event.crew];
-    if (!member?.alive || event.aboard !== 'player') return;
-    remember(sim, member, event.cause === 'fire' ? 'burn' : event.cause === 'suffocation' ? 'choke' : 'wound', { room: event.room });
-  });
-  sim.events.on('captain.overrode', (event) => {
-    // Everyone remembers a monstrous order forced through, refused or only argued; a risky one stays with the people it was about.
-    for (const member of living()) if (event.grave || event.crewAll.includes(member.id)) remember(sim, member, 'override', { room: event.room, who: nameOf(event.crew) });
-  });
+  for (const [type, writers] of Object.entries(sim.rules?.writers ?? {})) {
+    sim.events.on(type, (event) => {
+      for (const writer of writers) {
+        if (!match(writer.when, { sim, vars: vars({ event: ['data', event] }) })) continue;
+        const subject = sim.state.crew[event.crew];
+        const who = writer.to === 'subject' ? (subject?.alive ? [subject] : []) : living().filter((member) => writer.to === 'everyone' || (event.crewAll ?? []).includes(member.id));
+        // Aboard their ship the room means nothing here; it is remembered as what happened, not a place.
+        const room = (event.aboard === undefined || event.aboard === 'player') && sim.state.rooms[event.room] ? event.room : null;
+        for (const member of who) remember(sim, member, writer.type, { room, who: writer.names ? nameOf(event.crew) : null });
+      }
+    });
+  }
 }
 
 /** Memory problems that should never happen. */
@@ -214,7 +174,7 @@ export function checkMemoryInvariants(ship) {
   const problems = [];
   for (const [id, member] of Object.entries(ship.state.crew)) {
     if (!Array.isArray(member.memories) || member.memories.length > MEMORY_MAX) problems.push(`crew ${id} holds ${member.memories?.length} memories`);
-    else if (member.memories.some((entry) => !MEMORY_SECONDS[entry.type])) problems.push(`crew ${id} has a memory of an unknown kind`);
+    else if (ship.rules && member.memories.some((entry) => !ship.rules.memory[entry.type])) problems.push(`crew ${id} has a memory of an unknown kind`);
     if (!(member.dread >= 0 && member.dread < 1)) problems.push(`crew ${id} dread is ${member.dread}`);
   }
   return problems;

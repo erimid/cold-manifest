@@ -1,0 +1,57 @@
+{
+  "note": "What the crew remember (S2.10, moved into content in S3.3; D-102, D-110). Each kind says how long it lasts in seconds, how it reads in the crew panel, and which bus events write it. See src/narrative/rules.js for the fields. S4.3 adds weights, decay and opinions.",
+  "items": [
+    {
+      "id": "death",
+      "seconds": 300,
+      "text": "{who} dying in {room}",
+      "bare": "{who} dying aboard their ship",
+      "phrases": { "shadow": "{who} died in the dark" },
+      "on": [{ "event": "crew.died", "to": "everyone", "names": true }]
+    },
+    {
+      "id": "burn",
+      "seconds": 240,
+      "text": "burns in {room}",
+      "bare": "burns",
+      "phrases": { "shadow": "getting hurt in the dark in {room}" },
+      "on": [{ "event": "crew.hurt", "to": "subject", "when": [{ "fact": "event", "field": "aboard", "eq": "player" }, { "fact": "event", "field": "cause", "eq": "fire" }] }]
+    },
+    {
+      "id": "choke",
+      "seconds": 240,
+      "text": "no air in {room}",
+      "bare": "no air",
+      "phrases": { "shadow": "getting hurt in the dark in {room}" },
+      "on": [{ "event": "crew.hurt", "to": "subject", "when": [{ "fact": "event", "field": "aboard", "eq": "player" }, { "fact": "event", "field": "cause", "eq": "suffocation" }] }]
+    },
+    {
+      "id": "wound",
+      "seconds": 240,
+      "text": "a wound in {room}",
+      "bare": "a wound",
+      "phrases": { "shadow": "getting hurt in the dark in {room}" },
+      "on": [{ "event": "crew.hurt", "to": "subject", "when": [{ "fact": "event", "field": "aboard", "eq": "player" }, { "not": { "fact": "event", "field": "cause", "in": ["fire", "suffocation"] } }] }]
+    },
+    {
+      "id": "scare",
+      "seconds": 300,
+      "text": "the dark in {room}",
+      "bare": "the dark",
+      "phrases": { "shadow": "the dark in {room}" },
+      "shadow": "always",
+      "on": [{ "event": "crew.spooked", "to": "subject" }]
+    },
+    {
+      "id": "override",
+      "seconds": 420,
+      "text": "the captain overriding Margo in {room}",
+      "bare": "the captain overriding Margo",
+      "shadow": "never",
+      "on": [
+        { "event": "captain.overrode", "to": "everyone", "names": true, "when": { "fact": "event", "field": "grave", "eq": true } },
+        { "event": "captain.overrode", "to": "named", "names": true, "when": { "fact": "event", "field": "grave", "eq": false } }
+      ]
+    }
+  ]
+}

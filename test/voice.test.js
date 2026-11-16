@@ -3,9 +3,11 @@ import { test } from 'node:test';
 
 import { IDLE_MAX_SECONDS, LOG_MAX, QUEUE_MAX, TRIGGERS, candidates, requestLine } from '../src/ai/voice.js';
 import { AI_CATEGORIES } from '../src/ai/categories.js';
-import { RISKS } from '../src/ai/judgement.js';
 import { TICK_RATE, checkInvariants } from '../src/sim/sim.js';
-import { LINES, newCrewedSim, newTalkingSim } from './helpers.js';
+import { LINES, content, newCrewedSim, newTalkingSim } from './helpers.js';
+
+/** Margo's risks, from content/. */
+const RISKS = Object.fromEntries(content.all('risks').map((rule) => [rule.id, rule]));
 
 const seconds = (sim, s) => {
   for (let i = 0; i < Math.round(s * TICK_RATE); i++) sim.step();
