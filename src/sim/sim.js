@@ -15,9 +15,13 @@
 // be jettisoned. It has crew (crew.js): they walk the room and door graph and
 // fight fires, patch breaches and repair systems where they stand. And it has
 // a voice (ai/voice.js): the ship AI remarks on what happens, on the same clock.
+// She has a say (ai/judgement.js): she holds an order she thinks is risky or
+// monstrous until the captain overrides or stands down. The crew remember
+// (memory.js), and may refuse an order because of what they remember.
 // And it can fight (combat.js): in a fight the enemy is a second whole ship,
 // stepped by the same code as the player's.
 
+import { attachJudgement, checkJudgementInvariants, considerOrder, overrode, standDown, stepJudgement, takeObjection } from '../ai/judgement.js';
 import { attachVoice, checkVoiceInvariants, newVoiceState, stepVoice } from '../ai/voice.js';
 import { createEventBus } from '../engine/events.js';
 import { createRngSet } from '../engine/rng.js';
@@ -28,6 +32,7 @@ import { CREW_COMMANDS, checkCrewInvariants, newCrewState, stepCrew } from './cr
 import { POWER_COMMANDS, checkPowerInvariants, isPowered, lightsNeedPower, newSystemsState, stepPower } from './power.js';
 import { checkSenseInvariants, newSenseState, stepSenses } from './senses.js';
 import { HOLD_COMMANDS, checkHoldInvariants, newHoldState, stepHold } from './hold.js';
+import { MEMORY_TYPES, attachMemory, checkMemoryInvariants, lampHolder, remember, stepNerve, whyKeepLamp } from './memory.js';
 import { buildLayout } from './ship.js';
 
 /** Sim ticks per second (DECISIONS D-002). */
@@ -134,6 +139,8 @@ const COMMANDS = {
       if (typeof cmd.on !== 'boolean') return 'needs on: true or false';
       if (sim.state.rooms[cmd.room].jettisoned) return 'that section is gone';
       if (cmd.on && !sim.state.rooms[cmd.room].lightsOn && lightsNeedPower(sim)) return 'no spare power for more lights';
+      // Someone badly scared by the dark keeps the lamp on where they stand (S2.10).
+      if (!cmd.on && sim.state.rooms[cmd.room].lightsOn) return whyKeepLamp(sim, cmd.room);
       return null;
     },
     apply(sim, cmd) {
@@ -147,8 +154,10 @@ const COMMANDS = {
   'lights.all': {
     check(sim, cmd) {
       if (typeof cmd.on !== 'boolean') return 'needs on: true or false';
-      const rooms = Object.values(sim.state.rooms).filter((room) => !room.jettisoned);
-      if (!rooms.some((room) => room.lightsOn !== cmd.on)) return cmd.on ? 'every lamp is already on' : 'the ship is already dark';
+      const rooms = Object.entries(sim.state.rooms).filter(([, room]) => !room.jettisoned);
+      if (!rooms.some(([, room]) => room.lightsOn !== cmd.on)) return cmd.on ? 'every lamp is already on' : 'the ship is already dark';
+      // Lamps the crew are holding on stay on: if those are all that is left, there is nothing to switch.
+      if (!cmd.on && !rooms.some(([id, room]) => room.lightsOn && !lampHolder(sim, id))) return 'the only lamps left are ones the crew will not sit without';
       if (cmd.on && lightsNeedPower(sim)) return 'no spare power for more lights';
       return null;
     },
@@ -158,6 +167,7 @@ const COMMANDS = {
         const room = sim.state.rooms[id];
         if (room.jettisoned || room.lightsOn === cmd.on) continue;
         if (cmd.on && lightsNeedPower(sim)) break;
+        if (!cmd.on && lampHolder(sim, id)) continue;
         room.lightsOn = cmd.on;
         changed += 1;
         sim.events.emit('room.lights', { room: id, on: cmd.on, reason: 'all', tick: sim.state.tick });
@@ -198,6 +208,55 @@ const COMMANDS = {
       sim.events.emit('door.changed', { door: cmd.door, from, to, tick: sim.state.tick });
     },
   },
+  // The captain's answer to an order Margo is holding (judgement.js): carry it out anyway, or let it go.
+  'captain.override': {
+    check: (sim) => (sim.state.ai.objection ? null : 'Margo is not holding any order of yours'),
+    apply(sim) {
+      const held = takeObjection(sim);
+      const command = { ...held.command, id: sim.state.nextCommandId++ };
+      // The world may have moved on while they argued.
+      const problem = COMMANDS[command.type].check(sim, command);
+      if (problem) {
+        sim.events.emit('command.dropped', { command, reason: problem, tick: sim.state.tick });
+        return;
+      }
+      COMMANDS[command.type].apply(sim, command);
+      sim.events.emit('command.applied', { command, tick: sim.state.tick });
+      overrode(sim, held);
+    },
+  },
+  'captain.standDown': {
+    check: (sim) => (sim.state.ai.objection ? null : 'Margo is not holding any order of yours'),
+    apply: (sim) => standDown(sim),
+  },
+  // Debug panel only: set Margo's trust, or give her refusals back.
+  'debug.ai': {
+    check(sim, cmd) {
+      if (cmd.trust !== undefined && !(cmd.trust >= 0 && cmd.trust <= 100)) return 'trust must be between 0 and 100';
+      if (cmd.refusals !== undefined && cmd.refusals !== 0) return 'refusals can only be reset to 0';
+      return cmd.trust === undefined && cmd.refusals === undefined ? 'needs trust or refusals' : null;
+    },
+    apply(sim, cmd) {
+      if (cmd.trust !== undefined) sim.state.ai.trust = cmd.trust;
+      if (cmd.refusals !== undefined) sim.state.ai.refusals = 0;
+    },
+  },
+  // Debug panel only: put a memory in someone's head, or (dread: 0.95) their nerves on edge.
+  'debug.memory': {
+    check(sim, cmd) {
+      const member = sim.state.crew[cmd.crew];
+      if (!member?.alive || member.owner !== 'player') return `no crew member "${cmd.crew}" of ours aboard`;
+      if (cmd.dread !== undefined) return cmd.dread >= 0 && cmd.dread < 1 ? null : 'dread must be at least 0 and below 1';
+      if (!MEMORY_TYPES.includes(cmd.memory)) return `memory must be one of ${MEMORY_TYPES.join(', ')}`;
+      if (cmd.room !== undefined && !sim.state.rooms[cmd.room]) return `no room "${cmd.room}"`;
+      return null;
+    },
+    apply(sim, cmd) {
+      const member = sim.state.crew[cmd.crew];
+      if (cmd.dread !== undefined) member.dread = cmd.dread;
+      else remember(sim, member, cmd.memory, { room: cmd.room ?? member.room, who: cmd.who ?? 'Petrov' });
+    },
+  },
   ...POWER_COMMANDS,
   ...ATMOSPHERE_COMMANDS,
   ...CREW_COMMANDS,
@@ -229,7 +288,8 @@ function stepLights(sim) {
 // Order matters: crew act on the world as it stood, then fire can break a system, so power is settled
 // after the air and before anything reads it.
 // In a fight the enemy ship then takes the same steps, and the shooting is settled once both ships are up to date.
-const SHIP_SYSTEMS = [(ship) => stepCrew(ship, TICK_SECONDS), (ship) => stepHold(ship, TICK_SECONDS), (ship) => stepAtmosphere(ship, TICK_SECONDS), stepPower, stepDoors, stepLights, (ship) => stepSenses(ship, TICK_SECONDS)];
+// Nerves come after the lamps, so a lamp someone puts on is counted by the senses in the same tick.
+const SHIP_SYSTEMS = [(ship) => stepCrew(ship, TICK_SECONDS), (ship) => stepHold(ship, TICK_SECONDS), (ship) => stepAtmosphere(ship, TICK_SECONDS), stepPower, stepDoors, stepLights, (ship) => stepNerve(ship, TICK_SECONDS), (ship) => stepSenses(ship, TICK_SECONDS)];
 
 function stepEnemy(sim) {
   const enemy = enemyOf(sim);
@@ -238,7 +298,7 @@ function stepEnemy(sim) {
   for (const system of SHIP_SYSTEMS) system(enemy);
 }
 
-const SYSTEMS = [...SHIP_SYSTEMS, stepEnemy, (sim) => stepCombat(sim, TICK_SECONDS), stepVoice];
+const SYSTEMS = [...SHIP_SYSTEMS, stepEnemy, (sim) => stepCombat(sim, TICK_SECONDS), stepJudgement, stepVoice];
 
 /**
  * Create a simulation.
@@ -330,6 +390,11 @@ export function createSim({ seed, ship, crew = [], lines = [], weapons = [], shi
           sim.events.emit('command.dropped', { command, reason: problem, tick: state.tick });
           continue;
         }
+        // Margo reads every order on its way through, and may hold one (judgement.js).
+        if (considerOrder(sim, command)) {
+          sim.events.emit('command.held', { command, tick: state.tick });
+          continue;
+        }
         COMMANDS[command.type].apply(sim, command);
         sim.events.emit('command.applied', { command, tick: state.tick });
       }
@@ -353,6 +418,8 @@ export function createSim({ seed, ship, crew = [], lines = [], weapons = [], shi
     },
   };
   attachVoice(sim);
+  attachJudgement(sim);
+  attachMemory(sim);
   return sim;
 }
 
@@ -383,7 +450,7 @@ function shipProblems(ship, foe) {
     if (!['open', 'closed', 'locked', 'jammed'].includes(d.state)) problems.push(`${door.id}.state is ${d.state}`);
     if (!in01(d.openness)) problems.push(`${door.id}.openness is ${d.openness}`);
   }
-  problems.push(...checkPowerInvariants(ship), ...checkAtmosphereInvariants(ship), ...checkCrewInvariants(ship), ...checkCombatInvariants(ship, foe), ...checkSenseInvariants(ship), ...checkHoldInvariants(ship));
+  problems.push(...checkPowerInvariants(ship), ...checkAtmosphereInvariants(ship), ...checkCrewInvariants(ship), ...checkCombatInvariants(ship, foe), ...checkSenseInvariants(ship), ...checkHoldInvariants(ship), ...checkMemoryInvariants(ship));
   if (Object.keys(state.rooms).length !== layout.rooms.length) problems.push('room states do not match the layout');
   if (Object.keys(state.doors).length !== layout.doors.length) problems.push('door states do not match the layout');
   return problems;
@@ -394,7 +461,7 @@ export function checkInvariants(sim) {
   const problems = [];
   if (!Number.isInteger(sim.state.tick) || sim.state.tick < 0) problems.push(`tick is ${sim.state.tick}`);
   const enemy = enemyOf(sim);
-  problems.push(...shipProblems(sim, enemy), ...checkVoiceInvariants(sim), ...checkFightInvariants(sim), ...checkBoardingInvariants(sim, enemy));
+  problems.push(...shipProblems(sim, enemy), ...checkVoiceInvariants(sim), ...checkJudgementInvariants(sim), ...checkFightInvariants(sim), ...checkBoardingInvariants(sim, enemy));
   if (enemy) problems.push(...shipProblems(enemy, sim).map((problem) => `enemy: ${problem}`));
   return problems;
 }

@@ -6,12 +6,15 @@
 // requests wait in a short queue by priority, go stale and are dropped, and
 // are spoken one at a time, never over each other.
 //
-// S1.7 is the frame for Stage 5: about 40 placeholder lines, a handful of
-// triggers, and no trust, memory or damage behaviour yet.
+// S1.7 is the frame for Stage 5: placeholder lines and a handful of triggers.
+// S2.10 added her first real lines (the voice sample), her trust and her say
+// in the captain's orders (judgement.js). Memory and damage behaviour wait
+// for Stage 5.
 
 import { slotsIn } from '../engine/content-schema.js';
 import { findCrew } from '../sim/combat.js';
 import { aiCoreStatus } from '../sim/power.js';
+import { newJudgementState } from './judgement.js';
 import { unseen } from '../sim/senses.js';
 
 const TICKS = 20; // per second (DECISIONS D-002); voice.js is imported by sim.js, so it cannot import the constant back
@@ -27,6 +30,8 @@ export const QUEUE_MAX = 6;
 export const LOG_MAX = 60;
 
 const crewName = (sim, event) => ({ crew_name: findCrew(sim, event.crew)?.member.name });
+/** For lines about a person in a place: an order she is holding, or one a crew member turned down. */
+const crewAndRoom = (sim, event) => ({ ...crewName(sim, event), room: sim.layout.room(event.room)?.name });
 
 /**
  * What makes her speak. For each game event: the line category, how urgent it
@@ -74,6 +79,15 @@ export const TRIGGERS = Object.freeze({
   'weapon.loaded': { category: 'order_confirm', priority: 2, ttl: 6, cooldown: 20, chance: 0.6, slots: crewName },
   'crate.opened': { category: 'cargo', priority: 2, ttl: 10, cooldown: 15, slots: crewName },
   'crate.jettisoned': { category: 'cargo', priority: 2, ttl: 10, cooldown: 15 },
+  // Her say in an order (judgement.js). `urgent` cuts short whatever she was saying: the captain is waiting on her.
+  // `own` keeps these to lines written for that trigger, so a stray line of the same category cannot stand in.
+  'ai.argued': { category: 'argument', priority: 6, ttl: 15, urgent: true, own: true, slots: crewAndRoom },
+  'ai.refused': { category: 'refusal', priority: 6, ttl: 15, urgent: true, own: true, slots: crewAndRoom },
+  'captain.overrode': { category: 'override', priority: 6, ttl: 12, urgent: true, own: true, slots: crewAndRoom },
+  'captain.stood_down': { category: 'order_confirm', priority: 6, ttl: 8, urgent: true, own: true, slots: crewAndRoom },
+  // The crew saying no, and the crew putting the lamps back on (memory.js).
+  'crew.refused': { category: 'crew_conflict', priority: 3, ttl: 10, cooldown: 25, chance: 0.7, own: true, slots: crewAndRoom },
+  'crew.lit': { category: 'crew_conflict', priority: 2, ttl: 10, cooldown: 40, chance: 0.7, own: true, slots: crewAndRoom },
 });
 
 export function newVoiceState() {
@@ -85,6 +99,7 @@ export function newVoiceState() {
     heard: {}, // line id -> tick last spoken this run
     log: [], // the last LOG_MAX lines spoken: { n, tick, id, category, priority, text }
     said: 0, // lines spoken this run
+    ...newJudgementState(), // her trust in the captain and any order she is holding (judgement.js)
   };
 }
 
@@ -103,7 +118,7 @@ export function requestLine(sim, trigger, event = {}) {
   if (rule.chance !== undefined && !sim.rng.stream('ai').chance(rule.chance)) return false;
   if (rule.cooldown) ai.cooldowns[trigger] = tick + rule.cooldown * TICKS;
   const slots = rule.slots ? rule.slots(sim, event) : {};
-  ai.queue.push({ trigger, priority: rule.priority, expires: tick + rule.ttl * TICKS, slots });
+  ai.queue.push({ trigger, priority: rule.priority, expires: tick + rule.ttl * TICKS, slots, risk: event.risk ?? null });
   if (ai.queue.length > QUEUE_MAX) {
     // Lose the least urgent; among equals, the oldest.
     let drop = 0;
@@ -119,7 +134,10 @@ export function candidates(lines, entry) {
   return lines.filter((line) => {
     if (line.category !== rule.category) return false;
     const wanted = line.conditions?.trigger;
-    if (wanted !== undefined && wanted !== entry.trigger) return false;
+    if (wanted !== undefined ? wanted !== entry.trigger : rule.own) return false;
+    // A line written for particular risks (judgement.js) is only for those.
+    const risks = line.conditions?.risk;
+    if (risks !== undefined && ![].concat(risks).includes(entry.risk)) return false;
     return slotsIn(line.text).every((slot) => typeof entry.slots[slot] === 'string' && entry.slots[slot]);
   });
 }
@@ -143,7 +161,7 @@ function speak(sim, entry, line) {
   const ai = sim.state.ai;
   const text = fill(line.text, entry.slots);
   const seconds = LINE_BASE_SECONDS + text.length * LINE_SECONDS_PER_CHAR + LINE_GAP_SECONDS;
-  ai.speaking = { id: line.id, until: sim.state.tick + Math.ceil(seconds * TICKS) };
+  ai.speaking = { id: line.id, until: sim.state.tick + Math.ceil(seconds * TICKS), priority: entry.priority };
   ai.heard[line.id] = sim.state.tick;
   ai.said += 1;
   const spoken = { n: ai.said, tick: sim.state.tick, id: line.id, category: line.category, priority: entry.priority, text };
@@ -176,7 +194,9 @@ export function stepVoice(sim) {
     return;
   }
   if (ai.speaking) {
-    if (tick < ai.speaking.until) return;
+    // She finishes what she is saying, unless the captain is waiting on her about an order.
+    const cutIn = ai.queue.some((entry) => TRIGGERS[entry.trigger].urgent && entry.priority >= (ai.speaking.priority ?? 0) && entry.expires > tick);
+    if (tick < ai.speaking.until && !cutIn) return;
     ai.speaking = null;
   }
   if (tick >= ai.nextIdle && !ai.queue.length) {

@@ -17,6 +17,8 @@ npm run dev        # play at http://localhost:5173
 
 URL flags: `?debug=1` shows the debug overlay and debug buttons (start a fire, breach a room, jam a door, show vents), `?seed=ABCD-EFGH` fixes the seed, `?auto=1` is reserved for the autoplay bot.
 
+Margo holds an order she thinks is risky or monstrous (venting or jettisoning a room with crew in it, sending someone unsuited into a big fire). Her box turns red and offers **Stand down** (Escape) or **Do it anyway** / **Captain's override** (O). Crew can refuse an order because of something they remember, and say why. With `?debug=1`, the More sheet shows and sets her trust and writes memories into a crew member's head.
+
 ## Play it online
 
 - Latest `main`: https://erimid.github.io/cold-manifest/

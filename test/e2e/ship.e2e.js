@@ -646,7 +646,7 @@ async function voiceTests(browser) {
     await page.waitForFunction(() => window.coldManifest.sim.state.rooms.sensors.fire > 0.3, null, { timeout: 2000 });
     assert.equal(await paused(page), false, 'no pause this time');
     const saved = await game(page, () => JSON.parse(window.localStorage.getItem('cold-manifest.settings.v1')));
-    assert.deepEqual(saved.autoPause, { fight: true, boarded: true, fire: false, breach: true, death: true });
+    assert.deepEqual(saved.autoPause, { fight: true, boarded: true, fire: false, breach: true, death: true, objection: true, refusal: true });
   });
 
   await check('settings: sound off silences everything, sound on brings the hum back', async () => {
@@ -679,7 +679,7 @@ async function voiceTests(browser) {
   await check('a reload keeps the settings', async () => {
     await page.reload();
     await page.waitForFunction(() => window.coldManifest?.machine.state === 'title');
-    assert.deepEqual(await game(page, () => window.coldManifest.settings.values.autoPause), { fight: true, boarded: true, fire: false, breach: true, death: true });
+    assert.deepEqual(await game(page, () => window.coldManifest.settings.values.autoPause), { fight: true, boarded: true, fire: false, breach: true, death: true, objection: true, refusal: true });
   });
 
   await check('no page errors', async () => assert.deepEqual(errors, []));
@@ -1411,11 +1411,176 @@ async function enemyTests(browser) {
   await context.close();
 }
 
+async function margoTests(browser) {
+  console.log('iPad: Margo holds an order, the captain overrides, and the crew refuse (S2.10)');
+  const context = await browser.newContext({ ...devices['iPad (gen 7) landscape'] });
+  const page = await context.newPage();
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  await page.goto(`http://localhost:${PORT}/?seed=E2E-MARGO&autopause=0&debug=1`);
+  await page.waitForFunction(() => window.coldManifest?.machine.state === 'title');
+  await page.tap('#btn-ship');
+  await page.waitForFunction(() => window.coldManifest.machine.state === 'ship');
+  const shots = process.env.E2E_SHOTS;
+  const ai = (page) => game(page, () => ({ trust: window.coldManifest.sim.state.ai.trust, refusals: window.coldManifest.sim.state.ai.refusals, held: window.coldManifest.sim.state.ai.objection?.kind ?? null }));
+  const give = (command) => game(page, (cmd) => window.coldManifest.sim.enqueue(cmd), command);
+  const holding = (kind) => page.waitForFunction((k) => (window.coldManifest.sim.state.ai.objection?.kind ?? null) === k, kind, { timeout: 3000 });
+  /** Shut the hatch and give Okoro his air back, so he is there to be argued over again. */
+  const mend = async () => {
+    await give({ type: 'door.set', door: 'airlock_dorsal', state: 'closed' });
+    await doorIs(page, 'airlock_dorsal', 'closed', 0);
+    await give({ type: 'debug.room', room: 'quarters', set: { oxygen: 1 } });
+  };
+
+  await check('opening the hatch on Okoro: Margo refuses, names him and the room, and offers the override in one tap', async () => {
+    const t = await target(page, 'airlock_dorsal');
+    await page.touchscreen.tap(t.mx, t.my);
+    await page.tap('#btn-door-open');
+    await holding('refuse');
+    await page.waitForSelector('#objection', { state: 'visible', timeout: 2000 });
+    assert.equal(await page.textContent('#btn-override'), "Captain's override");
+    assert.match(await page.textContent('#ai-name'), /refuses · holding your order \d+s/);
+    assert.equal(await page.isVisible('#btn-log'), false, 'her two answers take the place of Log and Settings');
+    await page.waitForFunction(() => /Okoro/.test(document.querySelector('#ai-text').textContent) && /Quarters and mess/.test(document.querySelector('#ai-text').textContent), null, { timeout: 6000 });
+    assert.deepEqual(await door(page, 'airlock_dorsal'), { state: 'closed', openness: 0 });
+    for (const id of ['#btn-override', '#btn-stand-down']) {
+      const box = await page.locator(id).boundingBox();
+      assert.ok(box.width >= 44 && box.height >= 44, `${id} is ${Math.round(box.width)}x${Math.round(box.height)}`);
+    }
+    const fit = await game(page, () => {
+      const v = window.coldManifest.shipView.debug.view;
+      return { top: v.oy, bottom: document.querySelector('.shipdock').getBoundingClientRect().top };
+    });
+    assert.ok(fit.top > 0 && fit.bottom > 300, 'the ship still has its room');
+    if (shots) await page.screenshot({ path: `${shots}/s2-10-refuses-ipad.png` });
+  });
+
+  await check('Stand down: the order is dropped, she trusts the captain a little more, and her buttons go away', async () => {
+    await page.tap('#btn-stand-down');
+    await holding(null);
+    assert.deepEqual(await ai(page), { trust: 53, refusals: 1, held: null });
+    await page.waitForSelector('#objection', { state: 'hidden', timeout: 2000 });
+    assert.equal(await page.isVisible('#btn-log'), true);
+    assert.equal(await page.textContent('#ai-name'), 'M.A.R.G.O.');
+    assert.deepEqual(await door(page, 'airlock_dorsal'), { state: 'closed', openness: 0 });
+  });
+
+  await check("Captain's override: one tap, the hatch opens, and it costs her trust", async () => {
+    await page.tap('#btn-door-open');
+    await holding('refuse');
+    await page.tap('#btn-override');
+    await page.waitForFunction(() => window.coldManifest.sim.state.doors.airlock_dorsal.state === 'open', null, { timeout: 2000 });
+    assert.deepEqual(await ai(page), { trust: 38, refusals: 2, held: null });
+    await page.waitForFunction(() => window.coldManifest.sim.state.ai.log.at(-1).category === 'override', null, { timeout: 3000 });
+    await mend();
+  });
+
+  await check('keys: Escape stands down; after three refusals she can only argue, and O does it anyway', async () => {
+    // The hatch she was just overridden on she will not raise again for a while, so this time it is the whole room.
+    await give({ type: 'room.jettison', room: 'quarters' });
+    await holding('refuse');
+    await page.keyboard.press('Escape');
+    await holding(null);
+    assert.equal((await ai(page)).refusals, 3);
+    await give({ type: 'room.jettison', room: 'quarters' });
+    await holding('argue');
+    assert.equal(await page.textContent('#btn-override'), 'Do it anyway');
+    assert.match(await page.textContent('#ai-name'), /objects/);
+    await page.waitForFunction(() => window.coldManifest.sim.state.ai.log.at(-1).category === 'argument', null, { timeout: 3000 });
+    await page.keyboard.press('KeyO');
+    await page.waitForFunction(() => window.coldManifest.sim.state.rooms.quarters.jettisoned, null, { timeout: 2000 });
+    assert.equal(await game(page, () => window.coldManifest.sim.state.crew.okoro.alive), false);
+    // The two who are left remember who did it.
+    assert.deepEqual(await game(page, () => window.coldManifest.sim.state.crew.ilse.memories.map((m) => m.type).slice(-2)), ['death', 'override']);
+  });
+
+  await check('the debug sheet shows her trust and moves it, and can put a memory in a crew member\'s head', async () => {
+    const who = await crewTarget(page, 'dace');
+    await page.touchscreen.tap(who.cx, who.cy);
+    await page.tap('#btn-dbg-menu');
+    const before = (await ai(page)).trust;
+    assert.match(await page.textContent('#dbg-trust'), new RegExp(`trust ${before} .*refused 3 of 3`));
+    for (const id of ['#btn-dbg-trust-down', '#btn-dbg-trust-up', '#btn-dbg-refusals', '#btn-dbg-mem-death', '#btn-dbg-mem-scare', '#btn-dbg-dread']) {
+      await page.locator(id).scrollIntoViewIfNeeded();
+      const box = await page.locator(id).boundingBox();
+      assert.ok(box && box.width >= 44 && box.height >= 44, `${id} ${JSON.stringify(box)}`);
+    }
+    if (shots) await page.screenshot({ path: `${shots}/s2-10-debug-ipad.png` });
+    // A debug button does its work and folds the sheet away.
+    await page.tap('#btn-dbg-trust-up');
+    await page.waitForFunction((t) => window.coldManifest.sim.state.ai.trust === t + 20, before, { timeout: 2000 });
+    await page.tap('#btn-dbg-menu');
+    await page.tap('#btn-dbg-mem-scare');
+    await page.waitForFunction(() => window.coldManifest.sim.state.crew.dace.memories.some((m) => m.type === 'scare'), null, { timeout: 2000 });
+    assert.match(await page.textContent('#crew-memory'), /Remembers the dark in Reactor\./);
+  });
+
+  await check('a crew member with a bad memory of the dark refuses an unlit room: their own "no" on the intercom, and the reason in the panel', async () => {
+    await give({ type: 'room.lights', room: 'life_support', on: false });
+    await page.waitForFunction(() => window.coldManifest.sim.state.rooms.life_support.light === 0, null, { timeout: 2000 });
+    const t = await target(page, 'life_support');
+    await page.touchscreen.tap(t.mx, t.my);
+    await page.waitForSelector('#intercom', { state: 'visible', timeout: 2000 });
+    assert.match(await page.textContent('#intercom'), /Dace/);
+    assert.equal(await page.textContent('#intercom-text'), 'No. Not a chance.');
+    assert.match(await page.textContent('#status'), /Dace won't go into Life support alone in the dark\. Not after the dark in Reactor\./);
+    assert.equal(await game(page, () => window.coldManifest.sim.state.crew.dace.goal), null);
+    if (shots) await page.screenshot({ path: `${shots}/s2-10-crew-refuses-ipad.png` });
+    // With the lamp on, he goes.
+    await give({ type: 'room.lights', room: 'life_support', on: true });
+    await page.waitForFunction(() => window.coldManifest.sim.state.rooms.life_support.light === 1, null, { timeout: 2000 });
+    await page.touchscreen.tap(t.mx, t.my);
+    await page.waitForFunction(() => window.coldManifest.sim.state.crew.dace.goal === 'life_support' || window.coldManifest.sim.state.crew.dace.room === 'life_support', null, { timeout: 2000 });
+  });
+
+  await check('the dark gets to someone alone in it: they put the lamp on, say so, and the Lights button says why it stays on', async () => {
+    await give({ type: 'room.lights', room: 'bridge', on: false });
+    await give({ type: 'debug.memory', crew: 'ilse', dread: 0.97 });
+    await page.waitForFunction(() => window.coldManifest.sim.state.rooms.bridge.lightsOn === true && window.coldManifest.sim.state.crew.ilse.lampUntil > 0, null, { timeout: 8000 });
+    await page.waitForFunction(() => /Ilse/.test(document.querySelector('#intercom').textContent), null, { timeout: 2000 });
+    assert.equal(await page.textContent('#intercom-text'), "Lamp's on. I'll answer for it.");
+    await page.keyboard.press('Escape');
+    const t = await target(page, 'bridge');
+    await page.touchscreen.tap(t.mx, t.my);
+    await page.tap('#btn-lights');
+    assert.match(await page.textContent('#status'), /Ilse wants the lamp on\. Not after the dark in Bridge\./);
+    assert.equal((await room(page, 'bridge')).lightsOn, true);
+  });
+
+  await check('settings list the two new auto-pauses, every control is big enough, and the sheet clears the buttons under it', async () => {
+    await page.tap('#btn-settings');
+    for (const id of ['#set-pause-objection', '#set-pause-refusal']) assert.equal(await page.isVisible(id), true, id);
+    const sizes = await page.$$eval('button', (list) => list.map((b) => ({ id: b.id, w: b.getBoundingClientRect().width, h: b.getBoundingClientRect().height })));
+    for (const s of sizes.filter((b) => b.w > 0)) assert.ok(s.w >= 44 && s.h >= 44, `${s.id} is ${Math.round(s.w)}x${Math.round(s.h)}`);
+    if (shots) await page.screenshot({ path: `${shots}/s2-10-settings-ipad.png` });
+    await page.tap('#btn-settings');
+    await page.waitForSelector('#sheet', { state: 'hidden', timeout: 2000 });
+  });
+
+  await check('no page errors', async () => assert.deepEqual(errors, []));
+  await context.close();
+
+  // Auto-pause on by default on touch: the clock stops when she holds an order, and the pause button says why.
+  const second = await browser.newContext({ ...devices['iPad (gen 7) landscape'] });
+  const paged = await second.newPage();
+  await paged.goto(`http://localhost:${PORT}/?seed=E2E-MARGO-PAUSE&sound=0`);
+  await paged.waitForFunction(() => window.coldManifest?.machine.state === 'title');
+  await paged.tap('#btn-ship');
+  await paged.waitForFunction(() => window.coldManifest.machine.state === 'ship');
+  await check('auto-pause: Margo holding an order stops the clock and the pause button says so', async () => {
+    await game(paged, () => window.coldManifest.sim.enqueue({ type: 'room.jettison', room: 'quarters' }));
+    await paged.waitForFunction(() => window.coldManifest.clock.paused, null, { timeout: 3000 });
+    assert.equal(await paged.textContent('#pause-note'), 'Margo refuses');
+    assert.equal(await paged.isVisible('#btn-override'), true);
+  });
+  await second.close();
+}
+
 const server = await startServer();
 const browser = await chromium.launch(process.env.PW_CHROMIUM ? { executablePath: process.env.PW_CHROMIUM } : {});
 // E2E_ONLY=boarding (or a comma list of suite names) runs just those suites, for chasing one failure.
 const only = process.env.E2E_ONLY?.split(',');
-const suites = { touch: touchTests, desktop: desktopTests, voice: voiceTests, fight: fightTests, hit: hitTests, ending: endingTests, boarding: boardingTests, dark: darkTests, hold: holdTests, enemies: enemyTests };
+const suites = { touch: touchTests, desktop: desktopTests, voice: voiceTests, fight: fightTests, hit: hitTests, ending: endingTests, boarding: boardingTests, dark: darkTests, hold: holdTests, enemies: enemyTests, margo: margoTests };
 try {
   for (const [name, run] of Object.entries(suites)) if (!only || only.includes(name)) await run(browser);
 } finally {

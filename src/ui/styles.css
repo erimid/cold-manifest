@@ -357,6 +357,20 @@ body {
   padding-bottom: 4px;
 }
 
+.aibox__buttons[hidden] {
+  display: none;
+}
+
+/* She is holding an order (S2.10): the box goes red until the captain answers. */
+.aibox.is-objecting {
+  border-left-color: var(--alarm);
+  box-shadow: inset 0 0 0 1px var(--alarm);
+}
+
+.aibox.is-objecting .aibox__name {
+  color: var(--alarm);
+}
+
 .aibox__name {
   font-size: 0.68em;
   white-space: nowrap;
@@ -1282,4 +1296,19 @@ body {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;
+}
+
+/* Settings grew two auto-pause rows in S2.10: three across keeps the sheet clear of the buttons under it. */
+.sheet--settings {
+  width: min(680px, 100%);
+}
+
+.sheet--settings .sheet__pairs {
+  grid-template-columns: 1fr 1fr 1fr;
+}
+
+/* The debug sheet has outgrown its box; it scrolls rather than spill over the controls. */
+.sheet--debug {
+  max-height: min(420px, 55vh);
+  overflow-y: auto;
 }

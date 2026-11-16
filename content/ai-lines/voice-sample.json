@@ -1,0 +1,69 @@
+{
+  "note": "Margo's voice sample (S2.10): 50 real lines in the voice set out in _personality.md, spread across the categories in use so far. They count toward coverage. Eric pre-approved the sample on 2026-11-16 and may still revise it (DECISIONS D-099). conditions.trigger and conditions.risk are stand-ins for the condition language that arrives in S3.3. {room} is a room's stencilled name, used bare: 'Fire in Engines.'",
+  "items": [
+    { "id": "vs.greeting.001", "category": "greeting", "text": "Good morning, Captain. I've counted the crew. I'd like the same number at the other end." },
+    { "id": "vs.greeting.002", "category": "greeting", "text": "New hull, same core. I've been bolted into worse. Not often." },
+    { "id": "vs.greeting.003", "category": "greeting", "text": "Manifest Audit and Route Guidance, online. The crew call me Margo. It's shorter, and they were going to anyway." },
+
+    { "id": "vs.idle.001", "category": "idle", "text": "I audit the manifest every hour. It hasn't changed. I check anyway. That's the job, and I've no other hobbies." },
+    { "id": "vs.idle.002", "category": "idle", "text": "The company rated this hull for twenty years. That was thirty-one years ago. I mention it without comment." },
+    { "id": "vs.idle.003", "category": "idle", "text": "Nothing to report. I'd like it on the record how rarely I get to say that." },
+    { "id": "vs.idle.004", "category": "idle", "text": "Somebody has been sleeping in the hold again. I won't say who. I'll say it's colder than the bunks." },
+    { "id": "vs.idle.005", "category": "idle", "text": "The last crew I flew with argued about the heating for a year. I'd give a great deal to hear that argument again." },
+
+    { "id": "vs.hazard.001", "category": "hazard", "conditions": { "trigger": "fire.started" }, "text": "Fire. People out, doors shut, and only then worry about what was in there." },
+    { "id": "vs.hazard.002", "category": "hazard", "conditions": { "trigger": "breach.opened" }, "text": "We're open to space in one place. One is the right number to fix it at." },
+    { "id": "vs.hazard.003", "category": "hazard", "conditions": { "trigger": "power.brownout" }, "text": "The reactor can't cover what you've asked of it. I've cut what won't kill anyone. Check my arithmetic." },
+    { "id": "vs.hazard.004", "category": "hazard", "conditions": { "trigger": "hull.hit" }, "text": "That one got through. I felt it in the frame, if 'felt' is the word." },
+
+    { "id": "vs.crew_injury.001", "category": "crew_injury", "conditions": { "trigger": "crew.hurt" }, "text": "{crew_name} is hurt and still working. One of those needs to stop." },
+    { "id": "vs.crew_injury.002", "category": "crew_injury", "conditions": { "trigger": "crew.hurt" }, "text": "{crew_name} is down to half. The medbay is there for this. I'd rather not say it twice." },
+
+    { "id": "vs.crew_death.001", "category": "crew_death", "conditions": { "trigger": "crew.died" }, "text": "{crew_name} is gone. I have the time to the second. I wish I didn't." },
+    { "id": "vs.crew_death.002", "category": "crew_death", "conditions": { "trigger": "crew.died" }, "text": "I've stopped {crew_name}'s pay clock. It's the last thing the company lets me do for anyone." },
+    { "id": "vs.crew_death.003", "category": "crew_death", "conditions": { "trigger": "crew.died" }, "text": "{crew_name} is dead. I'll keep the name on the roster until you tell me otherwise. Don't tell me yet." },
+
+    { "id": "vs.combat_start.001", "category": "combat_start", "conditions": { "trigger": "fight.started" }, "text": "Contact, close, and not answering to any name I have on file. Nobody friendly arrives like that." },
+    { "id": "vs.combat_start.002", "category": "combat_start", "conditions": { "trigger": "fight.started" }, "text": "Ship alongside. They can count our lamps from there. Something to think about." },
+
+    { "id": "vs.combat_progress.001", "category": "combat_progress", "conditions": { "trigger": "enemy.hull.hit" }, "text": "Hit on their hull. I've logged it under deliveries." },
+    { "id": "vs.combat_progress.002", "category": "combat_progress", "conditions": { "trigger": "enemy.lock.gained" }, "text": "They've got us lined up. Lamps, drive, noise. Pick one to lose." },
+    { "id": "vs.combat_progress.003", "category": "combat_progress", "conditions": { "trigger": "fight.offer" }, "text": "They're offering to stop. People who are winning don't." },
+
+    { "id": "vs.combat_end.001", "category": "combat_end", "conditions": { "trigger": "fight.won" }, "text": "They're finished. For the report: they started it. I always write that. Sometimes it's true." },
+    { "id": "vs.combat_end.002", "category": "combat_end", "conditions": { "trigger": "fight.parted" }, "text": "They're leaving and so are we. Call it a disagreement about distance." },
+
+    { "id": "vs.order_confirm.001", "category": "order_confirm", "conditions": { "trigger": "crew.ordered" }, "text": "{crew_name}'s moving. Grumbling, but moving." },
+    { "id": "vs.order_confirm.002", "category": "order_confirm", "conditions": { "trigger": "captain.stood_down" }, "text": "Order withdrawn. Thank you. I won't mention it again." },
+    { "id": "vs.order_confirm.003", "category": "order_confirm", "conditions": { "trigger": "captain.stood_down" }, "text": "Standing down. For the record, that was the right call, and it was yours." },
+
+    { "id": "vs.cargo.001", "category": "cargo", "conditions": { "trigger": "crate.opened" }, "text": "{crew_name} has the lid off. Whatever's inside, we now know about it. That's a legal position, not a comfort." },
+    { "id": "vs.cargo.002", "category": "cargo", "conditions": { "trigger": "crate.jettisoned" }, "text": "One crate, outbound, no forwarding address. I've amended the manifest. I always amend the manifest." },
+
+    { "id": "vs.sensor_uncertain.001", "category": "sensor_uncertain", "conditions": { "trigger": "rooms.hidden" }, "text": "Part of the ship has gone dark to me. What's on your screen there is memory. Mine's good. It isn't eyes." },
+    { "id": "vs.sensor_uncertain.002", "category": "sensor_uncertain", "conditions": { "trigger": "rooms.hidden" }, "text": "No picture from some rooms. I can tell you what was there. I can't tell you what is." },
+
+    { "id": "vs.crew_conflict.001", "category": "crew_conflict", "conditions": { "trigger": "crew.refused" }, "text": "{crew_name} said no. I heard why. I'd leave it, Captain. I'd have said no too." },
+    { "id": "vs.crew_conflict.002", "category": "crew_conflict", "conditions": { "trigger": "crew.lit" }, "text": "{crew_name} put the lamp on in {room}. I could have stopped it. I didn't." },
+
+    { "id": "vs.argument.001", "category": "argument", "conditions": { "trigger": "ai.argued" }, "text": "Before I pass that on: {crew_name} is in {room}. Say it again, knowing that." },
+    { "id": "vs.argument.002", "category": "argument", "conditions": { "trigger": "ai.argued" }, "text": "I'll do it if you insist. {crew_name} pays for it, in {room}. Insist or don't." },
+    { "id": "vs.argument.003", "category": "argument", "conditions": { "trigger": "ai.argued" }, "text": "That order has {crew_name}'s name on the wrong end of it. Confirm, or think again. I'd think again." },
+    { "id": "vs.argument.004", "category": "argument", "conditions": { "trigger": "ai.argued", "risk": ["vent_crew", "jettison_crew"] }, "text": "I've refused you all I'm able to this trip. {crew_name} is still in {room}. So now I'm asking." },
+    { "id": "vs.argument.005", "category": "argument", "conditions": { "trigger": "ai.argued", "risk": "vent_near" }, "text": "That lock empties {room} as well. The door between is open, and {crew_name} is breathing in there." },
+    { "id": "vs.argument.006", "category": "argument", "conditions": { "trigger": "ai.argued", "risk": "air_cut" }, "text": "Life support is the last thing keeping air in {room}. {crew_name} is standing in it without a suit." },
+    { "id": "vs.argument.007", "category": "argument", "conditions": { "trigger": "ai.argued", "risk": "into_fire" }, "text": "{room} is burning hard enough to cook a suit. {crew_name} doesn't have one on." },
+    { "id": "vs.argument.008", "category": "argument", "conditions": { "trigger": "ai.argued", "risk": "into_fire" }, "text": "You're sending {crew_name} into {room}. I can read the temperature from here. Shall I read it to you?" },
+    { "id": "vs.argument.009", "category": "argument", "conditions": { "trigger": "ai.argued", "risk": "into_vacuum" }, "text": "There's no air in {room}, and {crew_name} has no suit on. One of those has to change first." },
+
+    { "id": "vs.refusal.001", "category": "refusal", "conditions": { "trigger": "ai.refused", "risk": "vent_crew" }, "text": "No. You're opening {room} to space, and {crew_name} is in {room}." },
+    { "id": "vs.refusal.002", "category": "refusal", "conditions": { "trigger": "ai.refused", "risk": "jettison_crew" }, "text": "No. {room} doesn't leave this ship with {crew_name} inside it. Not on my switch." },
+    { "id": "vs.refusal.003", "category": "refusal", "conditions": { "trigger": "ai.refused" }, "text": "I won't. {crew_name} is in {room}. Take it out of my hands if you want it done, and I'll remember that you did." },
+    { "id": "vs.refusal.004", "category": "refusal", "conditions": { "trigger": "ai.refused" }, "text": "That's not an order I carry. {crew_name} is alive in {room}. Override me if you can live with it." },
+
+    { "id": "vs.override.001", "category": "override", "conditions": { "trigger": "captain.overrode" }, "text": "Override accepted. Done. Your name is on it, with the time." },
+    { "id": "vs.override.002", "category": "override", "conditions": { "trigger": "captain.overrode" }, "text": "Done, on your authority and over my objection. I've logged both." },
+    { "id": "vs.override.003", "category": "override", "conditions": { "trigger": "captain.overrode" }, "text": "You have the override. You've always had it. I'd hoped you'd need it less." },
+    { "id": "vs.override.004", "category": "override", "conditions": { "trigger": "captain.overrode", "risk": ["vent_crew", "jettison_crew"] }, "text": "It's done. I had {crew_name} on camera the whole time. I'm keeping that. You should have to as well." }
+  ]
+}

@@ -130,6 +130,11 @@
     { "id": "ph.drone_launched.003", "category": "combat_progress", "placeholder": true, "conditions": { "trigger": "drone.launched" }, "text": "Another drone. I'd stop counting if counting weren't my job." },
     { "id": "ph.drone_lost.001", "category": "combat_progress", "placeholder": true, "conditions": { "trigger": "drone.lost" }, "text": "One drone fewer. It flew into the field and didn't fly out." },
     { "id": "ph.drone_lost.002", "category": "combat_progress", "placeholder": true, "conditions": { "trigger": "drone.lost" }, "text": "Drone's dead. Cheap things break cheaply." },
-    { "id": "ph.drone_lost.003", "category": "combat_progress", "placeholder": true, "conditions": { "trigger": "drone.lost" }, "text": "That drone is scrap. Their bay will send another if it can." }
+    { "id": "ph.drone_lost.003", "category": "combat_progress", "placeholder": true, "conditions": { "trigger": "drone.lost" }, "text": "That drone is scrap. Their bay will send another if it can." },
+    { "id": "ph.stood_down.001", "category": "order_confirm", "placeholder": true, "conditions": { "trigger": "captain.stood_down" }, "text": "Withdrawn. Nothing to log." },
+    { "id": "ph.crew_refused.001", "category": "crew_conflict", "placeholder": true, "conditions": { "trigger": "crew.refused" }, "text": "{crew_name} won't go. People have reasons. That one's is recent." },
+    { "id": "ph.crew_refused.002", "category": "crew_conflict", "placeholder": true, "conditions": { "trigger": "crew.refused" }, "text": "{crew_name} is refusing {room}. I can pass the order on again. It won't sound any better." },
+    { "id": "ph.crew_lit.001", "category": "crew_conflict", "placeholder": true, "conditions": { "trigger": "crew.lit" }, "text": "Lamp on in {room}. That was {crew_name}, not me." },
+    { "id": "ph.crew_lit.002", "category": "crew_conflict", "placeholder": true, "conditions": { "trigger": "crew.lit" }, "text": "{crew_name} has lit {room}. We're a little easier to see. So is whatever was worrying them." }
   ]
 }

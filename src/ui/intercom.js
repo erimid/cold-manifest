@@ -1,5 +1,6 @@
 // The intercom (S2.9, D-094): every order to one of our crew gets a short
-// spoken reply in their own voice. Replies come from the crew's content file;
+// spoken reply in their own voice, and from S2.10 that includes "no", and
+// what they say when they put a lamp back on. Replies come from the crew's content file;
 // nothing in the sim waits on them. Which line is said is fixed by how many
 // times that crew member has answered that kind of order, so a replay hears
 // the same words.
@@ -8,12 +9,14 @@ import { REPLY_KINDS } from '../engine/content-schema.js';
 
 /** What a `crew.ordered` event is asking for, as a reply kind. */
 export function replyKind(event) {
+  if (event.rule) return 'refuse'; // a `crew.refused` event (S2.10)
+  if (event.lamp) return 'lamp'; // a `crew.lit` event, marked by the caller
   if (!event.job) return 'move';
   return event.job === 'move' ? 'carry' : event.job;
 }
 
 /** A plain fallback for crew with no lines of their own. */
-const FALLBACK = Object.freeze({ move: ['Going to {room}.'], open: ['Opening it.'], carry: ['Carrying it to {room}.'], jettison: ['Spacing it.'], load: ['Fetching rounds.'] });
+const FALLBACK = Object.freeze({ move: ['Going to {room}.'], open: ['Opening it.'], carry: ['Carrying it to {room}.'], jettison: ['Spacing it.'], load: ['Fetching rounds.'], refuse: ['No. Not in there.'], lamp: ['I need the light.'] });
 
 /**
  * `replies` maps a crew id to their content `replies`. Returns `reply(event,
