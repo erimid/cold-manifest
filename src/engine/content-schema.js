@@ -9,6 +9,9 @@ import { checkRule } from '../narrative/rules.js';
 import { COMMAND_TYPES } from '../sim/sim.js';
 import { SYSTEM_IDS } from '../sim/systems.js';
 import { NODE_KINDS, checkSector, generateSector } from '../sim/sector.js';
+import { CONTRACT_TYPES } from '../sim/contracts.js';
+import { SERVICES } from '../sim/port.js';
+import { CRATE_KINDS } from '../sim/hold.js';
 import { validateLayout } from '../sim/ship.js';
 import { createRng } from './rng.js';
 import { CONTENT_TYPES, typeOfPath } from './content.js';
@@ -169,6 +172,66 @@ function checkSectorDef(item) {
   return problems;
 }
 
+/** Rules for one contract template (S3.4; the format is described at the top of src/sim/contracts.js). */
+function checkContract(item, refs = {}) {
+  const problems = [];
+  const allowed = ['id', 'note', 'type', 'title', 'client', 'contact', 'text', 'pay', 'advance', 'latePay', 'followed', 'slack', 'value', 'cargo', 'claim', 'reputation', 'penalty'];
+  for (const key of Object.keys(item)) if (!allowed.includes(key) && key !== '_file') problems.push(`unknown key "${key}"`);
+  const whole = (v) => Number.isInteger(v) && v >= 0;
+  const share = (v) => typeof v === 'number' && v >= 0 && v <= 1;
+  if (!CONTRACT_TYPES[item.type]) problems.push(`type must be one of ${Object.keys(CONTRACT_TYPES).join(', ')}`);
+  for (const key of ['title', 'contact', 'text']) if (!isNonEmptyString(item[key])) problems.push(`needs "${key}": words for the contract board`);
+  if (!isNonEmptyString(item.client)) problems.push('needs "client": the faction it is for');
+  else if (refs.factions && !refs.factions.has(item.client)) problems.push(`client: no faction "${item.client}"`);
+  if (!(whole(item.pay) && item.pay > 0)) problems.push('pay must be a whole number of credits above 0');
+  if (item.advance !== undefined && !(whole(item.advance) && item.advance < item.pay)) problems.push('advance must be a whole number of credits, less than the pay');
+  if (item.penalty !== undefined && !whole(item.penalty)) problems.push('penalty must be a whole number of credits');
+  if (!whole(item.value)) problems.push('value must be a whole number of credits: what a port pays for one crate of it');
+  if (item.latePay !== undefined && !share(item.latePay)) problems.push('latePay must be between 0 and 1');
+  if (item.followed !== undefined && !share(item.followed)) problems.push('followed must be a chance between 0 and 1');
+  if (item.slack !== undefined && !(Array.isArray(item.slack) && item.slack.length === 2 && item.slack.every(whole) && item.slack[0] <= item.slack[1])) problems.push('slack must be [fewest, most] spare jumps');
+  const rep = item.reputation;
+  if (!rep || typeof rep !== 'object' || !Number.isInteger(rep.deliver) || !Number.isInteger(rep.fail) || rep.fail > 0) problems.push('reputation must be { deliver, fail }, whole numbers, fail 0 or below');
+  if (!Array.isArray(item.cargo) || !item.cargo.length) problems.push('cargo must be a list of crate lines');
+  else
+    item.cargo.forEach((line, i) => {
+      const where = `cargo[${i}]`;
+      if (!line || typeof line !== 'object') return problems.push(`${where} must be an object`);
+      for (const key of Object.keys(line)) if (!['count', 'kind', 'label', 'contents', 'contraband'].includes(key)) problems.push(`${where}: unknown key "${key}"`);
+      if (line.count !== undefined && !(Number.isInteger(line.count) && line.count >= 1)) problems.push(`${where}.count must be a whole number, 1 or more`);
+      if (line.kind !== undefined && !['cargo', 'salvage'].includes(line.kind)) problems.push(`${where}.kind must be cargo or salvage (${CRATE_KINDS.join(', ')} exist; ammo is not cargo)`);
+      if (!isNonEmptyString(line.label)) problems.push(`${where}: needs a label, what the stencil says`);
+      if (!isNonEmptyString(line.contents)) problems.push(`${where}: needs contents, what is found when it is opened`);
+      if (line.contraband !== undefined && typeof line.contraband !== 'boolean') problems.push(`${where}.contraband must be true or false`);
+    });
+  if (item.claim !== undefined) {
+    const claim = item.claim;
+    if (!claim || typeof claim !== 'object' || !NODE_KINDS[claim.at] || claim.at === 'port') problems.push(`claim.at must be a kind of point other than a port (${Object.keys(NODE_KINDS).join(', ')})`);
+    if (!isNonEmptyString(claim?.event)) problems.push('claim.event must name the event that opens at the claim');
+    else if (refs.events && !refs.events.has(claim.event)) problems.push(`claim.event: no event "${claim.event}"`);
+  }
+  return problems;
+}
+
+/** Rules for one port definition (S3.4; described in content/ports/). */
+function checkPort(item) {
+  const problems = [];
+  if (!isNonEmptyString(item.name)) problems.push('missing name');
+  if (!isNonEmptyString(item.text)) problems.push('missing text: what the port screen says about it');
+  for (const key of ['fuel', 'hull', 'system', 'salvage']) if (!(Number.isInteger(item[key]) && item[key] >= 0)) problems.push(`${key} must be a whole number of credits, 0 or more`);
+  if (!Array.isArray(item.services)) problems.push(`services must be a list (${SERVICES.join(', ')})`);
+  else for (const service of item.services) if (!SERVICES.includes(service)) problems.push(`services: no service "${service}" (${SERVICES.join(', ')})`);
+  return problems;
+}
+
+/** Rules for one faction stub (S3.4; S7.4 writes them in full). */
+function checkFaction(item) {
+  const problems = [];
+  if (!isNonEmptyString(item.name)) problems.push('missing name');
+  if (!isNonEmptyString(item.line)) problems.push('missing line: one sentence on who they are');
+  return problems;
+}
+
 /** The rules for each content type: (item, refs) -> problems. `refs` is what exists across all the content (gatherRefs). */
 const ITEM_RULES = {
   'ai-lines': checkAiLine,
@@ -180,6 +243,9 @@ const ITEM_RULES = {
   memories: (item, refs) => checkRule('memory', item, refs),
   refusals: (item, refs) => checkRule('refusal', item, refs),
   risks: (item, refs) => checkRule('risk', item, refs),
+  contracts: checkContract,
+  ports: (item) => checkPort(item),
+  factions: (item) => checkFaction(item),
 };
 
 /**
@@ -205,6 +271,7 @@ export function gatherRefs(files) {
     scenes: of('scenes'),
     events: of('events'),
     threats: of('threats'),
+    factions: of('factions'),
     orders: new Set(COMMAND_TYPES),
   };
 }
@@ -265,6 +332,7 @@ export function validateContent(files) {
       const rule = ITEM_RULES[type];
       if (rule) for (const problem of rule(item, refs)) errors.push(`${label}: ${problem}`);
 
+      if (type === 'contracts' && typeof item.claim?.event === 'string') followed.add(item.claim.event); // a claim opens it
       if (type === 'events') {
         for (const id of followUps(item)) followed.add(id);
         if (item.at === undefined) unplaced.push([label, item.id]);

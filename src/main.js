@@ -13,7 +13,8 @@ import { createRng, newRunSeed } from './engine/rng.js';
 import { createStateMachine } from './engine/state-machine.js';
 import { findCrew, ourCrew } from './sim/combat.js';
 import { eventView } from './narrative/events.js';
-import { STUB_CONTRACTS, lostEnding, screenForArrival, summarize } from './sim/runflow.js';
+import { FAILURES, contractActive } from './sim/contracts.js';
+import { boardOffers, lostEnding, portView, screenForArrival, summarize } from './sim/runflow.js';
 import { nodeOf } from './sim/sector.js';
 import { unseen } from './sim/senses.js';
 import { TICK_SECONDS, createSim } from './sim/sim.js';
@@ -24,7 +25,7 @@ import { createShipView } from './ui/shipview.js';
 import { renderContracts, renderEvent, renderHub, renderPort, renderScene, renderSummary } from './ui/screens.js';
 import { renderTitle } from './ui/title.js';
 
-const VERSION = '0.20.0';
+const VERSION = '0.21.0';
 
 const params = new URLSearchParams(window.location.search);
 const flags = {
@@ -64,6 +65,9 @@ setPressBinder(input.press);
 const crew = content.all('crew').map(({ id, name, engineer, skills, traits }) => ({ id, name, engineer, skills, traits }));
 // What the crew remember and refuse and what Margo objects to are content too (S3.3).
 const rules = { memories: content.all('memories'), refusals: content.all('refusals'), risks: content.all('risks') };
+// Contracts, the clients they are for, and what ports charge (S3.4).
+const factions = content.all('factions');
+const ports = content.all('ports');
 const crewReplies = Object.fromEntries(content.all('crew').map(({ id, replies }) => [id, replies]));
 
 // Sound. Nothing can play until the first touch or key press (an iOS rule, and a polite one).
@@ -103,7 +107,7 @@ const AUTO_PAUSE_TEXT = {
 
 // ---------- the run loop (S3.2, D-108) ----------
 
-/** The run in progress, or null. `contract` is null in the sandbox. */
+/** The run in progress, or null. `contract` (the board's offer) is null in the sandbox. */
 let sim;
 let clock;
 let shipView;
@@ -116,7 +120,7 @@ let runCount = 0;
 /** Build a sim, its clock and its ship view, and wire the sound, auto-pause and run events to them. */
 function newGame(seed, { contract = null, pursuit } = {}) {
   // Only a run with a contract meets events: the sandbox has nowhere to show them.
-  sim = createSim({ seed, ship: content.require('ships', 'margin-of-error'), crew, lines: content.all('ai-lines'), weapons: content.all('weapons'), ships: content.all('ships'), rules, events: contract ? content.all('events') : [], sector: content.require('sectors', 'the-reach'), run: pursuit === undefined ? {} : { pursuit } });
+  sim = createSim({ seed, ship: content.require('ships', 'margin-of-error'), crew, lines: content.all('ai-lines'), weapons: content.all('weapons'), ships: content.all('ships'), rules, events: contract ? content.all('events') : [], sector: content.require('sectors', 'the-reach'), run: pursuit === undefined ? {} : { pursuit }, contract: contract?.template ?? null, ports });
   clock = createClock({ sim, tickSeconds: TICK_SECONDS });
   clock.onChange(() => audio.play('pause'));
   runInfo = { contract, seed, seen: new Set([sim.state.run.at]), pending: null, doom: null, handedOver: false };
@@ -152,6 +156,9 @@ function newGame(seed, { contract = null, pursuit } = {}) {
   sim.events.on('fight.over', (event) => {
     if (event.outcome === 'lost') mineInfo.doom = 'destroyed';
   });
+  // A contract can fail out on the chart (the cargo over the side, a courier late): say so where the captain is looking.
+  const view = shipView;
+  sim.events.on('contract.failed', (event) => view.announce(`Contract failed: ${FAILURES[event.reason] ?? event.reason}`));
   sim.events.on('fuel.out', (event) => {
     if (nodeOf(mine.state.run.map, event.node).kind !== 'port') mineInfo.doom = 'stranded';
   });
@@ -163,7 +170,9 @@ newGame(flags.seed);
 function finishRun(kind) {
   const info = runInfo;
   info.ended = kind;
-  const summary = summarize(sim, kind, info.contract);
+  // Retiring with the contract still in hand walks away from it (S3.4).
+  if (kind === 'retired' && contractActive(sim)) settle({ type: 'contract.abandon' });
+  const summary = summarize(sim, kind, { factions });
   history.push({ kind, contract: info.contract?.id ?? null });
   for (const { member } of ourCrew(sim)) if (!member.alive) wall.push(`${member.name}, ${info.contract?.title ?? 'a run with no contract'}`);
   machine.go('summary', { summary });
@@ -195,9 +204,17 @@ function settleRun() {
   machine.go(next, { node });
 }
 
-function startRun(contract) {
+/** Give an order on a screen where the clock is stopped: one tick carries it out. Returns false if it was refused. */
+function settle(command) {
+  if (sim.whyNot(command)) return false;
+  sim.enqueue(command);
+  sim.step();
+  return true;
+}
+
+function startRun(offer) {
   runCount += 1;
-  newGame(`${flags.seed}-run${runCount}`, { contract, pursuit: contract.followed });
+  newGame(`${flags.seed}-run${runCount}`, { contract: offer, pursuit: offer.followed });
   machine.go('ship');
   shipView.openChart(true);
 }
@@ -242,7 +259,9 @@ const machine = createStateMachine({
   },
   contracts: {
     enter() {
-      renderContracts(root, { contracts: STUB_CONTRACTS, onAccept: startRun, onBack: toTitle });
+      // The board for the next run, drawn from its seed: the same seed shows the same contracts.
+      const offers = boardOffers(content.all('contracts'), { seed: `${flags.seed}-run${runCount + 1}`, factions });
+      renderContracts(root, { offers, onAccept: startRun, onBack: toTitle });
     },
   },
   hub: {
@@ -252,35 +271,30 @@ const machine = createStateMachine({
   },
   port: {
     enter({ params }) {
-      const draw = () => {
-        const run = sim.state.run;
+      const draw = () =>
         renderPort(root, {
-          node: portNode(params.node),
-          fuel: run.fuel,
-          fuelMax: run.fuelMax,
-          isDrop: params.node === run.map.delivery,
-          onRefuel: () => {
-            sim.enqueue({ type: 'port.refuel' });
-            sim.step(); // the clock is stopped on this screen; one tick settles the order
+          view: portView(sim),
+          // The clock is stopped on this screen; one tick settles each order.
+          onService: (service) => {
+            settle(service.command);
             draw();
           },
           onBar: () => machine.go('scene', { title: `The bar at ${portNode(params.node).name}`, back: () => machine.go('port', params) }),
           onDepart: backToShip,
-          onHandOver: () => finishRun(run.late ? 'late' : 'delivered'),
+          onHandOver: () => {
+            const late = sim.state.run.late;
+            if (settle({ type: 'contract.deliver' })) finishRun(late ? 'late' : 'delivered');
+            else draw();
+          },
           onRetire: () => finishRun('retired'),
         });
-      };
       draw();
     },
   },
   event: {
     enter() {
       // The clock is stopped on this screen; one tick carries out each answer (the same way the port refuels).
-      const give = (command) => {
-        if (sim.whyNot(command)) return;
-        sim.enqueue(command);
-        sim.step();
-      };
+      const give = settle;
       const draw = () => {
         const view = eventView(sim);
         if (!view) return backToShip();

@@ -1,0 +1,10 @@
+{
+  "note": "Factions as stubs (S3.4; brief §11, D-012). Ids are stable; names are provisional working names until S7.4 gives each a look, values, what it buys and bans, and a voice. S3.4 needs them only as clients of contracts and as the people who run the checkpoints, so each has an id, a name and a line. S3.5 fills these out.",
+  "items": [
+    { "id": "receivers", "name": "The Receivers", "line": "What is left of the company's administrators, reclaiming assets one patrol line at a time." },
+    { "id": "miners-union", "name": "The Outer Stations Union", "line": "The miners' union that keeps the outer stations breathing, and keeps a list." },
+    { "id": "the-order", "name": "The Quiet Order", "line": "A religious order that thinks the emptiness of the Reach is holy and should stay that way." },
+    { "id": "confederation", "name": "The Free Confederation", "line": "Pirate crews with a written code. The code is long, and mostly about shares." },
+    { "id": "collective", "name": "Reach Medical Cooperative", "line": "A medical and research collective that pays well and asks very few questions." }
+  ]
+}

@@ -148,7 +148,7 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
       const crate = sim.state.crates[target.id];
       if (!crate) return null;
       if (crate.kind === 'ammo') return `${crate.label}: ${crate.rounds} rounds for the slug thrower and the lance. Tap it to load the guns.`;
-      return `${crate.label}. ${crate.sealed ? 'Under a company seal.' : crate.contents ?? 'Opened.'}`;
+      return `${crate.label}${crate.contract ? ' (contract cargo)' : ''}. ${crate.sealed ? 'Under a company seal.' : crate.contents ?? 'Opened.'}`;
     }
     if (target?.kind === 'crew') {
       const { member, ship } = findCrew(sim, target.id);
@@ -376,6 +376,15 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
           button('btn-dbg-fuel-out', 'Empty the tanks', act(() => order({ type: 'debug.run', fuel: 0 })), 'btn--debug'),
           button('btn-dbg-chase', sim.state.run.pursuit ? 'Nobody follows' : 'Someone follows', act(() => order({ type: 'debug.run', pursuit: sim.state.run.pursuit ? 'off' : 'on' })), 'btn--debug'),
           button('btn-dbg-caught', 'Pursuer alongside', act(() => order({ type: 'debug.run', pursuit: 'catch' })), 'btn--debug'),
+        ),
+      sim.state.run?.contract?.status === 'active' &&
+        el(
+          'div',
+          { class: 'sheet__grid' },
+          // The contract (S3.4): put the rest of its cargo aboard (works a claim), or fail it.
+          button('btn-dbg-load', 'Load all the cargo', act(() => order({ type: 'debug.contract', load: true })), 'btn--debug'),
+          button('btn-dbg-fail', 'Fail the contract', act(() => order({ type: 'debug.contract', fail: 'lost' })), 'btn--debug'),
+          button('btn-dbg-rich', '+100 credits', act(() => order({ type: 'debug.combat', action: 'money' })), 'btn--debug'),
         ),
       sim.transit.all.length > 0 && el('div', { class: 'stencil sheet__sub' }, `Events: ${sim.state.run?.events.count ?? 0} met this run`),
       sim.transit.all.length > 0 &&
@@ -1215,9 +1224,10 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
       const worker = ourCrew(sim).find(({ member }) => member.job?.crate === panel.id)?.member;
       let note = refusalText();
       if (!note && movingCrate === panel.id) note = 'Tap a room of ours to carry it there.';
-      else if (!note && armed) note = 'It goes out of the nearest airlock. Press again to confirm.';
+      else if (!note && armed) note = crate.contract ? 'Contract cargo: losing it costs the fee. Press again to confirm.' : 'It goes out of the nearest airlock. Press again to confirm.';
       else if (!note && worker) note = `${worker.name}: ${describeJob(sim, worker).toLowerCase()}.`;
-      else if (!note && crate.sealed) note = 'Breaking a company seal gets logged.';
+      else if (!note && crate.sealed) note = crate.contract ? 'Contract cargo. The client will see a broken seal, and pay less for it.' : 'Breaking a company seal gets logged.';
+      else if (!note && crate.contract) note = 'Contract cargo: it is what the drop pays for.';
       setText(panel.note, queuedFor('crate', panel.id) ? 'Order queued' : note);
       return;
     }

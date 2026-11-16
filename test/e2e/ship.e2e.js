@@ -1603,7 +1603,7 @@ async function chartTests(browser) {
 
   await check('New run puts the chart up on the monitor, with every point a big enough target and the ship still running under it', async () => {
     await page.tap('#btn-new-run');
-    await page.tap('#accept-stub-courier');
+    await page.tap('#accept-courier');
     await page.waitForFunction(() => window.coldManifest.machine.state === 'ship' && window.coldManifest.shipView.debug.chartOpen);
     assert.equal(await page.isVisible('#chart'), true);
     const r = await run();
@@ -1746,9 +1746,9 @@ async function loopTests(browser) {
     assert.equal(await page.locator('.card').count(), 3);
     await shot('s3-2-board-ipad');
     await big('#screen button');
-    await page.tap('#accept-stub-courier');
+    await page.tap('#accept-courier');
     await page.waitForFunction(() => window.coldManifest.machine.state === 'ship' && window.coldManifest.shipView.debug.chartOpen);
-    assert.equal(await game(page, () => window.coldManifest.run.contract.id), 'stub-courier');
+    assert.equal(await game(page, () => window.coldManifest.run.contract.id), 'courier-cold-chain');
   });
 
   await check('Back to the title and Resume run returns to the same run', async () => {
@@ -1819,8 +1819,13 @@ async function loopTests(browser) {
           await page.tap('#btn-back');
           assert.equal(await state(), 'port');
           assert.match(await page.textContent('#port-facts'), /Fuel\s*3 of 12/);
+          assert.match(await page.textContent('#btn-refuel'), /9 units, 108 credits/);
+          const money = Number((await page.textContent('#port-facts')).match(/Money\s*(\d+)/)[1]);
           await page.tap('#btn-refuel');
           assert.match(await page.textContent('#port-facts'), /Fuel\s*12 of 12/);
+          assert.match(await page.textContent('#port-facts'), new RegExp(`Money\\s*${money - 108}`), 'fuel is paid for');
+          assert.match(await page.textContent('#port-facts'), /Contract\s*Courier: 2 of 2 crates aboard/);
+          assert.equal(await page.isDisabled('#btn-hire'), true, 'hiring is a stub until Stage 4');
           assert.equal(await page.isDisabled('#btn-refuel'), true, 'full tanks, nothing to buy');
           await shot('s3-2-port-ipad');
           await big('#screen button');
@@ -1895,7 +1900,9 @@ async function loopTests(browser) {
     const facts = await page.textContent('#summary-facts');
     assert.match(facts, /Courier/);
     assert.match(facts, /3 of 3 alive/);
-    assert.match(facts, /Pay\s*(600|300) of 600/);
+    assert.match(facts, /Result\s*Delivered whole/);
+    assert.match(facts, /Paid\s*150 advance \+ 450 at the drop/);
+    assert.match(facts, /Standing\s*Reach Medical Cooperative \+2/);
     await shot('s3-2-summary-ipad');
     await big('#screen button');
   });
@@ -1911,10 +1918,11 @@ async function loopTests(browser) {
 
   await check('a second run starts fresh from the board; retiring at a port and losing the crew both end it with a summary', async () => {
     await page.tap('#btn-new-run');
-    await page.tap('#accept-stub-smuggling');
+    await page.tap('#accept-smuggling');
     await page.waitForFunction(() => window.coldManifest.machine.state === 'ship');
     assert.equal(await game(page, () => window.coldManifest.sim.state.run.jumps), 0);
-    assert.equal(await game(page, () => window.coldManifest.sim.state.run.pursuit !== null), true, 'the smuggling job is followed');
+    assert.equal(await game(page, () => window.coldManifest.sim.state.run.pursuit !== null), await game(page, () => window.coldManifest.run.contract.followed), 'followed as the board said');
+    assert.equal(await game(page, () => Object.values(window.coldManifest.sim.state.crates).filter((c) => c.contraband).length), 4, 'the contraband is in the hold');
     // Kill everyone on board: the run ends on the next frame.
     await game(page, () => Object.values(window.coldManifest.sim.state.crew).forEach((m) => (m.alive = false)));
     await page.waitForFunction(() => window.coldManifest.machine.state === 'summary', null, { timeout: 2000 });
@@ -1924,12 +1932,20 @@ async function loopTests(browser) {
     assert.match(await page.textContent('#hub-wall'), /Smuggling|Cold freight/);
     await page.tap('#btn-back');
     await page.tap('#btn-new-run');
-    await page.tap('#accept-stub-salvage');
+    await page.tap('#accept-salvage');
     await page.waitForFunction(() => window.coldManifest.machine.state === 'ship');
     // At the origin port nothing opens, so reach the port screen through a debug arrival: retire from there.
     await game(page, () => window.coldManifest.machine.go('port', { node: window.coldManifest.sim.state.run.at }));
+    assert.match(await page.textContent('#port-facts'), /Salvage claim: the claim at .* is still to be worked/);
+    assert.equal(await page.isDisabled('#btn-sell-contract'), true);
+    assert.match(await page.textContent('#btn-sell-contract'), /None of the contract cargo/);
+    await page.tap('#btn-abandon');
+    assert.match(await page.textContent('#port-facts'), /Salvage claim: failed, we walked away from it/);
+    assert.equal(await page.isVisible('#btn-abandon'), false);
     await page.tap('#btn-retire');
     assert.match(await page.textContent('#summary-title'), /Retired/);
+    assert.match(await page.textContent('#summary-facts'), /Result\s*Failed: we walked away from it/);
+    assert.match(await page.textContent('#summary-facts'), /Standing\s*The Outer Stations Union -2/);
   });
 
   await check('no page errors', async () => assert.deepEqual(errors, []));

@@ -4,6 +4,7 @@
 // pauses. Points are DOM buttons (44 px or more), lanes an SVG layer under
 // them. Everything shown is read from sim.state.run; every change is a command.
 
+import { contractLine } from '../sim/runflow.js';
 import { fixOf } from '../sim/combat.js';
 import { NODE_KINDS, cheapestRoute, distance, laneBetween, nodeOf, whyNoCourseJump, whyNoPlot } from '../sim/sector.js';
 import { el } from './dom.js';
@@ -64,7 +65,8 @@ export function createChart({ sim, order, onClose }) {
 
   function draw() {
     const r = run();
-    const key = `${r.at}|${r.plot}|${r.visited.length}|${selected}|${r.pursuit?.lastSeen?.node ?? ''}|${r.pursuit?.seen}|${r.pursuit?.done}`;
+    const key = `${r.at}|${r.plot}|${r.visited.length}|${selected}|${r.pursuit?.lastSeen?.node ?? ''}|${r.pursuit?.seen}|${r.pursuit?.done}|${contractLine(sim)}`;
+    const claim = r.contract?.status === 'active' && r.contract.claim && !r.contract.claim.done ? r.contract.claim.node : null;
     if (key === drawnFor) return;
     drawnFor = key;
     const { map } = r;
@@ -106,6 +108,7 @@ export function createChart({ sim, order, onClose }) {
           el('span', { class: 'chartnode__name' }, point.name),
           point.id === r.at && el('span', { class: 'chartnode__tag' }, 'Here'),
           point.id === map.delivery && point.id !== r.at && el('span', { class: 'chartnode__tag chartnode__tag--drop' }, 'Drop'),
+          point.id === claim && point.id !== r.at && el('span', { class: 'chartnode__tag chartnode__tag--drop', id: 'chart-claim' }, 'Claim'),
         );
       }),
       ...(chase ? [el('span', { class: `chart__contact${chase.seen ? ' is-seen' : ''}`, id: 'chart-contact', style: `left:${nodeOf(map, chase.lastSeen.node).x * 100}%;top:${nodeOf(map, chase.lastSeen.node).y * 100}%` }, chase.seen ? 'Contact' : 'Last seen')] : []),
@@ -122,6 +125,7 @@ export function createChart({ sim, order, onClose }) {
       card.replaceChildren(
         el('div', { class: 'stencil' }, r.map.name),
         el('p', { class: 'status__hint' }, `Tap a point a lane away to plot a course. Every jump spends fuel and counts against the deadline. ${r.delivered ? 'The cargo is at the drop.' : `The drop is ${distance(r.map, r.at, r.map.delivery)} jumps away at the fewest.`}`),
+        r.contract && el('p', { class: 'status__hint', id: 'chart-contract' }, contractLine(sim)),
       );
       return;
     }

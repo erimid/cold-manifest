@@ -27,7 +27,10 @@
 //              the cheapest course a lane at a time, sometimes turns off it for a
 //              port, waits for the fix and jumps; if the pursuer catches it, it
 //              fights back in a simple way and escapes down the next lane of its
-//              course as soon as the fix allows
+//              course as soon as the fix allows. Since S3.4 every crossing carries a
+//              contract from the board (each type in turn): the bot works a salvage
+//              claim on the way, refuels and patches the hull at ports when it can
+//              pay, answers inspections like any event, and hands over at the drop
 //
 // Chaos: the bot sends three crew around the ship to deal with whatever is
 // worst, suits them up for breaches, works doors, airlocks and lights, routes
@@ -47,6 +50,8 @@ import { DEBUG_ACTIONS, OUTCOMES, chargeOf, enemyOf, ourCrew } from '../src/sim/
 import { resolvedRooms, signature } from '../src/sim/senses.js';
 import { MANUAL_DOOR_SECONDS, TICK_RATE, TICK_SECONDS, checkInvariants, createSim } from '../src/sim/sim.js';
 import { cheapestRoute, laneBetween, neighbours, nodeOf, whyNoCourseJump } from '../src/sim/sector.js';
+import { contractCrates } from '../src/sim/contracts.js';
+import { boardOffers } from '../src/sim/runflow.js';
 import { writeFileSync } from 'node:fs';
 
 import { readContentFiles } from './lib/load-content.js';
@@ -75,6 +80,8 @@ const lines = content.all('ai-lines');
 const weapons = content.all('weapons');
 const ships = content.all('ships');
 const sectorDef = content.require('sectors', 'the-reach');
+const contractTemplates = content.all('contracts');
+const ports = content.all('ports');
 
 /** The longest anyone should stand still with somewhere to be: a hand-worked door, with a wide margin. */
 const MAX_STILL_TICKS = 200;
@@ -681,13 +688,24 @@ const DETOUR_CHANCE = 0.3;
  * A crossing: the sector chart from the origin to the drop. Throws on any failure, including a chart
  * with no way across, a bot that cannot get a fix, or a crossing still going after CROSSING_MINUTES.
  */
-function playCrossing(seed) {
-  const sim = createSim({ seed, ship, crew: roster, lines, weapons, ships, rules: ruleSet, events: transitEvents, sector: sectorDef });
+function playCrossing(seed, index) {
+  // The board for this seed, and the contract of the type whose turn it is (S3.4).
+  const offers = boardOffers(contractTemplates, { seed });
+  const offer = offers[index % offers.length];
+  const sim = createSim({ seed, ship, crew: roster, lines, weapons, ships, rules: ruleSet, events: transitEvents, sector: sectorDef, contract: offer.template, ports, run: { pursuit: offer.followed } });
   const bot = createRng(`crossing:${seed}`);
   const { run } = sim.state;
+  const contract = run.contract;
   const end = CROSSING_MINUTES * 60 * TICK_RATE;
-  const tally = { caught: 0, escapes: 0, detours: 0, sighted: 0, fightTicks: 0, lines: 0, outcomes: {}, events: 0, lapsed: 0, eventFights: 0, hooks: 0, met: {}, picked: {}, locked: 0, offered: 0 };
+  const tally = { caught: 0, escapes: 0, detours: 0, sighted: 0, fightTicks: 0, lines: 0, outcomes: {}, events: 0, lapsed: 0, eventFights: 0, hooks: 0, met: {}, picked: {}, locked: 0, offered: 0, inspections: 0, seized: 0, fuelBought: 0, fuelSpent: 0, repairSpent: 0, claimLeft: false };
+  sim.events.on('cargo.seized', () => (tally.seized += 1));
+  sim.events.on('port.refueled', (event) => {
+    tally.fuelBought += event.bought;
+    tally.fuelSpent += event.cost;
+  });
+  sim.events.on('port.repaired', (event) => (tally.repairSpent += event.cost));
   sim.events.on('event.opened', (event) => {
+    if (event.event === 'checkpoint.inspection') tally.inspections += 1;
     tally.events += 1;
     tally.met[event.event] = (tally.met[event.event] ?? 0) + 1;
   });
@@ -705,9 +723,11 @@ function playCrossing(seed) {
     if (event.outcome === 'escaped') tally.escapes += 1;
   });
   const give = (command) => !sim.whyNot(command) && sim.enqueue(command);
+  /** Where the bot is making for: the salvage claim while it is still to be worked, then the drop. */
+  const goal = () => (contract.status === 'active' && contract.claim && !contract.claim.done && !tally.claimLeft ? contract.claim.node : run.map.delivery);
   /** Where to go next: the cheapest way on, or now and then a port a lane off it if that still leaves the drop in reach. */
   function nextStop() {
-    const route = cheapestRoute(run.map, run.at, run.map.delivery);
+    const route = cheapestRoute(run.map, run.at, goal());
     const ahead = route.path[1];
     if (!bot.chance(DETOUR_CHANCE)) return ahead;
     const ports = neighbours(run.map, run.at).filter((id) => id !== ahead && nodeOf(run.map, id).kind === 'port' && !run.visited.includes(id));
@@ -720,9 +740,19 @@ function playCrossing(seed) {
     }
     return ahead;
   }
+  /** At a port with nothing else on: refuel for the way on, patch a badly holed hull, sell loose salvage. */
+  function portCall() {
+    if (nodeOf(run.map, run.at).kind !== 'port' || tally.lastPort === run.jumps) return;
+    tally.lastPort = run.jumps;
+    give({ type: 'port.sell', what: 'salvage' });
+    if (sim.state.hull.points < sim.state.hull.max * 0.6) give({ type: 'port.repair', what: 'hull' });
+    const need = cheapestRoute(run.map, run.at, goal()).fuel + (goal() === run.map.delivery ? 0 : cheapestRoute(run.map, goal(), run.map.delivery).fuel);
+    if (run.fuel < Math.min(run.fuelMax, need + 2)) give({ type: 'port.refuel' });
+  }
   let lost = false;
   let crewDead = false;
-  while (!run.delivered && sim.state.tick < end) {
+  let settled = false;
+  while (!settled && sim.state.tick < end) {
     const fight = sim.state.fight;
     const view = eventView(sim);
     if (!ourCrew(sim).some(({ member }) => member.alive)) {
@@ -766,8 +796,18 @@ function playCrossing(seed) {
       for (const { slot, index } of guns) if (slot.target !== (volley ? aim : null)) give({ type: 'weapon.target', slot: index, room: volley ? aim : null });
       if (!run.plot) give({ type: 'course.plot', to: cheapestRoute(run.map, run.at, run.map.delivery).path[1] });
       give({ type: 'ship.jump' });
+    } else if (run.at === run.map.delivery) {
+      // The drop: hand over whatever is left of the cargo, if there is a contract left to hand over.
+      if (!sim.whyNot({ type: 'contract.deliver' })) give({ type: 'contract.deliver' });
+      else {
+        // Nothing to hand over (a claim left unworked): the captain walks away from the contract, as retiring would.
+        give({ type: 'contract.abandon' });
+        settled = true;
+      }
     } else if (!run.plot) {
-      if (run.fuel < Math.min(...run.map.lanes.filter((l) => l.a === run.at || l.b === run.at).map((l) => l.fuel))) break; // stranded: ports refuel from S3.4
+      if (contract.claim && run.at === contract.claim.node && !contract.claim.done) tally.claimLeft = true; // it walked away from the claim
+      portCall();
+      if (run.fuel < Math.min(...run.map.lanes.filter((l) => l.a === run.at || l.b === run.at).map((l) => l.fuel))) break; // stranded
       give({ type: 'course.plot', to: nextStop() });
     } else if (!whyNoCourseJump(sim)) give({ type: 'course.jump' });
     else if (sim.state.tick % TICK_RATE === 0) {
@@ -798,7 +838,7 @@ function playCrossing(seed) {
       if (problems.length) throw new Error(`invariant broken at tick ${sim.state.tick}: ${problems[0]}`);
     }
   }
-  if (!run.delivered && !lost && !crewDead && sim.state.tick >= end) throw new Error(`still crossing after ${CROSSING_MINUTES} minutes, at ${run.at} with ${run.fuel} fuel (${run.plot ? whyNoCourseJump(sim) : `no course: ${sim.whyNot({ type: "course.plot", to: nextStop() })}`})`);
+  if (!settled && !lost && !crewDead && sim.state.tick >= end) throw new Error(`still crossing after ${CROSSING_MINUTES} minutes, at ${run.at} with ${run.fuel} fuel (${run.plot ? whyNoCourseJump(sim) : `no course: ${sim.whyNot({ type: "course.plot", to: nextStop() })}`})`);
   const bad = findBadNumbers(sim.state);
   if (bad.length) throw new Error(`non-finite numbers at ${bad.join(', ')}`);
   return {
@@ -813,6 +853,16 @@ function playCrossing(seed) {
     lost,
     crewDead,
     stranded: !run.delivered && !lost && !crewDead,
+    type: contract.type,
+    status: contract.status,
+    reason: contract.reason,
+    earned: contract.earned,
+    paid: contract.paid,
+    advance: contract.advance,
+    pay: contract.pay,
+    crates: contractCrates(sim).length,
+    money: sim.state.money,
+    standing: Object.values(contract.standing).reduce((sum, add) => sum + add, 0),
     jumps: run.jumps,
     fuelLeft: run.fuel,
     minutes: sim.state.tick / TICK_RATE / 60,
@@ -833,8 +883,8 @@ const crossings = [];
 for (let i = 1; i <= runs; i++) {
   const seed = `${baseSeed}-${i}`;
   try {
-    const first = playCrossing(seed);
-    const second = playCrossing(seed);
+    const first = playCrossing(seed, i - 1);
+    const second = playCrossing(seed, i - 1);
     if (first.hash !== second.hash) failures.push({ seed, reason: `crossing replay mismatch (${first.hash} vs ${second.hash})` });
     crossings.push(first);
   } catch (err) {
@@ -1032,6 +1082,20 @@ out.push(`  led to:            ${sumOf('eventFights')} fights, ${sumOf('hooks')}
 out.push(`  by event:          ${merged('met').map(([k, n]) => `${k} ${n}`).join(', ') || 'none'}`);
 out.push(`  never met:         ${transitEvents.filter((event) => !merged('met').some(([k]) => k === event.id)).map((event) => event.id).join(', ') || 'none'}`);
 out.push(`  by choice:         ${merged('picked').map(([k, n]) => `${k} ${n}`).join(', ') || 'none'}`);
+out.push('');
+out.push('Contracts (S3.4): every crossing carries one from the board, each type in turn');
+for (const type of [...new Set(crossings.map((c) => c.type))]) {
+  const of = crossings.filter((c) => c.type === type);
+  const done = of.filter((c) => c.status === 'delivered');
+  const whole = done.filter((c) => c.earned === c.pay).length;
+  const reasons = {};
+  for (const c of of) if (c.status === 'failed') reasons[c.reason] = (reasons[c.reason] ?? 0) + 1;
+  const unsettled = of.filter((c) => c.status === 'active').length;
+  out.push(`  ${type.padEnd(18)} ${of.length} taken: delivered ${done.length} (${whole} whole, ${done.filter((c) => c.late).length} late), failed ${of.length - done.length - unsettled} (${Object.entries(reasons).map(([k, n]) => `${k} ${n}`).join(', ') || 'none'}), unfinished (ship or crew lost) ${unsettled}; earned ${done.length ? mean(done.map((c) => c.earned)).toFixed(0) : '-'} of ${of[0].pay} on average when delivered`);
+}
+out.push(`  inspections:       ${sumOf('inspections')} met, ${sumOf('seized')} found the contraband; ${crossings.filter((c) => c.type === 'salvage' && c.claimLeft).length} salvage claims walked away from`);
+out.push(`  ports:             ${sumOf('fuelBought')} fuel bought for ${sumOf('fuelSpent')} credits, ${sumOf('repairSpent')} credits on repairs; money at the end ${mean(crossings.map((c) => c.money)).toFixed(0)} on average (${Math.min(...crossings.map((c) => c.money))} to ${Math.max(...crossings.map((c) => c.money))})`);
+out.push(`  standing:          ${mean(crossings.map((c) => c.standing)).toFixed(2)} a crossing on average, all factions together`);
 out.push('');
 out.push(`  wall time:         ${seconds.toFixed(2)}s`);
 const verdict = failures.length

@@ -10,6 +10,7 @@
 // Adding a fact here is all it takes for events, refusals, risks and lines to be
 // able to ask it, and for the content checker to check every use of it.
 
+import { contrabandAboard, contractCrates, contractOf } from '../sim/contracts.js';
 import { usable } from '../sim/power.js';
 import { DARK_ROOM, lightIn, roomView } from '../sim/senses.js';
 
@@ -35,6 +36,20 @@ export const FACTS = Object.freeze({
   flag: { args: { name: 'string' }, value: 'any', get: (sim, a) => run(sim)?.flags?.[a.name] ?? 0 },
   'event.met': { args: { event: 'event' }, value: 'boolean', get: (sim, a) => Boolean(run(sim)?.events?.met.includes(a.event)) },
   fight: { value: 'boolean', get: fightOn },
+
+  // ---------- the contract and standing (S3.4) ----------
+  /** The kind of contract on this run (smuggling, courier, salvage); no value without one. */
+  'contract.type': { value: 'string', get: (sim) => contractOf(sim)?.type },
+  /** active, delivered or failed. */
+  'contract.status': { value: 'string', get: (sim) => contractOf(sim)?.status },
+  /** How many of the contract's crates are aboard. */
+  'contract.crates': { value: 'number', get: (sim) => (contractOf(sim) ? contractCrates(sim).length : undefined) },
+  /** Are we standing at the contract's salvage claim? */
+  'contract.claim': { value: 'boolean', get: (sim) => Boolean(contractOf(sim)?.claim && contractOf(sim).claim.node === run(sim)?.at) },
+  /** Crates aboard an inspection would take. */
+  contraband: { value: 'number', get: (sim) => contrabandAboard(sim) },
+  /** Standing with a faction, -10 to 10. "client" is the contract's client. */
+  reputation: { args: { faction: 'faction' }, value: 'number', get: (sim, a) => sim.state.reputation[a.faction === 'client' ? contractOf(sim)?.client : a.faction] ?? 0 },
 
   // ---------- the ship ----------
   hull: { value: 'number', get: (sim) => sim.state.hull.points },

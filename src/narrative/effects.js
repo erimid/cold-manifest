@@ -16,6 +16,7 @@
 
 import { harmCrew } from '../sim/atmosphere.js';
 import { startFight } from '../sim/combat.js';
+import { changeReputation, contractActive, contractOf, failContract, FAILURES, loadCargo, seizeCargo } from '../sim/contracts.js';
 import { CRATE_KINDS, addCrate } from '../sim/hold.js';
 import { remember } from '../sim/memory.js';
 import { newPursuit } from '../sim/sector.js';
@@ -219,6 +220,34 @@ export const EFFECTS = Object.freeze({
       if (run && !run.threat) run.threat = { id: a.threat ?? null, tick: sim.state.tick };
       sim.events.emit('threat.cued', { threat: a.threat ?? null, tick: sim.state.tick });
     },
+  },
+  // ---------- the contract and standing (S3.4) ----------
+  // Standing with a faction moves; "client" is the contract's client.
+  reputation: {
+    args: { faction: typed('faction'), add: whole },
+    run: (sim, a) => changeReputation(sim, a.faction, a.add, 'event'),
+  },
+  // The salvage claim is worked: `count` more of the contract's crates come aboard (all that are left with no count).
+  'contract.load': {
+    args: { count },
+    optional: ['count'],
+    run(sim, a) {
+      if (!contractActive(sim)) return;
+      loadCargo(sim, a.count ?? Infinity);
+      const claim = contractOf(sim).claim;
+      if (claim) claim.done = true;
+    },
+  },
+  // An inspection takes the contraband aboard (or, with all, every crate of the contract). The contract fails if nothing of it is left.
+  'contract.seize': {
+    args: { all: typed('boolean') },
+    optional: ['all'],
+    run: (sim, a) => seizeCargo(sim, { all: a.all ?? false }),
+  },
+  // The contract fails outright, for one of the reasons in contracts.js.
+  'contract.fail': {
+    args: { reason: (value, env, what) => (FAILURES[value] ? [] : [`${what} must be one of ${Object.keys(FAILURES).join(', ')}`]) },
+    run: (sim, a) => failContract(sim, a.reason),
   },
   // Another event follows this one, whatever its own conditions say.
   event: {
