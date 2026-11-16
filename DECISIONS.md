@@ -1,0 +1,91 @@
+# DECISIONS
+
+Read this file at the start of every session. It is the project's memory across sessions.
+
+- The brief is [`docs/BRIEF.md`](docs/BRIEF.md). The build plan is [`PLAN.md`](PLAN.md).
+- Log every decision that departs from the brief, and every shortcut or deferral, with: **what** was done, **why**, and the **stage where it must be revisited**.
+- Keep the Deferred list current: add items when you take a shortcut, strike them when they're done.
+- At the end of every stage, add a stage note (what was built, what changed and why, known issues).
+
+---
+
+## Deferred
+
+Items here are known shortcuts. Each names the stage that must clear it.
+
+| # | What | Revisit in | Status |
+|---|---|---|---|
+| DF-01 | Placeholder AI lines (~40, flagged `placeholder: true`) stand in for the real library. | Stage 5 (all removed by end of S5.7) | Open |
+| DF-02 | Placeholder audio patches. | Stage 11 (S11.2) | Open |
+| DF-03 | Placeholder crew portraits in the crew panel. | Stage 8 (S8.2) | Open |
+| DF-04 | Faction and port names are provisional (see D-012). | Stage 7 (S7.4) | Open |
+| DF-05 | Vent graph is data only, not used by anything, until the creature exists. | Stage 6 (S6.1) | Open |
+| DF-06 | Pre-fight talk/bribe uses a placeholder negotiation value until crew skills exist. | Stage 4 (S4.1) | Open |
+
+---
+
+## Decisions
+
+### D-001 Simulation is DOM-free (Stage 1)
+**What:** Everything in `src/sim/`, `src/ai/`, `src/narrative/` and the RNG runs in plain Node with no `window` or `document`. Rendering, UI and audio only read sim state and send commands.
+**Why:** The brief requires headless batch autoplay (§19). Keeping the sim pure also keeps saves simple and makes tests fast.
+
+### D-002 Fixed 20 Hz sim tick (Stage 1)
+**What:** The sim clock steps at 50 ms. Rendering runs at display rate and interpolates between sim states.
+**Why:** The brief needs one fixed-timestep clock (§7). 20 Hz is enough for crew movement, fire and combat at this scale, and leaves frame budget on an iPad. Revisit only if movement looks steppy after interpolation.
+
+### D-003 Commands in, events out (Stage 1)
+**What:** UI and bot talk to the sim only through a command queue. The sim emits typed events on a bus. AI lines, memories, the run log, auto-pause, audio and the run summary all subscribe to the bus.
+**Why:** It gives pause queuing for free (commands wait for the next tick), lets the bot use exactly the same interface as a player, and gives every later stage one place to hook in.
+
+### D-004 One condition/effect language (Stage 3)
+**What:** Events, scenes, AI lines, contracts and traits share one small JSON condition/effect DSL, introduced in S3.3 and validated by the content checker.
+**Why:** Four separate condition formats would be four sets of bugs and four checkers.
+
+### D-005 Seeded RNG with named substreams (Stage 1)
+**What:** One seeded PRNG per subsystem (`map`, `combat`, `crew`, `events`, `ai`, `threat`, `market`), all derived from the run seed. `Math.random()` is banned and the checker lints for it.
+**Why:** Seeds stay useful for bug reports even after code changes add rolls to one system.
+
+### D-006 Content as JSON with two loaders (Stage 1)
+**What:** All content is JSON under `content/`. The browser loads it via Vite `import.meta.glob`; Node (checker, autoplay, tests) loads it from disk. The engine never imports a content file by name.
+**Why:** JSON is easy to validate and diff, and dropping a new file into a folder is enough to add content (brief §4).
+
+### D-007 Tests and CI (Stage 1)
+**What:** Unit tests use Node's built-in `node:test` (no test framework dependency). Touch and layout tests use Playwright with iPad emulation. GitHub Actions runs tests, the content checker, an autoplay batch and the build on every PR.
+**Why:** Keeps dependencies minimal while making the brief's "each stage ends with checker passing and autoplay with no crashes" an automatic gate rather than a habit.
+**Note:** Emulation does not replace a real iPad; real-device checks happen at the end of Stages 1, 6 and 11.
+
+### D-008 Project scaffolding lives in Stage 1 (Stage 1)
+**What:** Scaffolding, RNG, content loader, checker skeleton, autoplay skeleton and CI are the first session of Stage 1 (S1.1), not a separate stage.
+**Why:** Keeps the brief's 11 stages intact while making sure the tools needed for every stage's exit gate exist from day one.
+
+### D-009 AI lines are also written in Stages 6 to 9 (departure from brief §9)
+**What:** The brief says to spread AI writing across Stages 5 and 10. The plan writes the first 1,000 in Stage 5, then adds lines for each new system in the stage that builds it (S6: 250, S7: 220, S8: 120, S9: 150), and the remaining ~1,540 in Stage 10.
+**Why:** Creature, economy, scene and past-run lines are much easier to write well, and to test, when their system exists. It also makes Stage 10 smaller. Stage 10 still carries the bulk.
+
+### D-010 Contract type order (Stage 3 onward)
+**What:** S3 builds Smuggling, Courier and Salvage claim. Prisoner transport comes in S4, Specimen haul in S6, Rescue in S10.
+**Why:** Each type arrives when the systems it depends on exist: prisoners need crew opinions and the brig, specimens need the creature, rescue needs survivors with infection and traitor hooks.
+
+### D-011 Saves are versioned snapshots (Stage 3)
+**What:** A save is a JSON snapshot of sim state plus RNG state with a `schemaVersion`, migrated forward on load. Export/import is that JSON compressed and base64-encoded.
+**Why:** The build runs across many stages and sessions; old saves must keep loading.
+
+### D-012 Names: the AI is M.A.R.G.O.; factions provisional (Stage 1, revisit Stage 7)
+**What:** The ship AI is **M.A.R.G.O.** (Manifest Audit and Route Guidance Operator), a salvaged company cargo-custody intelligence. The crew calls it **Margo**, which also happens to be what's left of the ship's name, *Margin of Error*. Name confirmed by Eric on 2026-11-15 (he asked for an acronym). Factions use the brief's working descriptions (Receivers, miners' union, religious order, pirate confederation, research collective) as internal ids; final names are chosen in S7.4.
+**Why:** Placeholder lines in Stage 1 need something to call the AI, and ids need to be stable even if display names change. Display names live in content, so renaming later is a content edit.
+
+### D-013 Session and PR rhythm
+**What:** One PR per session, each passing the green gate (see PLAN.md §0). Stage notes and autoplay reports at the end of each stage.
+**Why:** Small reviewable steps that are always playable.
+
+### D-014 Preview deploys on Cloudflare Pages (Stage 1)
+**What:** The repo is connected to Cloudflare Pages (build `npm run build`, output `dist/`). Every PR gets its own preview URL, and `main` deploys to production. PR descriptions link the preview so Eric can test on his iPad.
+**Why:** Eric tests on a real iPad (brief §4, §22). The brief already names Cloudflare Pages as the target host, and its Git integration gives per-PR previews with no secrets in the repo.
+**Note:** Connecting the repo is a one-time step in Eric's Cloudflare account (S1.1).
+
+---
+
+## Stage notes
+
+_None yet. Stage 1 note goes here when Stage 1 is done._
