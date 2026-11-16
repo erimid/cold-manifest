@@ -24,9 +24,22 @@
 // room already is), and may hurt each person standing there. Fires and breaches
 // are only set on the room; from then on the Stage 1 hazard code (atmosphere.js)
 // runs them exactly as it runs any other fire or breach.
+//
+// A fight (S2.3) can open with a hail: neither side fires while the enemy
+// talks, and the player can talk, bribe or open fire. Once shooting starts
+// the enemy captain (tactics.js) routes power, aims and works its crew. A
+// fight ends one of nine ways (brief §7), each through `decide`:
+//   destroyed    their hull is gone          lost        ours is
+//   crew-dead    nobody alive aboard them    surrendered we took their offer
+//   escaped      we jumped away              fled        they jumped away
+//   talked       talked out of it            bribed      paid off
+//   stalemate    nobody has hurt anybody for STALEMATE_SECONDS: they break away
+// The stalemate rule means no fight runs forever: each hull point lost buys
+// at most STALEMATE_SECONDS more, and hull points never come back mid-fight.
 
-import { FIRE_CATCH_O2, FIRE_START, harmCrew } from './atmosphere.js';
+import { FIRE_CATCH_O2, FIRE_START, harmCrew, killCrew } from './atmosphere.js';
 import { stepPower } from './power.js';
+import { THINK_SECONDS, planOf, think } from './tactics.js';
 
 export const SHIELD_RECHARGE_SECONDS = 6;
 /** Chance a shot misses: nothing with the engines off, then a base, more per engine bar, more with someone at the helm. */
@@ -40,6 +53,30 @@ export const HIT = Object.freeze({
   wearBreach: 0.6, // extra breach chance per unit of the room's hull integrity already lost
   breachPerDamage: 0.3, // size of the hole per point of damage
   crewHarmPerDamage: 0.2, // health taken from someone caught in the room, per point of damage
+});
+/** Seconds the enemy waits on a hail before it opens fire, and on a surrender offer before it takes the silence as a no. */
+export const HAIL_SECONDS = 30;
+export const OFFER_SECONDS = 30;
+/** Seconds of shooting with no hull damage on either side before the fight is called off. */
+export const STALEMATE_SECONDS = 90;
+/** A jump drive needs this many engine-bar seconds: 60 s on one bar, 30 s on two. And someone at the helm. */
+export const JUMP_CHARGE = 60;
+/** Stand-in for the crew's negotiating skill and our reputation until crew skills (S4.1) and factions (Stage 7) exist (DF-06). */
+export const NEGOTIATION_PLACEHOLDER = 0.5;
+/** Money aboard at the start, until runs and contracts set it (Stage 3). */
+export const START_MONEY = 120;
+
+/** How each ending reads, for the UI and the bot's report. */
+export const OUTCOMES = Object.freeze({
+  destroyed: 'Destroyed',
+  lost: 'Our hull gave out',
+  'crew-dead': 'Their crew is dead',
+  surrendered: 'Surrendered',
+  escaped: 'We jumped away',
+  fled: 'They jumped away',
+  talked: 'Talked down',
+  bribed: 'Paid off',
+  stalemate: 'Broke off',
 });
 const MAX_SHOTS = 64;
 const EPS = 1e-9;
@@ -75,6 +112,27 @@ export function weaponsPowered(ship) {
   });
 }
 
+/** Can this ship charge its jump drive right now? Engines powered and someone at the helm. */
+export const canCharge = (ship) => ship.state.systems.engines.power > 0 && hasPilot(ship);
+/** The jump drive's charge as a fraction, 0 to 1. */
+export const jumpCharge = (ship) => Math.min(1, ship.state.jump / JUMP_CHARGE);
+/** Living crew aboard a ship. */
+export const livingCrew = (ship) => Object.values(ship.state.crew).filter((member) => member.alive);
+
+/** The chance that talking works on the enemy in this fight, 0 to 1. */
+export function talkChance(sim) {
+  const hail = sim.state.fight ? planOf(enemyOf(sim).layout).hail : null;
+  if (!hail) return 0;
+  return Math.max(0, Math.min(1, hail.talk + (NEGOTIATION_PLACEHOLDER - 0.5) * 0.6));
+}
+
+/** What the enemy wants to be paid to leave, or null if it is not asking. */
+export function bribePrice(sim) {
+  const fight = sim.state.fight;
+  if (!fight || fight.phase !== 'hail') return null;
+  return planOf(enemyOf(sim).layout).hail?.bribe ?? null;
+}
+
 /** A weapon's charge as a fraction, 0 to 1. */
 export const chargeOf = (ship, slot) => Math.min(1, ship.state.weapons[slot].charge / ship.catalog.weapon(ship.state.weapons[slot].id).charge);
 
@@ -86,6 +144,7 @@ export function newCombatState(layout, systems) {
     hull: { points: layout.hullPoints, max: layout.hullPoints },
     shield: { charge: systems.shields.power }, // a ship that starts with shields powered starts with them up
     weapons: layout.weapons.map((id) => ({ id, charge: 0, target: null, powered: false })),
+    jump: 0, // engine-bar seconds toward a jump (JUMP_CHARGE)
   };
 }
 
@@ -113,6 +172,11 @@ export function enemyOf(sim) {
   return ship;
 }
 
+/** Debug actions that lead to each ending (brief §7). */
+export const DEBUG_ACTIONS = Object.freeze(['cripple', 'killCrew', 'surrender', 'flee', 'chargeJump', 'stalemate', 'sinkUs', 'money']);
+
+const inHail = (sim) => (!sim.state.fight || sim.state.fight.over ? 'there is no fight' : sim.state.fight.phase !== 'hail' ? 'the shooting has already started' : null);
+
 function clearTargets(ship) {
   for (const slot of ship.state.weapons) slot.target = null;
 }
@@ -120,20 +184,86 @@ function clearTargets(ship) {
 /** Begin a fight with an enemy ship from the catalog. `newShipState` comes from sim.js. */
 export function startFight(sim, enemyId, newShipState) {
   const layout = sim.catalog.layout(enemyId);
+  const plan = planOf(layout);
+  const { tick } = sim.state;
+  sim.state.jump = 0; // the drive is charged for this fight, from nothing
   sim.state.fight = {
-    enemy: { ship: layout.id, tick: sim.state.tick, ...newShipState(layout, []) },
+    enemy: { ship: layout.id, tick, ...newShipState(layout, layout.crew) },
     shots: [], // in the air: { id, side, slot, weapon, room, born, lands }
     nextShot: 1,
-    started: sim.state.tick,
-    over: null, // { outcome: 'destroyed' | 'lost', tick } once it is decided
+    started: tick,
+    phase: plan.hail ? 'hail' : 'battle', // hail: nobody fires while they talk
+    hailEnds: plan.hail ? tick + HAIL_SECONDS * 20 : tick,
+    talked: false, // we have tried talking
+    offer: null, // their surrender terms while they stand: { kind, amount | name, qty | text, expires }
+    offered: false, // they have offered once already
+    fleeing: false, // they are charging their jump to get away
+    lastHarm: tick, // the last tick either hull lost a point
+    over: null, // { outcome, tick, ... } once it is decided (OUTCOMES)
   };
-  sim.events.emit('fight.started', { enemy: layout.id, name: layout.name, tick: sim.state.tick });
+  sim.events.emit('fight.started', { enemy: layout.id, name: layout.name, hailing: Boolean(plan.hail), tick });
+  if (plan.hail) sim.events.emit('fight.hail', { enemy: layout.id, name: layout.name, text: plan.hail.text, bribe: plan.hail.bribe, tick });
 }
 
 export function endFight(sim) {
   clearTargets(sim);
   sim.state.fight = null;
   sim.events.emit('fight.ended', { tick: sim.state.tick });
+}
+
+/** The fight is over, one of the OUTCOMES ways. Guns stop and whatever is in the air is lost. */
+export function decide(sim, outcome, extra = {}) {
+  const fight = sim.state.fight;
+  if (!fight || fight.over) return;
+  fight.over = { outcome, tick: sim.state.tick, ...extra };
+  fight.offer = null;
+  fight.shots = [];
+  clearTargets(sim);
+  clearTargets(enemyOf(sim));
+  sim.events.emit('fight.over', { ...fight.over, enemy: fight.enemy.ship });
+  // And how it went, in a word, for whoever only cares about that (Margo, for now).
+  sim.events.emit(`fight.${ENDING_KIND[outcome]}`, { outcome, enemy: fight.enemy.ship, tick: sim.state.tick });
+}
+
+/** Each ending as a win, a parting of ways, or a loss. */
+const ENDING_KIND = Object.freeze({ destroyed: 'won', 'crew-dead': 'won', surrendered: 'won', escaped: 'parted', fled: 'parted', talked: 'parted', bribed: 'parted', stalemate: 'parted', lost: 'lost' });
+
+/** Shooting starts: from a failed talk, our order, or their patience running out. */
+function engage(sim, by) {
+  const fight = sim.state.fight;
+  if (fight.phase === 'battle') return;
+  fight.phase = 'battle';
+  fight.lastHarm = sim.state.tick;
+  sim.events.emit('fight.engaged', { by, tick: sim.state.tick });
+}
+
+/** They give up: roll what they offer from their list. */
+function makeOffer(sim) {
+  const fight = sim.state.fight;
+  const plan = planOf(enemyOf(sim).layout);
+  const dice = sim.rng.stream('tactics');
+  const terms = dice.pick(plan.surrender.offers);
+  const offer = { kind: terms.kind, expires: sim.state.tick + OFFER_SECONDS * 20 };
+  if (terms.kind === 'money') offer.amount = dice.between(terms.amount[0], terms.amount[1]);
+  if (terms.kind === 'cargo') Object.assign(offer, { name: terms.name, qty: dice.between(terms.qty[0], terms.qty[1]) });
+  if (terms.kind === 'info') offer.text = terms.text;
+  fight.offer = offer;
+  fight.offered = true;
+  sim.events.emit('fight.offer', { ...offer, enemy: fight.enemy.ship, tick: sim.state.tick });
+}
+
+/** What an accepted offer puts in our hands. */
+function collect(sim, offer) {
+  if (offer.kind === 'money') sim.state.money += offer.amount;
+  if (offer.kind === 'cargo') sim.state.cargo.push({ name: offer.name, qty: offer.qty, from: sim.state.fight.enemy.ship });
+  if (offer.kind === 'info') sim.state.intel.push({ text: offer.text, from: sim.state.fight.enemy.ship, tick: sim.state.tick });
+}
+
+/** Describe an offer in a few words: "75 money", "2 x Crate of machine parts", "a tip". */
+export function offerText(offer) {
+  if (offer.kind === 'money') return `${offer.amount} money`;
+  if (offer.kind === 'cargo') return `${offer.qty} x ${offer.name}`;
+  return `what they know: "${offer.text}"`;
 }
 
 // ---------- orders ----------
@@ -158,6 +288,73 @@ export function combatCommands(newShipState) {
         slot.target = cmd.room;
         sim.events.emit('weapon.targeted', { slot: cmd.slot, weapon: slot.id, room: cmd.room, tick: sim.state.tick });
       },
+    },
+    // Before shooting starts: try talking them out of it. One go.
+    'fight.talk': {
+      check(sim) {
+        const problem = inHail(sim);
+        if (problem) return problem;
+        if (sim.state.fight.talked) return 'they have heard enough talk';
+        return null;
+      },
+      apply(sim) {
+        const fight = sim.state.fight;
+        fight.talked = true;
+        const chance = talkChance(sim);
+        const worked = sim.rng.stream('tactics').chance(chance);
+        sim.events.emit('fight.talked', { worked, chance, tick: sim.state.tick });
+        if (worked) decide(sim, 'talked');
+        else engage(sim, 'talk');
+      },
+    },
+    // Before shooting starts: pay them to leave.
+    'fight.bribe': {
+      check(sim) {
+        const problem = inHail(sim);
+        if (problem) return problem;
+        const price = bribePrice(sim);
+        if (sim.state.money < price) return `they want ${price} and we have ${sim.state.money}`;
+        return null;
+      },
+      apply(sim) {
+        const price = bribePrice(sim);
+        sim.state.money -= price;
+        decide(sim, 'bribed', { paid: price });
+      },
+    },
+    // Before shooting starts: stop talking and shoot.
+    'fight.engage': {
+      check: (sim) => inHail(sim),
+      apply: (sim) => engage(sim, 'us'),
+    },
+    // Take their surrender, and what they offer for it.
+    'fight.accept': {
+      check: (sim) => (!sim.state.fight?.offer || sim.state.fight.over ? 'nobody is offering to surrender' : null),
+      apply(sim) {
+        const { offer } = sim.state.fight;
+        collect(sim, offer);
+        decide(sim, 'surrendered', { offer });
+      },
+    },
+    // Turn their surrender down and keep shooting.
+    'fight.refuse': {
+      check: (sim) => (!sim.state.fight?.offer || sim.state.fight.over ? 'nobody is offering to surrender' : null),
+      apply(sim) {
+        sim.state.fight.offer = null;
+        sim.events.emit('fight.refused', { tick: sim.state.tick });
+      },
+    },
+    // Jump away once the drive is charged.
+    'ship.jump': {
+      check(sim) {
+        const fight = sim.state.fight;
+        if (!fight) return 'there is nowhere to jump to yet'; // the sector map arrives in Stage 3
+        if (fight.over) return 'the fight is over';
+        if (jumpCharge(sim) < 1) return `the jump drive is at ${Math.floor(jumpCharge(sim) * 100)}%`;
+        if (!hasPilot(sim)) return 'nobody is at the helm';
+        return null;
+      },
+      apply: (sim) => decide(sim, 'escaped'),
     },
     // Leave a fight that has been decided.
     'fight.dismiss': {
@@ -190,6 +387,46 @@ export function combatCommands(newShipState) {
         const fight = sim.state.fight;
         const id = fight ? fight.nextShot++ : 0;
         land(sim, { id, side: cmd.at === 'us' ? 'enemy' : 'player', slot: 0, weapon: cmd.weapon, room, born: sim.state.tick, lands: sim.state.tick }, { force: Boolean(cmd.force) });
+      },
+    },
+    // Debug panel only: push a fight toward one of its endings, through the normal code.
+    'debug.combat': {
+      check(sim, cmd) {
+        if (!DEBUG_ACTIONS.includes(cmd.action)) return `no debug action "${cmd.action}"`;
+        if (cmd.action === 'money') return null;
+        const fight = sim.state.fight;
+        if (!fight) return 'there is no fight';
+        if (fight.over) return 'the fight is over';
+        const enemy = enemyOf(sim);
+        const plan = planOf(enemy.layout);
+        if (cmd.action === 'killCrew' && !livingCrew(enemy).length) return 'there is nobody aboard them';
+        if (cmd.action === 'surrender' && (!plan.surrender || !livingCrew(enemy).length)) return 'they have nobody to surrender';
+        if (cmd.action === 'surrender' && fight.offer) return 'they are already offering';
+        if (cmd.action === 'flee' && (!plan.flee || !hasPilot(enemy))) return 'they have no way to run';
+        return null;
+      },
+      apply(sim, cmd) {
+        const fight = sim.state.fight;
+        const enemy = enemyOf(sim);
+        const { tick } = sim.state;
+        if (cmd.action === 'money') sim.state.money += 100;
+        if (cmd.action === 'cripple') Object.assign(enemy.state, { hull: { ...enemy.state.hull, points: 1 }, shield: { charge: 0 } });
+        if (cmd.action === 'sinkUs') Object.assign(sim.state, { hull: { ...sim.state.hull, points: 1 }, shield: { charge: 0 } });
+        if (cmd.action === 'killCrew') for (const member of livingCrew(enemy)) killCrew(enemy, member.id, 'debug');
+        if (cmd.action === 'surrender') {
+          engage(sim, 'debug');
+          makeOffer(sim);
+        }
+        if (cmd.action === 'flee') {
+          engage(sim, 'debug');
+          fight.fleeing = true;
+          enemy.state.jump = JUMP_CHARGE;
+        }
+        if (cmd.action === 'chargeJump') sim.state.jump = JUMP_CHARGE;
+        if (cmd.action === 'stalemate') {
+          engage(sim, 'debug');
+          fight.lastHarm = tick - STALEMATE_SECONDS * 20;
+        }
       },
     },
     // Debug panel only: put an enemy ship alongside, or send it away (enemy: null).
@@ -227,10 +464,13 @@ function stepWeapons(sim, ship, side, dt) {
     const ready = slot.charge >= weapon.charge - EPS;
     if (ready && !wasReady && side === 'player') sim.events.emit('weapon.ready', { slot: index, weapon: slot.id, tick: sim.state.tick });
     if (!ready || slot.target === null || !fight || fight.over || fight.shots.length >= MAX_SHOTS) return;
+    // Nobody fires while they talk, and they hold their fire while offering to give up.
+    if (fight.phase !== 'battle' || (side === 'enemy' && fight.offer)) return;
     slot.charge = 0;
     const shot = { id: fight.nextShot++, side, slot: index, weapon: slot.id, room: slot.target, born: sim.state.tick, lands: sim.state.tick + Math.max(1, Math.round(weapon.flight * 20)) };
     fight.shots.push(shot);
     sim.events.emit('weapon.fired', { ...shot, tick: sim.state.tick });
+    if (side === 'enemy') slot.target = null; // their captain picks a fresh room for every shot
   });
 }
 
@@ -246,6 +486,7 @@ export function applyHit(sim, ship, roomId, weapon) {
   const effects = { system: 0, fire: false, breach: false, crew: [] };
   const { hull } = ship.state;
   hull.points = Math.max(0, hull.points - weapon.damage);
+  if (sim.state.fight && weapon.damage > 0) sim.state.fight.lastHarm = tick;
   room.hull = Math.max(0, room.hull - ROOM_HULL_PER_DAMAGE * weapon.damage);
 
   // The room's system loses a bar for each point of damage.
@@ -301,32 +542,61 @@ function land(sim, shot, { force = false } = {}) {
     target.state.shield.charge = Math.max(0, target.state.shield.charge - 1);
   } else effects = applyHit(sim, target, shot.room, weapon);
   sim.events.emit('shot.resolved', { id: shot.id, side: shot.side, slot: shot.slot, weapon: shot.weapon, room: shot.room, result, damage: result === 'hit' ? weapon.damage : 0, effects, tick: sim.state.tick });
-  if (fight && target.state.hull.points === 0 && !fight.over) {
-    fight.over = { outcome: shot.side === 'player' ? 'destroyed' : 'lost', tick: sim.state.tick };
-    sim.events.emit('fight.over', { ...fight.over, enemy: fight.enemy.ship });
-  }
+  if (fight && target.state.hull.points === 0) decide(sim, shot.side === 'player' ? 'destroyed' : 'lost');
 }
 
-/** Shields, weapons and shots in the air, for both ships. */
+function stepJump(ship, dt) {
+  if (canCharge(ship)) ship.state.jump = Math.min(JUMP_CHARGE, ship.state.jump + dt * ship.state.systems.engines.power);
+}
+
+/** The enemy captain's turn, and the rules that end a fight without a last shot. */
+function stepFight(sim, enemy, dt) {
+  const fight = sim.state.fight;
+  const { tick } = sim.state;
+  const plan = planOf(enemy.layout);
+  const { hull } = enemy.state;
+
+  if (fight.phase === 'hail' && tick >= fight.hailEnds) engage(sim, 'them');
+  if ((tick - fight.started) % Math.round(THINK_SECONDS * 20) === 0) think(enemy, sim, { fleeing: fight.fleeing });
+
+  if (fight.offer && tick >= fight.offer.expires) {
+    fight.offer = null;
+    sim.events.emit('fight.refused', { expired: true, tick });
+  }
+  const crewed = enemy.layout.crew.length > 0;
+  const alive = livingCrew(enemy).length > 0;
+  if (fight.phase === 'battle' && alive && hull.points > 0) {
+    if (plan.surrender && !fight.offered && hull.points <= plan.surrender.at * hull.max) makeOffer(sim);
+    if (plan.flee && !fight.fleeing && !fight.offer && hull.points <= plan.flee.at * hull.max) {
+      fight.fleeing = true;
+      sim.events.emit('fight.fleeing', { enemy: fight.enemy.ship, tick });
+    }
+  }
+  if (fight.fleeing) stepJump(enemy, dt);
+
+  if (crewed && !alive) decide(sim, 'crew-dead');
+  else if (fight.fleeing && enemy.state.jump >= JUMP_CHARGE && hasPilot(enemy)) decide(sim, 'fled');
+  else if (fight.phase === 'battle' && !fight.offer && tick - fight.lastHarm >= STALEMATE_SECONDS * 20) decide(sim, 'stalemate');
+}
+
+/** Shields, weapons and shots in the air for both ships, then the enemy's turn. */
 export function stepCombat(sim, dt) {
   const enemy = enemyOf(sim);
   stepShield(sim, dt);
   stepWeapons(sim, sim, 'player', dt);
   if (!enemy) return;
+  const fight = sim.state.fight;
+  if (!fight.over) stepJump(sim, dt);
   stepShield(enemy, dt);
   stepWeapons(sim, enemy, 'enemy', dt);
-  const fight = sim.state.fight;
   const flying = [];
   for (const shot of fight.shots) {
     if (fight.over) break; // it is decided: whatever was in the air is lost in the wreckage
     if (sim.state.tick >= shot.lands) land(sim, shot);
     else flying.push(shot);
   }
-  fight.shots = fight.over ? [] : flying;
-  if (fight.over) {
-    clearTargets(sim);
-    clearTargets(enemy);
-  }
+  if (!fight.over) fight.shots = flying;
+  if (!fight.over) stepFight(sim, enemy, dt);
 }
 
 // ---------- invariants ----------
@@ -337,6 +607,7 @@ export function checkCombatInvariants(ship, foe = null) {
   const { hull, shield, weapons, systems } = ship.state;
   if (!Number.isInteger(hull.points) || hull.points < 0 || hull.points > hull.max) problems.push(`hull is ${hull.points} of ${hull.max}`);
   if (!(shield.charge >= 0 && shield.charge <= systems.shields.level + EPS)) problems.push(`shield charge is ${shield.charge} with a level ${systems.shields.level} system`);
+  if (!(ship.state.jump >= 0 && ship.state.jump <= JUMP_CHARGE + EPS)) problems.push(`jump charge is ${ship.state.jump}`);
   if (weapons.length > ship.layout.hardpoints.length) problems.push(`${weapons.length} weapons on ${ship.layout.hardpoints.length} hardpoints`);
   weapons.forEach((slot, index) => {
     const weapon = ship.catalog.weapon(slot.id);
@@ -357,5 +628,11 @@ export function checkFightInvariants(sim) {
     if (shot.lands < sim.state.tick) problems.push(`shot ${shot.id} should have landed at tick ${shot.lands}`);
   }
   if (fight.over && fight.shots.length) problems.push('shots are still flying after the fight was decided');
+  if (fight.over && !OUTCOMES[fight.over.outcome]) problems.push(`the fight ended an unknown way: "${fight.over.outcome}"`);
+  if (!['hail', 'battle'].includes(fight.phase)) problems.push(`fight phase is "${fight.phase}"`);
+  if (fight.offer && !fight.offered) problems.push('an offer stands that was never made');
+  if (fight.offer && fight.over) problems.push('an offer stands after the fight was decided');
+  if (!fight.over && fight.phase === 'battle' && sim.state.tick - fight.lastHarm > STALEMATE_SECONDS * 20 && !fight.offer) problems.push('the stalemate rule did not end the fight');
+  if (!(sim.state.money >= 0) || !Number.isInteger(sim.state.money)) problems.push(`money is ${sim.state.money}`);
   return problems;
 }

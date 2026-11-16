@@ -915,6 +915,116 @@ async function hitTests(browser) {
   await context.close();
 }
 
+async function endingTests(browser) {
+  console.log('iPad: hails, surrenders, jumps and every ending');
+  const context = await browser.newContext({ ...devices['iPad (gen 7) landscape'] });
+  const page = await context.newPage();
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  await page.goto(`http://localhost:${PORT}/?seed=E2E-ENDINGS&autopause=0&debug=1`);
+  await page.waitForFunction(() => window.coldManifest?.machine.state === 'title');
+  await page.tap('#btn-ship');
+  await page.waitForFunction(() => window.coldManifest.machine.state === 'ship');
+  const shots = process.env.E2E_SHOTS;
+  const outcome = () => game(page, () => window.coldManifest.sim.state.fight?.over?.outcome ?? null);
+  const outcomeIs = (want) => page.waitForFunction((w) => window.coldManifest.sim.state.fight?.over?.outcome === w, want, { timeout: 4000 });
+  /** Open the debug sheet and start a fight with the skiff, ending any decided one first. */
+  const startSkiff = async () => {
+    if (await game(page, () => window.coldManifest.sim.state.fight?.over)) {
+      await page.tap('#btn-fight-leave');
+      await page.waitForFunction(() => window.coldManifest.sim.state.fight === null, null, { timeout: 2000 });
+    }
+    await page.tap('#btn-dbg-menu');
+    await page.tap('#btn-dbg-fight-salvager-skiff');
+    await page.waitForFunction(() => window.coldManifest.sim.state.fight?.enemy.ship === 'salvager-skiff' && !window.coldManifest.sim.state.fight.over, null, { timeout: 2000 });
+    assert.equal(await game(page, () => window.coldManifest.shipView.debug.sheet), null, 'the sheet closes after a press');
+  };
+  const debugEnd = async (action) => {
+    await page.tap('#btn-dbg-menu');
+    await page.tap(`#btn-dbg-end-${action}`);
+  };
+
+  await check('a hail: the card says what they want, with Talk, Pay and Open fire, and our guns hold', async () => {
+    await startSkiff();
+    await page.waitForSelector('#fightcall:not([hidden])', { timeout: 2000 });
+    assert.match(await page.textContent('#fightcall-title'), /Salvager skiff hails us/);
+    assert.match(await page.textContent('#btn-talk'), /Talk · 35%/);
+    assert.match(await page.textContent('#btn-bribe'), /Pay 80 · have 120/);
+    assert.equal(await page.isVisible('#btn-engage'), true);
+    assert.equal(await page.isVisible('#btn-accept'), false);
+    if (shots) await page.screenshot({ path: `${shots}/s2-3-hail-ipad.png` });
+  });
+
+  await check('every control is at least 44px tall and wide with the hail card up', async () => {
+    const small = await page.$$eval('.ship .btn', (nodes) => nodes.map((n) => ({ id: n.id, r: n.getBoundingClientRect() })).filter((n) => n.r.width > 0 && (n.r.width < 44 || n.r.height < 44)).map((n) => `${n.id} ${Math.round(n.r.width)}x${Math.round(n.r.height)}`));
+    assert.deepEqual(small, []);
+  });
+
+  await check('Pay: the money goes, the fight ends, and the bar says how', async () => {
+    await page.tap('#btn-bribe');
+    await outcomeIs('bribed');
+    assert.equal(await game(page, () => window.coldManifest.sim.state.money), 40);
+    await page.waitForFunction(() => /Paid off/.test(document.querySelector('#fight-foe').textContent), null, { timeout: 2000 });
+    assert.equal(await page.isHidden('#fightcall'), true);
+    assert.equal(await page.isVisible('#btn-fight-leave'), true);
+  });
+
+  await check('Talk: either they let us go, or the shooting starts and Talk is gone', async () => {
+    await startSkiff();
+    await page.waitForSelector('#btn-talk:not([hidden])', { timeout: 2000 });
+    await page.tap('#btn-talk');
+    await page.waitForFunction(() => window.coldManifest.sim.state.fight.over || window.coldManifest.sim.state.fight.phase === 'battle', null, { timeout: 2000 });
+    if ((await outcome()) === 'talked') assert.match(await page.textContent('#fight-foe'), /Talked down/);
+    else assert.equal(await page.isHidden('#fightcall'), true, 'no card once the shooting starts');
+  });
+
+  await check('a surrender: the card shows their terms; Accept takes them and ends it', async () => {
+    await startSkiff();
+    await page.tap('#btn-engage');
+    await debugEnd('surrender');
+    await page.waitForSelector('#btn-accept:not([hidden])', { timeout: 2000 });
+    assert.match(await page.textContent('#fightcall-title'), /surrenders/);
+    assert.match(await page.textContent('#fightcall-text'), /They offer/);
+    if (shots) await page.screenshot({ path: `${shots}/s2-3-surrender-ipad.png` });
+    await page.tap('#btn-accept');
+    await outcomeIs('surrendered');
+  });
+
+  await check('our jump: the button fills, and once ready a tap jumps us out', async () => {
+    await startSkiff();
+    await page.tap('#btn-engage');
+    assert.match(await page.textContent('#jump-note'), /%/);
+    await debugEnd('chargeJump');
+    await page.waitForFunction(() => document.querySelector('#jump-note').textContent === 'Ready', null, { timeout: 2000 });
+    await page.tap('#btn-jump');
+    await outcomeIs('escaped');
+    assert.match(await page.textContent('#fight-foe'), /We jumped away/);
+  });
+
+  for (const [action, want, label] of [['flee', 'fled', /They jumped away/], ['stalemate', 'stalemate', /Broke off/], ['killCrew', 'crew-dead', /Their crew is dead/]]) {
+    await check(`debug ${action}: the fight ends as "${want}"`, async () => {
+      await startSkiff();
+      await debugEnd(action);
+      await outcomeIs(want);
+      await page.waitForFunction((re) => new RegExp(re).test(document.querySelector('#fight-foe').textContent), label.source, { timeout: 2000 });
+    });
+  }
+
+  await check('debug cripple then a hit destroys them; sink us then a hit loses the ship', async () => {
+    await startSkiff();
+    await debugEnd('cripple');
+    await game(page, () => window.coldManifest.sim.enqueue({ type: 'debug.hit', at: 'them', room: 'reactor', weapon: 'pulse-laser', force: true }));
+    await outcomeIs('destroyed');
+    await startSkiff();
+    await debugEnd('sinkUs');
+    await page.tap('#btn-dbg-hit');
+    await outcomeIs('lost');
+  });
+
+  await check('no page errors', async () => assert.deepEqual(errors, []));
+  await context.close();
+}
+
 const server = await startServer();
 const browser = await chromium.launch(process.env.PW_CHROMIUM ? { executablePath: process.env.PW_CHROMIUM } : {});
 try {
@@ -923,6 +1033,7 @@ try {
   await voiceTests(browser);
   await fightTests(browser);
   await hitTests(browser);
+  await endingTests(browser);
 } finally {
   await browser.close();
   server.kill();

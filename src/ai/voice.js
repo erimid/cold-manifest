@@ -42,7 +42,12 @@ export const TRIGGERS = Object.freeze({
   'room.jettisoned': { category: 'hazard', priority: 4, ttl: 15 },
   'crew.died': { category: 'crew_death', priority: 5, ttl: 40, slots: crewName },
   'fight.started': { category: 'combat_start', priority: 4, ttl: 15 },
-  'fight.over': { category: 'combat_end', priority: 3, ttl: 20 },
+  'fight.won': { category: 'combat_end', priority: 3, ttl: 20 },
+  'fight.parted': { category: 'combat_end', priority: 3, ttl: 20 },
+  'fight.lost': { category: 'combat_end', priority: 5, ttl: 20 },
+  'fight.hail': { category: 'combat_start', priority: 3, ttl: 15 },
+  'fight.offer': { category: 'combat_progress', priority: 3, ttl: 12 },
+  'fight.fleeing': { category: 'combat_progress', priority: 3, ttl: 10 },
   'hull.hit': { category: 'hazard', priority: 4, ttl: 6, cooldown: 15 },
   'enemy.hull.hit': { category: 'combat_progress', priority: 2, ttl: 5, cooldown: 20, chance: 0.5 },
 });

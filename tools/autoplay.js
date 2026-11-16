@@ -19,7 +19,8 @@
 //              to save the ship, to see whether the tools work
 //   under fire shots land on the ship for two minutes and do what hits do
 //              (S2.2); the same bot then has three minutes to clean up
-//   gunnery    target practice on the drone (S2.1)
+//   duels      every enemy in turn against a bot that fights (S2.3; it replaced
+//              S2.1's target practice)
 //
 // Chaos: the bot sends three crew around the ship to deal with whatever is
 // worst, suits them up for breaches, works doors, airlocks and lights, routes
@@ -32,6 +33,7 @@ import { createContent } from '../src/engine/content.js';
 import { findBadNumbers, hashState } from '../src/engine/hash.js';
 import { createRng } from '../src/engine/rng.js';
 import { POWERED, used, supply } from '../src/sim/power.js';
+import { DEBUG_ACTIONS, OUTCOMES, chargeOf } from '../src/sim/combat.js';
 import { MANUAL_DOOR_SECONDS, TICK_RATE, TICK_SECONDS, checkInvariants, createSim } from '../src/sim/sim.js';
 import { writeFileSync } from 'node:fs';
 
@@ -71,6 +73,7 @@ function playRun(seed) {
   const clock = createClock({ sim, tickSeconds: TICK_SECONDS });
   // The bot's own dice, kept apart from the sim's so its choices are not part of the game state.
   const bot = createRng(`bot:${seed}`);
+  const endings = {}; // how chaos fights ended, by outcome
   const stats = { orders: 0, refused: 0, dropped: 0, doorMoves: 0, pauses: 0, powerMoves: 0, brownouts: 0, darkTicks: 0, fires: 0, spreads: 0, firesOut: 0, scorched: 0, jettisons: 0, airlessTicks: 0, moves: 0, arrivals: 0, blocked: 0, deaths: 0, firesFought: 0, patches: 0, repairs: 0, fights: 0, shots: 0, hits: 0, absorbed: 0, missed: 0, kills: 0 };
   const watch = stuckWatch(sim);
   const movingSince = new Map(); // door id -> tick its last order was applied
@@ -101,7 +104,10 @@ function playRun(seed) {
   sim.events.on('fight.started', () => (stats.fights += 1));
   sim.events.on('weapon.fired', () => (stats.shots += 1));
   sim.events.on('shot.resolved', ({ result }) => (stats[result === 'hit' ? 'hits' : result === 'shield' ? 'absorbed' : 'missed'] += 1));
-  sim.events.on('fight.over', ({ outcome }) => outcome === 'destroyed' && (stats.kills += 1));
+  sim.events.on('fight.over', ({ outcome }) => {
+    if (outcome === 'destroyed') stats.kills += 1;
+    endings[outcome] = (endings[outcome] ?? 0) + 1;
+  });
 
   /** Give an order the way a player would: only if the game would accept it. */
   function order(command) {
@@ -145,6 +151,11 @@ function playRun(seed) {
     const enemyRooms = Object.keys(fight.enemy.rooms);
     if (roll < 0.7) return order({ type: 'weapon.target', slot: bot.between(0, sim.state.weapons.length), room: bot.chance(0.85) ? bot.pick(enemyRooms) : null });
     if (roll < 0.9) return order({ type: 'power.add', system: bot.pick(['weapons', 'shields', 'engines']), delta: 1 });
+    if (roll < 0.93) {
+      // Answer whatever is being asked, push toward an ending, or try to leave.
+      const pick = bot.pick(['fight.talk', 'fight.bribe', 'fight.engage', 'fight.accept', 'fight.refuse', 'ship.jump', 'debug.combat', 'debug.combat']);
+      return order(pick === 'debug.combat' ? { type: pick, action: bot.pick(DEBUG_ACTIONS) } : { type: pick });
+    }
     if (roll < 0.97) {
       // A shot out of nowhere, on either ship, through the debug panel.
       return order({ type: 'debug.hit', at: bot.chance(0.5) ? 'us' : 'them', room: null, weapon: bot.pick(weapons).id, force: bot.chance(0.5) });
@@ -227,7 +238,7 @@ function playRun(seed) {
   const bad = findBadNumbers(sim.state);
   if (bad.length) throw new Error(`non-finite numbers at ${bad.join(', ')}`);
   stats.said = sim.state.ai.said;
-  return { ...stats, hash: hashState(sim.snapshot()) };
+  return { ...stats, endings, hash: hashState(sim.snapshot()) };
 }
 
 /** Fail if anyone with somewhere to be has not moved for too long. Call once a tick. */
@@ -359,57 +370,123 @@ function playScenario(seed, { incoming = false } = {}) {
   };
 }
 
-const GUNNERY_MINUTES = 5;
+const DUEL_MINUTES = 8;
+/** Rooms the duel bot keeps lit; the rest go dark to free a bar for shields (brief §6: lights draw power). */
+const DUEL_LIT = ['bridge', 'weapons', 'shields', 'engines', 'reactor'];
 
 /**
- * Target practice: a drone comes alongside, the bot strips power from what it
- * can spare, feeds the guns, and aims both at the drone. Returns how long the
- * drone lasted, or throws on any failure.
+ * A duel: one enemy alongside, and a bot that fights it. It answers a hail
+ * (mostly by shooting, sometimes by talking or paying), turns off the lights
+ * it does not need, feeds guns, shields and engines, aims at their shields
+ * and then their guns, keeps someone at the helm and sends the others to
+ * trouble, takes most surrenders, and jumps out when the hull is low. Returns
+ * how it ended, or throws on any failure, including a fight still going at
+ * the end (the stalemate rule should make that impossible).
  */
-function playGunnery(seed) {
+function playDuel(seed, enemyId) {
   const sim = createSim({ seed, ship, crew: roster, lines, weapons, ships });
-  const bot = createRng(`gunnery:${seed}`);
-  const end = GUNNERY_MINUTES * 60 * TICK_RATE;
-  const tally = { shots: 0, hit: 0, shield: 0, miss: 0 };
-  sim.events.on('weapon.fired', () => (tally.shots += 1));
-  sim.events.on('shot.resolved', ({ result }) => (tally[result] += 1));
+  const bot = createRng(`duel:${enemyId}:${seed}`);
+  const end = DUEL_MINUTES * 60 * TICK_RATE;
+  const watch = stuckWatch(sim);
+  const tally = { shots: 0, hit: 0, shield: 0, miss: 0, incoming: 0, incomingHits: 0, offers: 0, hail: null };
+  sim.events.on('shot.resolved', ({ side, result }) => {
+    if (side === 'player') tally[result] += 1;
+    else {
+      tally.incoming += 1;
+      if (result === 'hit') tally.incomingHits += 1;
+    }
+  });
+  sim.events.on('weapon.fired', ({ side }) => side === 'player' && (tally.shots += 1));
+  sim.events.on('fight.offer', () => (tally.offers += 1));
   const order = (command) => !sim.whyNot(command) && sim.enqueue(command);
-  const enemyId = bot.pick(sim.catalog.enemies);
-  const spare = bot.shuffle(['sensors', 'doors', 'medbay', 'engines', 'shields']);
+  const answer = bot.next(); // how it answers a hail: talk, pay, or shoot
+  const trouble = (room) => {
+    const r = sim.state.rooms[room.id];
+    const system = room.system ? sim.state.systems[room.system] : null;
+    return r.jettisoned ? 0 : r.fire * 3 + r.breach * 2 + (system && !system.lost ? system.damage * 0.5 : 0);
+  };
 
   while (sim.state.tick < end && !sim.state.fight?.over) {
-    if (sim.state.tick === TICK_RATE) order({ type: 'debug.fight', enemy: enemyId });
-    if (sim.state.fight && sim.state.tick % TICK_RATE === 0) {
-      // Feed the guns: take a bar from something it can spare, give it to weapons.
-      const guns = sim.state.systems.weapons;
-      if (guns.power < guns.level - guns.damage) {
-        if (sim.whyNot({ type: 'power.add', system: 'weapons', delta: 1 })) {
-          const from = spare.find((id) => sim.state.systems[id].power > 0);
-          if (from) order({ type: 'power.add', system: from, delta: -1 });
-        } else order({ type: 'power.add', system: 'weapons', delta: 1 });
+    const { tick } = sim.state;
+    if (tick === TICK_RATE) order({ type: 'debug.fight', enemy: enemyId });
+    const fight = sim.state.fight;
+    if (fight && tick % TICK_RATE === 0) {
+      const enemy = sim.state.fight.enemy;
+      if (fight.phase === 'hail' && tick > 2 * TICK_RATE) {
+        tally.hail = answer < 0.2 ? 'talk' : answer < 0.3 ? 'pay' : 'fight';
+        if (tally.hail === 'talk') order({ type: 'fight.talk' });
+        else if (tally.hail === 'pay' && !order({ type: 'fight.bribe' })) order({ type: 'fight.engage' });
+        else order({ type: 'fight.engage' });
       }
-      const rooms = Object.keys(sim.state.fight.enemy.rooms);
-      sim.state.weapons.forEach((slot, index) => {
-        if (slot.target === null) order({ type: 'weapon.target', slot: index, room: bot.pick(rooms) });
+      if (fight.offer) order({ type: bot.chance(0.75) ? 'fight.accept' : 'fight.refuse' });
+      // Lights out where nobody needs them, then guns, shields and engines.
+      for (const room of sim.layout.rooms) {
+        if (!DUEL_LIT.includes(room.id) && sim.state.rooms[room.id].lightsOn) order({ type: 'room.lights', room: room.id, on: false });
+      }
+      for (const id of ['sensors', 'doors', 'medbay', 'ai_core']) if (sim.state.systems[id].power > 0) order({ type: 'power.add', system: id, delta: -1 });
+      // One bar at a time, top of the list first: air, every gun, shields, then engines with what is left.
+      const want = ['life_support', 'weapons', 'shields', 'engines'].find((id) => !sim.whyNot({ type: 'power.add', system: id, delta: 1 }) || (sim.state.systems[id].power < sim.state.systems[id].level - sim.state.systems[id].damage && id !== 'engines'));
+      if (want) {
+        if (sim.whyNot({ type: 'power.add', system: want, delta: 1 }) && want !== 'engines' && sim.state.systems.engines.power > 1) order({ type: 'power.add', system: 'engines', delta: -1 });
+        else order({ type: 'power.add', system: want, delta: 1 });
+      }
+      // Their shields first; once those are broken, their guns.
+      const shieldsDown = enemy.systems.shields.absent || enemy.systems.shields.damage >= enemy.systems.shields.level;
+      const aim = shieldsDown && enemy.rooms.weapons ? 'weapons' : enemy.rooms.shields ? 'shields' : bot.pick(Object.keys(enemy.rooms));
+      // Hold fire until every powered gun is charged, then fire them together.
+      const guns = sim.state.weapons.map((slot, index) => ({ slot, index })).filter(({ slot }) => slot.powered);
+      const volley = guns.length > 0 && guns.every(({ index }) => chargeOf(sim, index) >= 1);
+      for (const { slot, index } of guns) {
+        const want = volley ? aim : null;
+        if (slot.target !== want) order({ type: 'weapon.target', slot: index, room: want });
+      }
+      // Get out if it is going badly.
+      if (sim.state.hull.points <= sim.state.hull.max * 0.3) order({ type: 'ship.jump' });
+      // Crew: the first stays at the helm, the others go to the worst trouble.
+      const crew = Object.values(sim.state.crew).filter((member) => member.alive);
+      const spots = sim.layout.rooms.filter((room) => trouble(room) > 0).sort((a, b) => trouble(b) - trouble(a));
+      crew.forEach((member, index) => {
+        if (member.path.length) return;
+        if (index === 0) {
+          if (member.room !== 'bridge') order({ type: 'crew.move', crew: member.id, room: 'bridge' });
+          return;
+        }
+        if (trouble(sim.layout.room(member.room)) > 0) return;
+        const spot = spots[(index - 1) % Math.max(1, spots.length)];
+        if (!spot) return;
+        const needsSuit = sim.state.rooms[spot.id].breach > 0;
+        if (member.suit !== needsSuit) order({ type: 'crew.suit', crew: member.id, on: needsSuit });
+        order({ type: 'crew.move', crew: member.id, room: spot.id });
       });
     }
     sim.step();
     const problems = checkInvariants(sim);
     if (problems.length) throw new Error(`tick ${sim.state.tick}: ${problems.join('; ')}`);
+    watch();
   }
   const bad = findBadNumbers(sim.state);
   if (bad.length) throw new Error(`non-finite numbers at ${bad.join(', ')}`);
   const over = sim.state.fight?.over ?? null;
-  if (!over) throw new Error(`the ${enemyId} was still there after ${GUNNERY_MINUTES} minutes (${sim.state.fight?.enemy.hull.points} hull left, ${tally.shots} shots)`);
+  if (!over) throw new Error(`the fight with the ${enemyId} was still going after ${DUEL_MINUTES} minutes`);
   if (tally.shots < tally.hit + tally.shield + tally.miss) throw new Error('more shots landed than were fired');
-  return { ...tally, outcome: over.outcome, seconds: (over.tick - sim.state.fight.started) / TICK_RATE, ourHull: sim.state.hull.points, hash: hashState(sim.snapshot()) };
+  return {
+    ...tally,
+    enemy: enemyId,
+    outcome: over.outcome,
+    seconds: (over.tick - sim.state.fight.started) / TICK_RATE,
+    ourHull: sim.state.hull.points,
+    alive: Object.values(sim.state.crew).filter((member) => member.alive).length,
+    hash: hashState(sim.snapshot()),
+  };
 }
 
 const started = performance.now();
 const failures = [];
 const totals = { orders: 0, refused: 0, dropped: 0, doorMoves: 0, pauses: 0, powerMoves: 0, brownouts: 0, darkTicks: 0, fires: 0, spreads: 0, firesOut: 0, scorched: 0, jettisons: 0, airlessTicks: 0, moves: 0, arrivals: 0, blocked: 0, deaths: 0, firesFought: 0, patches: 0, repairs: 0, fights: 0, shots: 0, hits: 0, absorbed: 0, missed: 0, kills: 0, said: 0 };
 const scenarios = [];
-const gunnery = [];
+const duels = [];
+const chaosEndings = {};
+const enemyIds = ships.filter((item) => item.enemy === true).map((item) => item.id);
 const underFire = [];
 for (let i = 1; i <= runs; i++) {
   const seed = `${baseSeed}-${i}`;
@@ -418,6 +495,7 @@ for (let i = 1; i <= runs; i++) {
     const second = playRun(seed);
     if (first.hash !== second.hash) failures.push({ seed, reason: `chaos replay mismatch (${first.hash} vs ${second.hash})` });
     for (const key of Object.keys(totals)) totals[key] += first[key];
+    for (const [outcome, n] of Object.entries(first.endings)) chaosEndings[outcome] = (chaosEndings[outcome] ?? 0) + n;
   } catch (err) {
     failures.push({ seed, reason: `chaos: ${err.message}` });
   }
@@ -437,13 +515,15 @@ for (let i = 1; i <= runs; i++) {
   } catch (err) {
     failures.push({ seed, reason: `under fire: ${err.message}` });
   }
-  try {
-    const first = playGunnery(seed);
-    const second = playGunnery(seed);
-    if (first.hash !== second.hash) failures.push({ seed, reason: `gunnery replay mismatch (${first.hash} vs ${second.hash})` });
-    gunnery.push(first);
-  } catch (err) {
-    failures.push({ seed, reason: `gunnery: ${err.message}` });
+  for (const enemyId of enemyIds) {
+    try {
+      const first = playDuel(seed, enemyId);
+      const second = playDuel(seed, enemyId);
+      if (first.hash !== second.hash) failures.push({ seed, reason: `duel with ${enemyId}: replay mismatch (${first.hash} vs ${second.hash})` });
+      duels.push(first);
+    } catch (err) {
+      failures.push({ seed, reason: `duel with ${enemyId}: ${err.message}` });
+    }
   }
 }
 const seconds = (performance.now() - started) / 1000;
@@ -455,7 +535,7 @@ const pct = (n, of) => (of ? `${Math.round((100 * n) / of)}%` : 'n/a');
 
 const out = [];
 out.push('Cold Manifest autoplay');
-out.push(`  runs:              ${runs} (seeds ${baseSeed}-1 to ${baseSeed}-${runs}), each played as chaos, as a hazard scenario, under fire and as target practice, each twice`);
+out.push(`  runs:              ${runs} (seeds ${baseSeed}-1 to ${baseSeed}-${runs}), each played as chaos, as a hazard scenario, under fire and as a duel with every enemy, each twice`);
 out.push(`  ship:              ${ship.name}, crew of ${roster.length}, ${lines.length} AI lines`);
 out.push(`  crashed or bad:    ${failures.length}`);
 out.push('');
@@ -468,6 +548,7 @@ out.push(`  crew per run:      ${per(totals.moves)} sent, ${per(totals.arrivals)
 out.push(`  crew work per run: ${per(totals.firesFought)} fires put out, ${per(totals.patches)} breaches patched, ${per(totals.repairs)} system bars repaired`);
 out.push(`  air:               rooms were unbreathable ${((100 * totals.airlessTicks) / (runs * ticks * ship.rooms.length)).toFixed(0)}% of room-time`);
 out.push(`  fights per run:    ${per(totals.fights)} started, ${per(totals.shots)} shots fired (${per(totals.hits)} hit, ${per(totals.absorbed)} stopped by shields, ${per(totals.missed)} missed), ${per(totals.kills)} enemies destroyed`);
+out.push(`  fight endings:     ${Object.keys(OUTCOMES).map((k) => `${OUTCOMES[k].toLowerCase()} ${chaosEndings[k] ?? 0}`).join(', ')}`);
 out.push(`  AI lines per run:  ${per(totals.said)} (about one every ${totals.said ? Math.round((runs * minutes * 60) / totals.said) : 0} seconds)`);
 out.push(`  pauses per run:    ${per(totals.pauses)} (state checked every paused frame)`);
 out.push('');
@@ -493,12 +574,23 @@ for (const s of underFire) for (const [cause, n] of Object.entries(s.deaths)) ca
 out.push(`  deaths by cause:   ${Object.entries(causes).sort((a, b) => b[1] - a[1]).map(([cause, n]) => `${cause} ${n}`).join(', ') || 'none'}`);
 out.push(`  hull left:         ${mean(underFire.map((s) => s.hull)).toFixed(1)} of ${ship.hullPoints} on average; ${mean(underFire.map((s) => s.damage)).toFixed(1)} system bars still broken at the end`);
 out.push('');
-const killTimes = gunnery.map((g) => g.seconds).sort((a, b) => a - b);
-const fired = gunnery.reduce((sum, g) => sum + g.shots, 0);
-out.push(`Target practice (up to ${GUNNERY_MINUTES} game minutes each): a gunnery drone alongside, and a bot feeding and aiming the guns`);
-out.push(`  completed:         ${gunnery.length} of ${runs}; drone destroyed in ${gunnery.filter((g) => g.outcome === 'destroyed').length}`);
-out.push(`  time to destroy:   median ${killTimes.length ? Math.round(killTimes[Math.floor(killTimes.length / 2)]) : 'n/a'}s, fastest ${killTimes.length ? Math.round(killTimes[0]) : 'n/a'}s, slowest ${killTimes.length ? Math.round(killTimes.at(-1)) : 'n/a'}s`);
-out.push(`  shots:             ${mean(gunnery.map((g) => g.shots)).toFixed(1)} per fight; ${pct(gunnery.reduce((n, g) => n + g.hit, 0), fired)} hit, ${pct(gunnery.reduce((n, g) => n + g.shield, 0), fired)} stopped by shields, ${pct(gunnery.reduce((n, g) => n + g.miss, 0), fired)} missed`);
+out.push(`Duels (up to ${DUEL_MINUTES} game minutes each): every enemy in turn, and a bot fighting it`);
+for (const enemyId of enemyIds) {
+  const mine = duels.filter((d) => d.enemy === enemyId);
+  const name = ships.find((item) => item.id === enemyId).name;
+  const counts = {};
+  for (const d of mine) counts[d.outcome] = (counts[d.outcome] ?? 0) + 1;
+  const times = mine.map((d) => d.seconds).sort((a, b) => a - b);
+  const fired = mine.reduce((n, d) => n + d.shots, 0);
+  const hails = {};
+  for (const d of mine) if (d.hail) hails[d.hail] = (hails[d.hail] ?? 0) + 1;
+  out.push(`  ${name}: ${mine.length} fights`);
+  out.push(`    endings:        ${Object.entries(counts).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${OUTCOMES[k].toLowerCase()} ${n}`).join(', ')}`);
+  out.push(`    length:         median ${times.length ? Math.round(times[Math.floor(times.length / 2)]) : 'n/a'}s, longest ${times.length ? Math.round(times.at(-1)) : 'n/a'}s`);
+  out.push(`    our shots:      ${mean(mine.map((d) => d.shots)).toFixed(1)} per fight; ${pct(mine.reduce((n, d) => n + d.hit, 0), fired)} hit, ${pct(mine.reduce((n, d) => n + d.shield, 0), fired)} stopped by shields, ${pct(mine.reduce((n, d) => n + d.miss, 0), fired)} missed`);
+  out.push(`    their shots:    ${mean(mine.map((d) => d.incoming)).toFixed(1)} per fight, ${mean(mine.map((d) => d.incomingHits)).toFixed(1)} hit; our hull at the end ${mean(mine.map((d) => d.ourHull)).toFixed(1)} of ${ship.hullPoints}, crew alive ${mean(mine.map((d) => d.alive)).toFixed(2)} of ${roster.length}`);
+  if (Object.keys(hails).length) out.push(`    hails answered: ${Object.entries(hails).map(([k, n]) => `${k} ${n}`).join(', ')}; ${mine.reduce((n, d) => n + d.offers, 0)} surrender offers made`);
+}
 out.push('');
 out.push(`  wall time:         ${seconds.toFixed(2)}s`);
 const verdict = failures.length

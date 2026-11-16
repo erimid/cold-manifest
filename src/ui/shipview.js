@@ -7,10 +7,12 @@
 //
 // In a fight (S2.1) the enemy ship stands in a column on the right and a
 // weapons bar appears above the status panel: tap a weapon, then a room on
-// their ship, to aim it. It all works while paused.
+// their ship, to aim it. It all works while paused. From S2.3 a card above the
+// weapons bar answers a hail (talk, pay, open fire) or a surrender (accept,
+// refuse), and the weapons bar has a Jump button that fills as the drive charges.
 
 import { pickTarget } from '../engine/hit.js';
-import { chargeOf, enemyOf, evasion, shieldLayers, shieldMax } from '../sim/combat.js';
+import { DEBUG_ACTIONS, OUTCOMES, OFFER_SECONDS, bribePrice, chargeOf, enemyOf, evasion, jumpCharge, offerText, shieldLayers, shieldMax, talkChance } from '../sim/combat.js';
 import { describeTask } from '../sim/crew.js';
 import { POWERED, aiCoreStatus, free, lightsDraw, litRooms, supply, usable } from '../sim/power.js';
 import { SPACE, SYSTEMS } from '../sim/systems.js';
@@ -46,6 +48,10 @@ function effectWords(effects) {
 const CHIP_TASKS = { walking: 'Walking', waiting: 'At a door', extinguish: 'Fighting fire', patch: 'Patching hull', repair: 'Repairing', unjam: 'Freeing door', idle: 'Standing by' };
 /** Start a sentence with a capital: the sim's reasons are written to follow "because". */
 const sentence = (text) => `${text.charAt(0).toUpperCase()}${text.slice(1)}.`;
+
+/** What each debug ending button is called (DEBUG_ACTIONS in combat.js). */
+const DEBUG_LABELS = { cripple: 'Cripple them', killCrew: 'Kill their crew', surrender: 'They surrender', flee: 'They run', chargeJump: 'Charge our jump', stalemate: 'Stalemate now', sinkUs: 'Sink us', money: '+100 money' };
+const seconds = (ticks) => `${Math.max(0, Math.ceil(ticks * TICK_SECONDS))}s`;
 
 /** How fast the AI's lines type out, in characters per second of real time, and how often a character blips. */
 const TYPE_SPEED = 45;
@@ -238,6 +244,32 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
     nodes.sheet.className = `panel sheet sheet--${sheet}`;
     if (sheet === 'log') drawLog();
     if (sheet === 'settings') drawSettings();
+    if (sheet === 'debug') drawDebug();
+  }
+
+  /** Debug only: start a fight with any enemy, and push one toward each ending (brief §7). */
+  function drawDebug() {
+    const fight = sim.state.fight;
+    const act = (fn) => () => {
+      fn();
+      openSheet('debug');
+    };
+    nodes.sheet.replaceChildren(
+      el('div', { class: 'stencil' }, 'Debug: fights'),
+      el(
+        'div',
+        { class: 'sheet__grid' },
+        sim.catalog.enemies.map((id) => button(`btn-dbg-fight-${id}`, sim.catalog.layout(id).name, act(() => order({ type: 'debug.fight', enemy: id })), 'btn--debug')),
+        fight && button('btn-dbg-away', 'Send away', act(() => order({ type: 'debug.fight', enemy: null })), 'btn--debug'),
+      ),
+      el('div', { class: 'stencil sheet__sub' }, 'Push the fight to an ending'),
+      el('div', { class: 'sheet__grid' }, DEBUG_ACTIONS.map((action) => button(`btn-dbg-end-${action}`, DEBUG_LABELS[action], act(() => order({ type: 'debug.combat', action })), 'btn--debug'))),
+      el('div', { class: 'stencil sheet__sub' }, 'View'),
+      el('div', { class: 'sheet__grid' }, button('btn-vents', showVents ? 'Hide vents' : 'Show vents', () => {
+        showVents = !showVents;
+        drawDebug();
+      }, 'btn--debug')),
+    );
   }
 
   // ---------- the power panel ----------
@@ -355,9 +387,54 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
     const own = sideStats('fight-own', 'Our hull');
     const theirs = sideStats('fight-foe', 'Their hull');
     const leave = button('btn-fight-leave', 'Leave it', () => order({ type: 'fight.dismiss' }));
-    fightBar = { tiles, own, theirs, leave };
-    fightBar.node = el('div', { class: 'panel fightbar', id: 'fightbar', hidden: true }, own.node, el('div', { class: 'fightbar__weapons' }, tiles.map((t) => t.node)), theirs.node, leave);
-    return fightBar.node;
+    const jumpLabel = el('span', {}, 'Jump');
+    const jumpNote = el('small', { id: 'jump-note' }, '');
+    const jump = el('button', { class: 'btn btn--small btn--jump', type: 'button', id: 'btn-jump', press: () => order({ type: 'ship.jump' }) }, jumpLabel, jumpNote);
+    fightBar = { tiles, own, theirs, leave, jump, jumpNote, call: buildCall() };
+    fightBar.node = el('div', { class: 'panel fightbar', id: 'fightbar', hidden: true }, own.node, el('div', { class: 'fightbar__weapons' }, tiles.map((t) => t.node)), theirs.node, jump, leave);
+    return el('div', { class: 'fightstack' }, fightBar.call.node, fightBar.node);
+  }
+
+  /** The card that answers a hail or a surrender. Its buttons are built once and shown or hidden. */
+  function buildCall() {
+    const title = el('span', { class: 'stencil fightcall__title', id: 'fightcall-title' });
+    const text = el('span', { class: 'fightcall__text', id: 'fightcall-text' });
+    const clockText = el('small', { class: 'fightcall__clock', id: 'fightcall-clock' });
+    const talk = button('btn-talk', 'Talk', () => order({ type: 'fight.talk' }));
+    const bribe = button('btn-bribe', 'Pay', () => order({ type: 'fight.bribe' }));
+    const engage = button('btn-engage', 'Open fire', () => order({ type: 'fight.engage' }), 'btn--danger');
+    const accept = button('btn-accept', 'Accept', () => order({ type: 'fight.accept' }));
+    const refuse = button('btn-refuse', 'Refuse', () => order({ type: 'fight.refuse' }), 'btn--danger');
+    const node = el('div', { class: 'panel fightcall', id: 'fightcall', hidden: true }, el('div', { class: 'fightcall__words' }, title, text, clockText), el('div', { class: 'fightcall__buttons' }, talk, bribe, engage, accept, refuse));
+    return { node, title, text, clock: clockText, talk, bribe, engage, accept, refuse };
+  }
+
+  function updateCall(fight, enemy) {
+    const call = fightBar.call;
+    const hailing = !fight.over && fight.phase === 'hail';
+    const offer = !fight.over ? fight.offer : null;
+    const show = hailing || Boolean(offer);
+    if (call.node.hidden !== !show) call.node.hidden = !show;
+    if (!show) return;
+    const name = enemy.layout.name;
+    const toggle = (node, on) => node.hidden !== !on && (node.hidden = !on);
+    toggle(call.talk, hailing && !fight.talked);
+    toggle(call.bribe, hailing);
+    toggle(call.engage, hailing);
+    toggle(call.accept, Boolean(offer));
+    toggle(call.refuse, Boolean(offer));
+    if (hailing) {
+      const hail = enemy.layout.tactics.hail;
+      setText(call.title, `${name} hails us`);
+      setText(call.text, `"${hail.text}"`);
+      setText(call.clock, `They open fire in ${seconds(fight.hailEnds - sim.state.tick)}`);
+      setText(call.talk, `Talk · ${percent(talkChance(sim))}`);
+      setText(call.bribe, `Pay ${bribePrice(sim)} · have ${sim.state.money}`);
+    } else {
+      setText(call.title, `${name} surrenders`);
+      setText(call.text, `They offer ${offerText(offer)}.`);
+      setText(call.clock, `Offer stands ${seconds(offer.expires - sim.state.tick)}`);
+    }
   }
 
   function updateSide(part, ship) {
@@ -375,12 +452,15 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
     if (!state.powered) return `No power: needs ${weapon.power}`;
     const aim = state.target ? enemyOf(sim)?.layout.room(state.target)?.name : null;
     if (chargeOf(sim, slot) < 1) return aim ? `Charging · ${aim}` : 'Charging · no target';
+    const fight = sim.state.fight;
+    if (fight && !fight.over && fight.phase === 'hail') return 'Holding fire: talking';
     return aim ? `Firing · ${aim}` : 'Ready · no target';
   }
 
   function updateFight() {
     const fight = sim.state.fight;
     if (fightBar.node.hidden !== !fight) fightBar.node.hidden = !fight;
+    if (!fight && !fightBar.call.node.hidden) fightBar.call.node.hidden = true;
     if (!fight) {
       // The fight is gone: let go of anything that pointed at it.
       if (selectedWeapon !== null) selectWeapon(null);
@@ -391,8 +471,14 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
     const enemy = enemyOf(sim);
     updateSide(fightBar.own, sim);
     updateSide(fightBar.theirs, enemy);
-    setText(fightBar.theirs.name, fight.over ? (fight.over.outcome === 'destroyed' ? 'Destroyed' : 'They won') : enemy.layout.name);
+    if (fight.fleeing && !fight.over) setText(fightBar.theirs.line, `Running · jump ${percent(jumpCharge(enemy))}`);
+    setText(fightBar.theirs.name, fight.over ? OUTCOMES[fight.over.outcome] : enemy.layout.name);
     fightBar.leave.hidden = !fight.over;
+    fightBar.jump.hidden = Boolean(fight.over);
+    const charged = jumpCharge(sim);
+    setText(fightBar.jumpNote, charged >= 1 ? 'Ready' : percent(charged));
+    fightBar.jump.classList.toggle('is-ready', charged >= 1);
+    updateCall(fight, enemy);
     for (const tile of fightBar.tiles) {
       const state = sim.state.weapons[tile.index];
       setText(tile.state, weaponStatus(tile.index));
@@ -900,10 +986,7 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
         debug && button('btn-dbg-step', 'Step', () => clock.stepOnce(), 'btn--debug'),
         debug && button('btn-dbg-hit', 'Hit us', () => order({ type: 'debug.hit', at: 'us', room: selected?.kind === 'room' ? selected.id : null, weapon: heaviestGun(), force: true }), 'btn--debug'),
         debug && button('btn-dbg-fight', 'Fight', () => order({ type: 'debug.fight', enemy: sim.state.fight ? null : sim.catalog.enemies[0] }), 'btn--debug'),
-        debug &&
-          button('btn-vents', 'Vents', () => {
-            showVents = !showVents;
-          }, 'btn--debug'),
+        debug && button('btn-dbg-menu', 'More', () => openSheet('debug'), 'btn--debug'),
         button('btn-back', 'Back', onBack),
       ),
     );
@@ -996,6 +1079,7 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
           charges: enemy.state.weapons.map((_, slot) => chargeOf(enemy, slot)),
           aimed: aimedBy(sim),
           inviting: selectedWeapon !== null && !sim.state.fight.over,
+          hostile: true,
         });
         drawFight(clock.alpha);
       }
