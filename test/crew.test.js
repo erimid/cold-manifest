@@ -141,7 +141,7 @@ test('a door locked in their face: they go round, or stop and say so', () => {
 test('with door control dark, crew still get through by hand, slowly', () => {
   const quick = newCrewedSim();
   const slow = newCrewedSim();
-  give(slow, { type: 'power.add', system: 'doors', delta: -1 });
+  give(slow, { type: 'station.stand', station: 'doors', down: true });
   for (const sim of [quick, slow]) give(sim, { type: 'crew.move', crew: 'ilse', room: 'weapons' });
   let quickAt = 0;
   let slowAt = 0;
@@ -171,13 +171,13 @@ test('a suit slows the walk', () => {
   assert.ok(Number.isFinite(slow) && slow > quick + 2 * TICK_RATE, `unsuited ${quick} ticks, suited ${slow}`);
 });
 
-test('the lifts are quick while door control has power, and cranked slowly by hand without it', () => {
+test('the lifts are quick while the lift motor runs, and cranked slowly by hand with it off', () => {
   const sim = newSim();
   // Bridge to the main hold: by the lift, two decks down.
   assert.deepEqual(doors(findRoute(sim, 'bridge', 'hold')), ['d_lift_bridge', 'd_lift_hold']);
   const timeTo = (dark) => {
     const s = newCrewedSim();
-    if (dark) give(s, { type: 'power.add', system: 'doors', delta: -s.state.systems.doors.power });
+    if (dark) give(s, { type: 'power.lift', on: false });
     give(s, { type: 'crew.move', crew: 'ilse', room: 'hold' });
     let cranked = false;
     for (let i = 0; i < 90 * TICK_RATE; i++) {
@@ -197,10 +197,10 @@ test('the lifts are quick while door control has power, and cranked slowly by ha
 test('engineers take the service crawlways; nobody else can', () => {
   const sim = newSim();
   const engineer = { engineer: true };
-  // Cargo to the brig: up and down the deck lifts on foot. With door control dark the
+  // Cargo to the brig: up and down the deck lifts on foot. With the lift motor off the
   // lifts are cranked by hand, and an engineer goes through the wall instead.
   assert.deepEqual(doors(findRoute(sim, 'cargo', 'brig', engineer)), ['d_cargo', 'd_brig']);
-  give(sim, { type: 'power.add', system: 'doors', delta: -sim.state.systems.doors.power });
+  give(sim, { type: 'power.lift', on: false });
   assert.ok(doors(findRoute(sim, 'cargo', 'brig')).every(Boolean), 'nobody else can crawl');
   assert.deepEqual(findRoute(sim, 'cargo', 'brig', engineer).map((s) => s.crawlway ?? s.door), ['c_cargo_brig']);
   // The creature's ducts are never theirs.
@@ -319,13 +319,12 @@ test('fire comes before the breach, the breach before the repair, and a jammed d
   assert.ok(m.alive);
 });
 
-test('a powered medbay heals whoever is resting in it', () => {
+test('a medbay that is stood to heals whoever is resting in it', () => {
   const sim = newSim();
   const hurt = putCrew(sim, 'hurt', 'medbay', { health: 0.4 });
   seconds(sim, 10);
-  assert.equal(hurt.health, 0.4, 'the medbay starts unpowered');
-  give(sim, { type: 'power.add', system: 'sensors', delta: -1 });
-  give(sim, { type: 'power.add', system: 'medbay', delta: 1 });
+  assert.equal(hurt.health, 0.4, 'the medbay starts stood down');
+  give(sim, { type: 'station.stand', station: 'medbay', down: false });
   assert.equal(describeTask(sim, hurt), 'Being patched up');
   seconds(sim, 30);
   assert.equal(hurt.health, 1);
@@ -334,7 +333,7 @@ test('a powered medbay heals whoever is resting in it', () => {
 test('the dead stay where they fell and take no orders', () => {
   const sim = newCrewedSim();
   // The whole ship loses its air while Okoro is on his way to the bridge.
-  give(sim, { type: 'crew.move', crew: 'okoro', room: 'bridge' }, { type: 'power.add', system: 'life_support', delta: -1 }, ...sim.layout.rooms.map((room) => ({ type: 'debug.room', room: room.id, set: { oxygen: 0 } })));
+  give(sim, { type: 'crew.move', crew: 'okoro', room: 'bridge' }, { type: 'station.stand', station: 'life_support', down: true }, ...sim.layout.rooms.map((room) => ({ type: 'debug.room', room: room.id, set: { oxygen: 0 } })));
   seconds(sim, 9);
   const okoro = sim.state.crew.okoro;
   assert.equal(okoro.alive, false);

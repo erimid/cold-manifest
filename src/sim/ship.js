@@ -11,7 +11,7 @@
 //   rooms   rectangles { id, name, x, y, w, h, kind?, system?, jettison? } in whole
 //           tiles. `jettison: true` marks a section that can be cut loose.
 //           `kind: "lift"` is a lift shaft: crew ride it fast while door control
-//           has power, and crank it slowly by hand while it has none (D-093).
+//           motor is switched on, and crank it slowly by hand while it is off (D-093, H.4).
 //           `hide: n` is how many of the crew can hide there (lockers, bunks,
 //           a gap behind the crates), and `compartment: n` how many crates fit
 //           under its deck plates, out of a boarding party's sight (H.2).
@@ -25,9 +25,8 @@
 //           `creature: true` marks a duct too narrow for anyone but the creature.
 //   hull    the outline of the ship as a list of [x, y] points
 //   crewStart  room ids where the starting crew stand, in roster order
-//   power   { reactor, lightsPerBar, systems: { id: { level, power } } }: the
-//           reactor's bars, how many lit rooms one bar carries, and each
-//           powered system's size and starting power (see power.js)
+//   power   { reactor, lightsPerBar, systems: { id: { level } }, down: [ids] }: the reactor's size, how
+//           many lit rooms load it as much as one system, each system's size, and which start stood down (power.js)
 //   hullPoints  how much punishment the ship takes before it breaks up
 //   hardpoints  [{ id, x, y }]: where weapons mount on the hull, 2 to 4
 //   weapons     ids from content/weapons/, fitted to the hardpoints in order

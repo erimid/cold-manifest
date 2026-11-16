@@ -33,7 +33,7 @@
 
 import { FIRE_CATCH_O2, FIRE_START, harmCrew } from './atmosphere.js';
 import { isHome } from './crew.js';
-import { bestSkillIn, skillFactor } from './roles.js';
+import { bars, rating, running } from './stations.js';
 import { stepPower } from './power.js';
 import { FLARE, NOISE, bang, flare } from './senses.js';
 import { contactView, findContact, pdShot, pdTarget, shotAt, struck } from './encounters.js';
@@ -70,8 +70,9 @@ export function stationPace(ship, room) {
 }
 const helmOf = (ship) => ship.layout.rooms.find((room) => room.kind === 'helm');
 /**
- * A jump needs a sensor fix (D-074): `seconds` of sensors with one bar and someone at the helm, quicker with more bars.
- * A hit on the ship knocks `hit` off the fix and each round we fire `shot`; with the sensors dark or the helm empty it drains away.
+ * A jump needs a sensor fix (D-074): `seconds` of the sensors and the helm both run by the book, quicker with a
+ * pilot at the helm or a trained hand on the sensors (their ratings multiply, stations.js).
+ * A hit on the ship knocks `hit` off the fix and each round we fire `shot`; with the sensors or the helm dark it drains away.
  */
 export const FIX = Object.freeze({ seconds: 25, hit: 0.25, shot: 0.1, drain: 0.05 });
 /** Money aboard at the start, until runs and contracts set it (Stage 3). */
@@ -85,8 +86,8 @@ export const START_MONEY = 120;
  * on top of the gun's own flash, and costs `standing` with the faction of a ship that answers to one.
  */
 export const GUN = Object.freeze({ hit: 0.85, floor: 0.35, far: 0.5, flightPerUnit: 0.08, fear: Object.freeze({ hit: 1, miss: 0.35 }), flare: 0.35, standing: -2 });
-/** Point defence (D-174): each charged burst downs what it is aimed at with chance `hit`, better with a gunner on the guns. */
-export const PD = Object.freeze({ hit: 0.45, gunner: 0.08 });
+/** Point defence (D-174): each charged burst downs what it is aimed at with chance `hit`, and `edge` more for each point the guns' station is rated over the book (a gunner on it), less under. */
+export const PD = Object.freeze({ hit: 0.45, edge: 0.6 });
 /** What a carrier's drones spit at our hull (S2.5, D-097; content/weapons/). */
 export const DRONE_WEAPON = 'drone-zap';
 
@@ -96,8 +97,8 @@ const TICKS = 20;
 
 // ---------- reading the ship ----------
 
-/** The most the capacitor can hold: one unit per bar routed to shields (none on a wreck). */
-export const capacity = (ship) => (ship.state.hull.points === 0 ? 0 : ship.state.systems.shields.power);
+/** The most the capacitor can hold: one unit per working bar of the shields while their station runs (none on a wreck). */
+export const capacity = (ship) => (ship.state.hull.points === 0 ? 0 : bars(ship, 'shields'));
 /** The capacitor as a fraction of what it can hold, 0 to 1. */
 export const capacitorOf = (ship) => (capacity(ship) > 0 ? Math.min(1, ship.state.shield.charge / capacity(ship)) : 0);
 /** Is a brace up? */
@@ -105,7 +106,7 @@ export const braced = (ship) => ship.state.shield.field > EPS;
 /** Why this ship cannot brace now, or null. */
 export function whyNoBrace(ship) {
   if (braced(ship)) return 'already braced';
-  if (capacity(ship) === 0) return 'the shields have no power';
+  if (capacity(ship) === 0) return 'the shields are dark';
   if (ship.state.shield.charge < BRACE.min - EPS) return `the capacitor is at ${Math.floor(capacitorOf(ship) * 100)}%: a brace needs a full bar`;
   return null;
 }
@@ -118,34 +119,26 @@ export const gunSlot = (ship) => ship.state.weapons.findIndex((_, index) => role
 /** The slot of the point-defence mount, or -1 if none is fitted. */
 export const pdSlot = (ship) => ship.state.weapons.findIndex((_, index) => roleOf(ship, index) === 'pd');
 
-/** Is one of the ship's own crew alive at the helm? A boarder standing there flies nothing. */
-export function hasPilot(ship) {
-  const helm = helmOf(ship);
-  return Boolean(helm) && Object.values(ship.state.crew).some((member) => member.alive && member.room === helm.id && isHome(ship, member));
-}
+/** Does anyone have the helm: a pilot posted to it, or Margo? A boarder standing there flies nothing. */
+export const hasPilot = (ship) => running(ship, 'helm');
 
-/** Which weapons have their bars, by slot: the weapons system's power is dealt out in hardpoint order. */
+/** Which mounts are live, by slot: all of them while the guns' station runs, none while it is dark. */
 export function weaponsPowered(ship) {
-  let budget = ship.state.systems.weapons.power;
-  return ship.state.weapons.map((slot) => {
-    const need = ship.catalog.weapon(slot.id).power;
-    if (need > budget) return false;
-    budget -= need;
-    return true;
-  });
+  const live = running(ship, 'weapons');
+  return ship.state.weapons.map(() => live);
 }
 
-/** Sensor bars working on a fix: a ship built without a sensors room has a fixed navigation set worth one. */
-const fixBars = (ship) => (ship.state.systems.sensors.absent ? 1 : ship.state.systems.sensors.power);
-/** Can this ship take a sensor fix right now? Sensors running and someone at the helm. */
+/** How well the sensors are working on a fix: their station's rating; a ship built without a sensors room has a fixed navigation set worth one. */
+const fixBars = (ship) => (ship.state.systems.sensors.absent ? 1 : rating(ship, 'sensors'));
+/** Can this ship take a sensor fix right now? Sensors running and the helm held. */
 export const canFix = (ship) => fixBars(ship) > 0 && hasPilot(ship);
 /** The sensor fix as a fraction, 0 to 1. */
 export const fixOf = (ship) => Math.min(1, ship.state.fix);
 /** Why this ship cannot jump this instant, or null: the fix, the helm, then the drive. */
 export function whyNoJump(ship) {
-  if (fixOf(ship) < 1) return fixBars(ship) > 0 ? `the sensor fix is at ${Math.floor(fixOf(ship) * 100)}%` : 'the sensors have no power to take a fix';
-  if (!hasPilot(ship)) return 'nobody is at the helm';
-  if (ship.state.systems.engines.power < 1) return 'the engines have no power';
+  if (fixOf(ship) < 1) return fixBars(ship) > 0 ? `the sensor fix is at ${Math.floor(fixOf(ship) * 100)}%` : 'the sensors are dark and cannot take a fix';
+  if (!hasPilot(ship)) return 'nobody has the helm';
+  if (!running(ship, 'engines')) return 'the engines are stood down';
   return null;
 }
 /** A ship's own crew, alive and aboard it. */
@@ -194,7 +187,7 @@ export function whyNoGun(sim, id) {
 export function newCombatState(layout, systems, catalog) {
   return {
     hull: { points: layout.hullPoints, max: layout.hullPoints },
-    shield: { charge: systems.shields.power, field: 0, until: 0 }, // a ship that starts with shields powered starts with the capacitor full
+    shield: { charge: (layout.power.down ?? []).includes('shields') || systems.shields.absent ? 0 : systems.shields.level, field: 0, until: 0 }, // a ship that starts with its shields stood to starts with the capacitor full
     // Heavy guns start with a full magazine; what is in the hold is for after.
     weapons: layout.weapons.map((id) => ({ id, charge: 0, target: null, powered: false, rounds: catalog.weapon(id).ammo?.magazine ?? null })),
     fix: 0, // the sensor fix a jump needs, 0 to 1 (FIX)
@@ -298,16 +291,16 @@ function stepShield(ship, dt) {
     shield.field = 0;
   }
   if (shield.field > 0) shield.charge = Math.min(shield.charge, max);
-  else shield.charge = shield.charge >= max ? max : Math.min(max, shield.charge + (dt * stationPace(ship, ship.layout.roomOfSystem('shields')) * ship.state.systems.shields.power) / CAPACITOR.seconds);
+  else shield.charge = shield.charge >= max ? max : Math.min(max, shield.charge + (dt * stationPace(ship, ship.layout.roomOfSystem('shields')) * max * rating(ship, 'shields')) / CAPACITOR.seconds);
 }
 
 /** Charge the mounts; point defence shoots whatever is coming, and the gun fires on its contact. */
 function stepWeapons(sim, dt) {
   const powered = weaponsPowered(sim);
   const gunRoom = sim.layout.roomOfSystem('weapons');
-  // A gunner in the weapons room charges the guns faster (D-131).
-  const skill = gunRoom ? bestSkillIn(sim, gunRoom.id, 'weapons') : 0;
-  const pace = stationPace(sim, gunRoom) * (gunRoom ? skillFactor(skill) : 1);
+  // The mounts come ready at the rating of the guns' station: a gunner on it charges them faster (D-131, H.4).
+  const run = rating(sim, 'weapons');
+  const pace = stationPace(sim, gunRoom) * run;
   const { tick } = sim.state;
   sim.state.weapons.forEach((slot, index) => {
     const weapon = sim.catalog.weapon(slot.id);
@@ -331,7 +324,7 @@ function stepWeapons(sim, dt) {
       const target = pdTarget(sim);
       if (!target) return;
       slot.charge = 0;
-      const hit = sim.rng.stream('combat').chance(Math.min(1, PD.hit + PD.gunner * skill) * stationPace(sim, gunRoom));
+      const hit = sim.rng.stream('combat').chance(Math.max(0, Math.min(1, PD.hit + PD.edge * (run - 1))) * stationPace(sim, gunRoom));
       if (gunRoom) bang(sim, gunRoom.id, NOISE.gun * 0.5);
       sim.events.emit('pd.fired', { slot: index, target: target.kind, id: target.item.id, hit, tick });
       if (hit) pdShot(sim, target);
@@ -459,7 +452,7 @@ function landOnContact(sim, shot) {
 export function stepFix(ship, dt, { ready = 'fix.ready', lost = 'fix.lost' } = {}) {
   const before = ship.state.fix;
   const helm = helmOf(ship);
-  const pilot = helm ? skillFactor(bestSkillIn(ship, helm.id, 'piloting')) : 1; // a pilot at the helm takes the fix faster (D-131)
+  const pilot = rating(ship, 'helm'); // a pilot at the helm takes the fix faster than Margo does (D-131, H.4)
   ship.state.fix = canFix(ship) ? Math.min(1, before + (dt * stationPace(ship, helm) * pilot * fixBars(ship)) / FIX.seconds) : Math.max(0, before - FIX.drain * dt);
   if (before < 1 && ship.state.fix >= 1) ship.events.emit(ready, { tick: ship.state.tick });
   if (before >= 1 && ship.state.fix < 1) ship.events.emit(lost, { tick: ship.state.tick });

@@ -17,12 +17,12 @@
 // Skills improving with use, traits, and the rest of S4.1 stay in Stage 4.
 
 export const ROLES = Object.freeze({
-  pilot: { name: 'Pilot', skill: 'piloting', post: 'helm', blurb: 'Takes the sensor fix faster at the helm.' },
-  engineer: { name: 'Engineer', skill: 'engineering', post: 'reactor', blurb: 'Repairs and patches faster, and fits through the crawlways.' },
-  gunner: { name: 'Gunner', skill: 'weapons', post: 'weapons', blurb: 'Guns charge faster with them in the weapons room.' },
-  medic: { name: 'Medic', skill: 'medicine', post: 'medbay', blurb: 'The medbay heals faster with them in it.' },
-  security: { name: 'Security', skill: 'combat', post: 'brig', blurb: 'Hits harder hand to hand.' },
-  quartermaster: { name: 'Quartermaster', skill: 'negotiation', post: 'hold', blurb: 'Talks better in a hail.' },
+  pilot: { name: 'Pilot', skill: 'piloting', post: 'helm', station: 'helm', blurb: 'Best at the helm: brings her round and takes the fix faster.' },
+  engineer: { name: 'Engineer', skill: 'engineering', post: 'reactor', station: 'reactor', blurb: 'Repairs and patches faster, fits through the crawlways, and can run the reactor hard.' },
+  gunner: { name: 'Gunner', skill: 'weapons', post: 'weapons', station: 'weapons', blurb: 'Best on the guns: they come ready faster.' },
+  medic: { name: 'Medic', skill: 'medicine', post: 'medbay', station: 'medbay', blurb: 'Best in the medbay: the hurt mend faster.' },
+  security: { name: 'Security', skill: 'combat', post: 'brig', station: 'doors', blurb: 'Hits harder hand to hand, and runs door control.' },
+  quartermaster: { name: 'Quartermaster', skill: 'negotiation', post: 'hold', station: null, blurb: 'Talks better in a hail. The spare hand: no station of their own.' },
 });
 export const ROLE_IDS = Object.freeze(Object.keys(ROLES));
 

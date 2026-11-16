@@ -19,7 +19,7 @@
         {
           "id": "sweep",
           "label": "Slow to a crawl and sweep ahead",
-          "requires": { "fact": "system.power", "system": "sensors", "gte": 1, "label": "Sensors powered" },
+          "requires": { "fact": "system.running", "system": "sensors", "label": "Sensors running" },
           "outcomes": [{ "text": "The sensors pick a way through, one clear pocket at a time. It costs the better part of a day you had been counting on.", "effects": [{ "do": "deadline", "add": -1 }] }]
         },
         {
@@ -152,7 +152,7 @@
         {
           "id": "listen",
           "label": "Hold off and listen first",
-          "requires": { "fact": "system.power", "system": "sensors", "gte": 2, "label": "Sensors at 2 bars" },
+          "requires": { "fact": "station.rating", "station": "sensors", "gt": 1, "label": "A trained hand on the sensors" },
           "hidden": true,
           "outcomes": [{ "text": "With the gain up there is a second signature tucked in behind the beacon: a small drive, banked low and warm. You leave it sitting there.", "effects": [{ "do": "intel", "text": "Somebody is using a false beacon near {place}." }] }]
         }
@@ -181,8 +181,8 @@
         },
         {
           "id": "scrubbers",
-          "label": "Pull a bar from life support and strip the scrubbers",
-          "requires": { "fact": "system.power", "system": "life_support", "gte": 1, "label": "Life support powered" },
+          "label": "Stop the air plant and strip the scrubbers",
+          "requires": { "fact": "system.running", "system": "life_support", "label": "Air plant running" },
           "outcomes": [{ "text": "The filter that comes out is the colour of the inside of a chimney. The new one is the last new one.", "effects": [{ "do": "flag", "name": "scrubbers_changed" }, { "do": "heal", "crew": "all", "amount": 0.05 }] }]
         }
       ]

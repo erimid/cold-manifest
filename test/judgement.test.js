@@ -166,10 +166,9 @@ test('jettisoning an occupied room is refused; cutting the air on someone in a b
   assert.equal(sim.state.rooms.quarters.jettisoned, false);
   give(sim, { type: 'captain.standDown' });
 
-  // Life support down to its last bar, and Dace standing in a holed room.
-  sim.state.systems.life_support.power = 1;
+  // The air plant about to be stood down, and Dace standing in a holed room.
   sim.state.rooms.reactor.breach = 0.5;
-  const cut = { type: 'power.add', system: 'life_support', delta: -1 };
+  const cut = { type: 'station.stand', station: 'life_support', down: true };
   assert.equal(riskOf(sim, cut).id, 'air_cut');
   assert.deepEqual(riskOf(sim, cut).crew, ['dace']);
   sim.state.crew.dace.suit = true;
@@ -188,7 +187,7 @@ test('jettisoning an occupied room is refused; cutting the air on someone in a b
 test('she cannot object to what she cannot see, or with her core dark, or with no voice at all', () => {
   // An airless room nobody can see into: she has nothing to say about walking into it. (A big fire lights its own room.)
   const blind = started();
-  blind.state.systems.sensors.power = 0;
+  blind.state.stations.sensors.down = true;
   blind.state.rooms.medbay.lightsOn = false;
   seconds(blind, 2);
   blind.state.rooms.medbay.oxygen = 0;
@@ -202,9 +201,9 @@ test('she cannot object to what she cannot see, or with her core dark, or with n
   blind.step();
   assert.equal(riskOf(blind, move).id, 'into_vacuum');
 
-  // No power to the AI core: the order goes straight through.
+  // The AI core stood down: the order goes straight through.
   const dark = started();
-  dark.state.systems.ai_core.power = 0;
+  dark.state.stations.ai_core.down = true;
   give(dark, OPEN_DORSAL);
   assert.equal(dark.state.ai.objection, null);
   assert.equal(dark.state.doors.airlock_dorsal.state, 'open');

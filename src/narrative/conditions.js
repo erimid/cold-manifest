@@ -35,6 +35,7 @@
 // Text can name the same things in braces: "{medic} goes across to {place}".
 
 import { FACTS } from './facts.js';
+import { STATION_IDS } from '../sim/stations.js';
 
 /** Ticks per second (DECISIONS D-002). */
 const TICKS = 20;
@@ -311,6 +312,7 @@ export function checkValue(value, type, env, what) {
   if (type === 'boolean') return typeof value === 'boolean' ? [] : [`${what} must be true or false`];
   if (type === 'number') return typeof value === 'number' && Number.isFinite(value) ? [] : [`${what} must be a number`];
   if (type === 'count') return Number.isInteger(value) && value >= 0 ? [] : [`${what} must be a whole number, 0 or more`];
+  if (type === 'station') return STATION_IDS.includes(value) ? [] : [`${what}: no station "${value}" (${STATION_IDS.join(', ')})`];
   if (type === 'skill') return SKILLS.includes(value) ? [] : [`${what}: no skill "${value}" (${SKILLS.join(', ')})`];
   if (type === 'string' || type === 'any') return typeof value === 'string' || type === 'any' ? [] : [`${what} must be text`];
   if (sets[type]) {

@@ -150,7 +150,8 @@ test('the check refuses what could never work, and says where', () => {
   assert.match(problemsOf({ fact: 'money', gte: 'lots' })[0], /must be a number/);
   assert.match(problemsOf({ fact: 'money', eq: 'lots' })[0], /"money" is a number/);
   assert.match(problemsOf({ fact: 'money', gte: 1, more: true })[0], /unknown key "more"/);
-  assert.match(problemsOf({ fact: 'system.power', system: 'warp', gte: 1 })[0], /no system "warp"/);
+  assert.match(problemsOf({ fact: 'system.running', system: 'warp' })[0], /no system "warp"/);
+  assert.match(problemsOf({ fact: 'station.rating', station: 'galley', gt: 1 })[0], /no station "galley"/);
   assert.match(problemsOf({ crew: { skill: 'cooking' } })[0], /no skill "cooking"/);
   assert.match(problemsOf({ crew: { id: 'petrov' } })[0], /no crew "petrov"/);
   assert.match(problemsOf({ crew: { trait: 'coward' } })[0], /no trait "coward"/);
@@ -178,7 +179,7 @@ test('text is checked against the names in reach', () => {
 
 test('every fact says what it needs and what it gives, and answers on a plain ship without throwing', () => {
   const sim = started();
-  const sample = { faction: 'receivers', room: 'medbay', crew: 'ilse', door: sim.layout.doors[0].id, system: 'sensors', skill: 'medicine', name: 'x', kind: 'ammo', field: 'type', event: 'none' };
+  const sample = { faction: 'receivers', room: 'medbay', crew: 'ilse', door: sim.layout.doors[0].id, system: 'sensors', station: 'helm', skill: 'medicine', name: 'x', kind: 'ammo', field: 'type', event: 'none' };
   for (const [id, fact] of Object.entries(FACTS)) {
     assert.ok(['number', 'boolean', 'string', 'any'].includes(fact.value), `${id} says what it gives`);
     const args = Object.fromEntries(Object.keys(fact.args ?? {}).map((name) => [name, sample[name]]));

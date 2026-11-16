@@ -20,7 +20,7 @@
 
 import { fillText, isFresh, match, memoryMatching, memoryText, vars } from '../narrative/conditions.js';
 import { crewEmit } from './atmosphere.js';
-import { lightsNeedPower } from './power.js';
+import { whyNoLights } from './power.js';
 import { DARK_ROOM, lightIn } from './senses.js';
 
 const TICKS = 20; // per second (DECISIONS D-002)
@@ -114,7 +114,7 @@ export function whyKeepLamp(ship, roomId) {
 /** Put the lamp on in the room they stand in, if there is power for it. */
 function lightLamp(ship, member) {
   const r = ship.state.rooms[member.room];
-  if (r.lightsOn || r.jettisoned || lightsNeedPower(ship)) return false;
+  if (r.lightsOn || r.jettisoned || whyNoLights(ship)) return false;
   r.lightsOn = true;
   ship.events.emit('room.lights', { room: member.room, on: true, reason: 'crew', by: member.id, tick: ship.state.tick });
   crewEmit(ship, member, 'crew.lit', { crew: member.id, room: member.room, tick: ship.state.tick });

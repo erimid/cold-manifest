@@ -12,6 +12,7 @@
 //
 // All the numbers here are starting values to tune by play (DECISIONS D-034).
 
+import { rating } from './stations.js';
 import { SPACE } from './systems.js';
 
 /** How fast air moves through a fully open interior door, an open airlock, and a full-size breach (tiles of air per second per unit of difference). */
@@ -63,8 +64,9 @@ function stepAir(sim, seconds) {
   const { rooms, doors, systems } = sim.state;
 
   // Life support, ship-wide.
-  const bars = systems.life_support.power;
-  const change = bars > 0 ? bars * O2_REFILL_PER_BAR * seconds : -O2_STALE * seconds;
+  // The air plant works at its station's rating (stations.js): by the book, a bar's worth for each working bar.
+  const plant = rating(sim, 'life_support') * (systems.life_support.level - systems.life_support.damage);
+  const change = plant > 0 ? plant * O2_REFILL_PER_BAR * seconds : -O2_STALE * seconds;
   for (const room of Object.values(rooms)) {
     if (!room.jettisoned) room.oxygen = clamp01(room.oxygen + change);
   }
@@ -270,7 +272,7 @@ export const ATMOSPHERE_COMMANDS = {
       if (room.system) {
         const system = sim.state.systems[room.system];
         const from = system.damage;
-        Object.assign(system, { damage: system.level, power: 0, lost: true });
+        Object.assign(system, { damage: system.level, lost: true });
         sim.events.emit('system.damage', { system: room.system, from, to: system.level, cause: 'jettison', tick: sim.state.tick });
       }
       const lost = [];

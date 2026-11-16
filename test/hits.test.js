@@ -3,8 +3,9 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { FIRE_START } from '../src/sim/atmosphere.js';
 import { HIT, ROOM_HULL_PER_DAMAGE, applyHit } from '../src/sim/combat.js';
-import { supply, used } from '../src/sim/power.js';
+import { supply } from '../src/sim/power.js';
 import { TICK_RATE, checkInvariants } from '../src/sim/sim.js';
+import { running } from '../src/sim/stations.js';
 import { content, newCrewedSim, newSim, newTalkingSim, putCrew } from './helpers.js';
 
 const steps = (sim, n) => {
@@ -23,15 +24,14 @@ function collect(sim, type) {
   return seen;
 }
 
-test('a hit breaks a bar of the room\'s system per point of damage, and the power lets go at once', () => {
+test('a hit breaks a bar of the room\'s system per point of damage, and a wholly broken system is dark at once', () => {
   const sim = newSim();
-  sim.state.systems.engines.power = 2;
-  sim.state.systems.sensors.power = 0;
+  assert.ok(running(sim, 'engines'));
   const damage = collect(sim, 'system.damage');
   const effects = applyHit(sim, sim, 'engines', SLUGS);
   assert.equal(effects.system, 2);
   assert.equal(sim.state.systems.engines.damage, 2);
-  assert.equal(sim.state.systems.engines.power, 0, 'no bar is left on a broken system');
+  assert.equal(running(sim, 'engines'), false, 'nothing runs on a broken system');
   assert.deepEqual(checkInvariants(sim), []);
   assert.deepEqual(damage.map((e) => [e.system, e.from, e.to, e.cause]), [['engines', 0, 2, 'hit']]);
   // A system that is already broken takes no more.
@@ -39,13 +39,16 @@ test('a hit breaks a bar of the room\'s system per point of damage, and the powe
   assert.equal(sim.state.systems.engines.damage, 2);
 });
 
-test('a hit on the reactor cuts supply and browns the ship out in the same tick', () => {
+test('hits on the reactor cut its bars, and at half of them it browns out to low output in the same tick', () => {
   const sim = newSim();
-  assert.equal(used(sim), supply(sim), 'the ship starts with every bar in use');
+  assert.equal(sim.state.power.output, 'steady');
   const brownouts = collect(sim, 'power.brownout');
   applyHit(sim, sim, 'reactor', SLUGS);
   assert.equal(supply(sim), 6);
-  assert.ok(used(sim) <= supply(sim));
+  assert.equal(sim.state.power.output, 'steady', 'she holds steady with most of her bars');
+  applyHit(sim, sim, 'reactor', SLUGS);
+  assert.equal(supply(sim), 4);
+  assert.equal(sim.state.power.output, 'low');
   assert.equal(brownouts.length, 1);
   assert.deepEqual(checkInvariants(sim), []);
 });
@@ -164,9 +167,7 @@ test('debug.hit lands a shot on us at once; force makes it a hit through a brace
   assert.match(sim.whyNot({ type: 'debug.hit', at: 'us', room: null, weapon: 'ray-gun' }), /no weapon/);
   assert.match(sim.whyNot({ type: 'debug.hit', at: 'sideways', room: null, weapon: 'slug-thrower' }), /at must be/);
   const resolved = collect(sim, 'shot.resolved');
-  sim.state.systems.shields.power = 2;
-  sim.state.systems.sensors.power = 0;
-  sim.state.systems.doors.power = 0;
+  sim.state.stations.shields.down = false;
   sim.state.shield.charge = 2;
   sim.enqueue({ type: 'debug.hit', at: 'us', room: 'weapons', weapon: 'slug-thrower', force: true });
   sim.step();

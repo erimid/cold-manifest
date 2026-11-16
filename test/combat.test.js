@@ -7,6 +7,7 @@ import { BRACE, CAPACITOR, DARK_STATION, FIX, braced, chargeOf, fixOf, gunSlot, 
 import { DARK_WALK } from '../src/sim/crew.js';
 import { airlockRooms, nearestAirlock } from '../src/sim/boarding.js';
 import { validateLayout } from '../src/sim/ship.js';
+import { running } from '../src/sim/stations.js';
 import { TICK_RATE, checkInvariants } from '../src/sim/sim.js';
 import { content, newCrewedSim, newSim, shipCopy } from './helpers.js';
 
@@ -19,22 +20,16 @@ const PD = content.require('weapons', 'point-defence');
 const SLUGS = content.require('weapons', 'slug-thrower');
 const LASER = content.require('weapons', 'pulse-laser');
 
-/** Move bars around so the weapons system has `bars` (dropping sensors, doors and engines as needed). */
-function powerWeapons(sim, bars) {
-  for (const system of ['sensors', 'doors', 'engines'].slice(0, bars)) sim.enqueue({ type: 'power.add', system, delta: -1 });
+/** Stand the guns to. */
+function powerWeapons(sim) {
+  sim.enqueue({ type: 'station.stand', station: 'weapons', down: false });
   sim.step();
-  for (let i = 0; i < bars; i++) sim.enqueue({ type: 'power.add', system: 'weapons', delta: 1 });
-  sim.step();
-  assert.equal(sim.state.systems.weapons.power, bars);
+  assert.ok(running(sim, 'weapons'));
 }
 
-/** Two bars on the shields, from the sensors and the doors. */
+/** Stand the shields to: both bars of them. */
 function powerShields(sim) {
-  sim.enqueue({ type: 'power.add', system: 'sensors', delta: -1 });
-  sim.enqueue({ type: 'power.add', system: 'doors', delta: -1 });
-  sim.step();
-  sim.enqueue({ type: 'power.add', system: 'shields', delta: 1 });
-  sim.enqueue({ type: 'power.add', system: 'shields', delta: 1 });
+  sim.enqueue({ type: 'station.stand', station: 'shields', down: false });
   sim.step();
 }
 
@@ -85,15 +80,10 @@ test('the Margin of Error starts with point defence and the slug thrower, a whol
   assert.deepEqual(sim.state.shots, []);
 });
 
-test('weapons take the system\'s bars in hardpoint order, charge with power and drain without', () => {
+test('the mounts are live while the guns are stood to, charge while they are and drain when they are not', () => {
   const sim = newSim();
-  assert.deepEqual(weaponsPowered(sim), [false, false]);
-  powerWeapons(sim, 1);
-  assert.deepEqual(weaponsPowered(sim), [true, false], 'one bar runs point defence, which is first on the hardpoints');
-  sim.enqueue({ type: 'power.add', system: 'doors', delta: -1 });
-  sim.step();
-  sim.enqueue({ type: 'power.add', system: 'weapons', delta: 1 });
-  sim.step();
+  assert.deepEqual(weaponsPowered(sim), [false, false], 'the guns start stood down');
+  powerWeapons(sim);
   assert.deepEqual(weaponsPowered(sim), [true, true]);
   const ready = [];
   sim.events.on('weapon.ready', (e) => ready.push(e.slot));
@@ -103,7 +93,7 @@ test('weapons take the system\'s bars in hardpoint order, charge with power and 
   assert.equal(chargeOf(sim, 1), 1, 'a charged gun with nothing to lay on holds its charge');
   assert.equal(chargeOf(sim, 0), 1, 'and so does point defence with nothing coming');
   assert.deepEqual(ready, [1], 'only the gun says it is ready');
-  sim.enqueue({ type: 'power.add', system: 'weapons', delta: -1 });
+  sim.enqueue({ type: 'station.stand', station: 'weapons', down: true });
   seconds(sim, SLUGS.charge / 4);
   assert.ok(chargeOf(sim, 1) < 0.6 && chargeOf(sim, 1) > 0.4, 'charge drains twice as fast as it built');
   assert.deepEqual(checkInvariants(sim), []);
@@ -116,16 +106,16 @@ test('the shield capacitor charges from its bars, a unit a bar, and holds no mor
   seconds(sim, CAPACITOR.seconds / 2);
   assert.ok(Math.abs(sim.state.shield.charge - 1) < 0.05, `two bars put in a unit in half the time: ${sim.state.shield.charge}`);
   seconds(sim, CAPACITOR.seconds * 3);
-  assert.equal(sim.state.shield.charge, 2, 'never more than the power routed');
+  assert.equal(sim.state.shield.charge, 2, 'never more than its bars hold');
   assert.equal(braced(sim), false, 'charge alone stops nothing');
-  sim.enqueue({ type: 'power.add', system: 'shields', delta: -1 });
+  sim.enqueue({ type: 'debug.system', system: 'shields', damage: 1 });
   steps(sim, 2);
   assert.equal(sim.state.shield.charge, 1, 'losing a bar loses what it held at once');
 });
 
 test('a brace works any time, soaks what lands for a few seconds, costs more against a gun that pierces, and lights the ship up', () => {
   const sim = newSim();
-  assert.match(sim.whyNot({ type: 'ship.brace' }), /no power/);
+  assert.match(sim.whyNot({ type: 'ship.brace' }), /dark/);
   powerShields(sim);
   sim.state.shield.charge = 0.6;
   assert.match(sim.whyNot({ type: 'ship.brace' }), /capacitor is at 30%/);
@@ -174,21 +164,21 @@ test('a hit that takes the last hull point wrecks the ship, and the run ends wit
   assert.equal(wrecked, 1);
   seconds(sim, 1);
   assert.deepEqual(sim.state.weapons.map((w) => w.powered), [false, false], 'a wreck fires nothing');
-  assert.equal(sim.whyNot({ type: 'ship.brace' }), 'the shields have no power');
+  assert.equal(sim.whyNot({ type: 'ship.brace' }), 'the shields are dark');
 });
 
 test('nothing in the guns moves while the clock is stopped, and orders given then wait', () => {
   const sim = newSim();
-  powerWeapons(sim, 2);
+  powerWeapons(sim);
   seconds(sim, 2);
   const before = hashState({ weapons: sim.state.weapons, shield: sim.state.shield, shots: sim.state.shots });
-  sim.enqueue({ type: 'power.add', system: 'weapons', delta: -1 }); // "paused": no step is taken
+  sim.enqueue({ type: 'station.stand', station: 'weapons', down: true }); // "paused": no step is taken
   assert.equal(hashState({ weapons: sim.state.weapons, shield: sim.state.shield, shots: sim.state.shots }), before);
   sim.step();
-  assert.equal(sim.state.systems.weapons.power, 1);
+  assert.equal(running(sim, 'weapons'), false);
 });
 
-test('a jump needs a sensor fix, a pilot at the helm and a bar on the engines; a hit shakes the fix', () => {
+test('a jump needs a sensor fix, the helm held and the engines running; a hit shakes the fix', () => {
   // The fix itself builds while a course is plotted (sector.test.js); here, what a jump asks of the ship.
   const sim = newCrewedSim('fix');
   const go = (command) => {
@@ -198,29 +188,33 @@ test('a jump needs a sensor fix, a pilot at the helm and a bar on the engines; a
   assert.match(whyNoJump(sim), /sensor fix is at 0%/);
   sim.state.fix = 1;
   assert.equal(whyNoJump(sim), null);
+  // With the pilot sent away Margo has the helm; with Margo down as well, nobody has.
   const pilot = Object.values(sim.state.crew).find((m) => m.room === 'bridge');
   go({ type: 'crew.move', crew: pilot.id, room: 'medbay' });
   seconds(sim, 6);
-  assert.match(whyNoJump(sim), /nobody is at the helm/);
+  assert.equal(whyNoJump(sim), null, 'Margo flies her');
+  go({ type: 'station.stand', station: 'ai_core', down: true });
+  assert.match(whyNoJump(sim), /sensors are dark|nobody has the helm/);
+  go({ type: 'station.stand', station: 'ai_core', down: false });
+  go({ type: 'station.stand', station: 'helm', down: true });
+  assert.match(whyNoJump(sim), /nobody has the helm/);
+  go({ type: 'station.stand', station: 'helm', down: false });
   go({ type: 'crew.move', crew: pilot.id, room: 'bridge' });
   seconds(sim, 10);
-  go({ type: 'power.add', system: 'engines', delta: -1 });
-  assert.match(whyNoJump(sim), /engines have no power/);
-  go({ type: 'power.add', system: 'engines', delta: 1 });
+  go({ type: 'station.stand', station: 'engines', down: true });
+  assert.match(whyNoJump(sim), /engines are stood down/);
+  go({ type: 'station.stand', station: 'engines', down: false });
   go({ type: 'debug.hit', at: 'us', room: 'cargo', weapon: 'pulse-laser', force: true });
   assert.ok(Math.abs(fixOf(sim) - (1 - FIX.hit)) < 0.01, 'a hit on us costs a quarter of it');
   sim.state.fix = 0;
-  go({ type: 'power.add', system: 'sensors', delta: -1 });
-  assert.match(whyNoJump(sim), /sensors have no power to take a fix/);
+  go({ type: 'station.stand', station: 'sensors', down: true });
+  assert.match(whyNoJump(sim), /sensors are dark/);
 });
 
 test('running dark costs: a gun on a dark gun deck charges slower, and crew feel their way through an unlit room', () => {
   const charged = (dark) => {
     const sim = newCrewedSim('dark-gun');
-    for (const system of ['sensors', 'doors']) sim.enqueue({ type: 'power.add', system, delta: -1 });
-    sim.step();
-    sim.enqueue({ type: 'power.add', system: 'weapons', delta: 1 });
-    sim.enqueue({ type: 'power.add', system: 'weapons', delta: 1 });
+    sim.enqueue({ type: 'station.stand', station: 'weapons', down: false });
     if (dark) sim.enqueue({ type: 'lights.all', on: false });
     seconds(sim, 2);
     assert.equal(stationPace(sim, sim.layout.roomOfSystem('weapons')), dark ? DARK_STATION : 1);

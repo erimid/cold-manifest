@@ -12,6 +12,7 @@ import { recall } from '../src/sim/memory.js';
 import { neighbours, nodeOf, whyNoCourseJump } from '../src/sim/sector.js';
 import { checkInvariants, createSim } from '../src/sim/sim.js';
 import { readContentFiles } from '../tools/lib/load-content.js';
+import { spotIn } from '../src/sim/crew.js';
 import { CATALOG, CREW, EVENTS, SHIP, content } from './helpers.js';
 
 const REACH = content.require('sectors', 'the-reach');
@@ -110,12 +111,12 @@ test('a choice shows who meets its requirement, is locked with what is missing, 
   const byId = () => Object.fromEntries(eventView(sim).choices.map((choice) => [choice.id, choice]));
   assert.deepEqual(byId()['press-on'], { id: 'press-on', label: 'Hold the course and take what comes', tag: null, available: true });
   assert.equal(byId().thread.tag, '[Ilse, Piloting]');
-  assert.equal(byId().sweep.tag, '[Sensors powered]');
+  assert.equal(byId().sweep.tag, '[Sensors running]');
   assert.equal(whyNoChoice(sim, 'thread'), null);
   sim.state.crew.ilse.alive = false;
-  sim.state.systems.sensors.power = 0;
+  sim.state.stations.sensors.down = true;
   assert.deepEqual(byId().thread, { id: 'thread', label: 'Let the best hands aboard fly it', tag: '[Needs Piloting 2]', available: false });
-  assert.equal(byId().sweep.tag, '[Needs Sensors powered]');
+  assert.equal(byId().sweep.tag, '[Needs Sensors running]');
   assert.match(whyNoChoice(sim, 'thread'), /not open to us/);
   assert.throws(() => sim.enqueue({ type: 'event.choose', choice: 'thread' }), /not open to us/);
   assert.match(whyNoChoice(sim, 'dance'), /no choice "dance"/);
@@ -123,8 +124,11 @@ test('a choice shows who meets its requirement, is locked with what is missing, 
   give(sim, { type: 'debug.event', event: 'empty.beacon' });
   view = eventView(sim);
   assert.ok(!view.choices.some((choice) => choice.id === 'listen'), 'hidden until the sensors can do it');
-  sim.state.systems.sensors.power = 2;
-  assert.equal(byId().listen.tag, '[Sensors at 2 bars]');
+  // A trained hand posted to the sensors and on them.
+  sim.state.stations.sensors.down = false;
+  const at = spotIn(sim.layout.room('sensors'), sim.state.crew.vesna.index);
+  Object.assign(sim.state.crew.vesna, { post: 'sensors', skills: { piloting: 2 }, room: 'sensors', x: at.x, y: at.y, px: at.x, py: at.y, path: [], goal: null, task: 'idle' });
+  assert.equal(byId().listen.tag, '[A trained hand on the sensors]');
 });
 
 test('a choice is answered once, its outcome is told, and the event is put away', () => {

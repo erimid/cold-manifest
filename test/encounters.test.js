@@ -6,7 +6,9 @@ import { test } from 'node:test';
 
 import { validateContent } from '../src/engine/content-schema.js';
 import { ALONGSIDE, ENDINGS, HELM, SCOPE, STATES, bluffChance, contactView, errorOf, returnQuality, scopeView, speedOf, validateEncounter } from '../src/sim/encounters.js';
-import { signature } from '../src/sim/senses.js';
+import { spotIn } from '../src/sim/crew.js';
+import { THRUST, signature } from '../src/sim/senses.js';
+import { operatorOf } from '../src/sim/stations.js';
 import { TICK_RATE, checkInvariants, createSim } from '../src/sim/sim.js';
 import { readContentFiles } from '../tools/lib/load-content.js';
 import { CATALOG, CREW, SHIP, content } from './helpers.js';
@@ -29,16 +31,19 @@ function seconds(sim, n) {
     assert.deepEqual(problems, [], `tick ${sim.state.tick}`);
   }
 }
-/** Every lamp off, and the sensors and engines powered down: as quiet as she gets with air to breathe. */
+/** Every lamp off, and the sensors and engines stood down: as quiet as she gets with air to breathe. */
 function goDark(sim) {
   if (!sim.whyNot({ type: 'lights.all', on: false })) go(sim, { type: 'lights.all', on: false });
-  for (const system of ['sensors', 'engines']) while (sim.state.systems[system].power > 0) go(sim, { type: 'power.add', system, delta: -1 });
+  for (const station of ['sensors', 'engines']) if (!sim.state.stations[station].down) go(sim, { type: 'station.stand', station, down: true });
 }
-/** Every bar the engines can take, paid for by the sensors. */
+/** All the drive has: the engineer on the engines station, not Margo. */
 function fullEngines(sim) {
-  go(sim, { type: 'power.add', system: 'sensors', delta: -1 });
-  go(sim, { type: 'power.add', system: 'engines', delta: 1 });
-  assert.equal(sim.state.systems.engines.power, sim.state.systems.engines.level);
+  if (sim.state.stations.engines.down) go(sim, { type: 'station.stand', station: 'engines', down: false });
+  const dace = sim.state.crew.dace;
+  const at = spotIn(sim.layout.room('engines'), dace.index);
+  Object.assign(dace, { post: 'engines', room: 'engines', x: at.x, y: at.y, px: at.x, py: at.y, path: [], goal: null, task: 'idle' });
+  sim.step();
+  assert.equal(operatorOf(sim, 'engines')?.id, 'dace');
 }
 /** Run until the encounter ends (or `limit` seconds pass) and say how: { outcome, seconds, heard }. */
 function play(sim, limit = 900, each = null) {
@@ -90,26 +95,26 @@ test('every encounter in content/encounters is sound, and the checker says what 
 
 // ---------- the helm ----------
 
-test('the helm: she comes round with a pilot and power, the drive pushes her, and cutting it leaves her drifting', () => {
+test('the helm: she comes round with the helm held and the engines up, the drive pushes her, and cutting it leaves her drifting', () => {
   const sim = quietSim('helm');
   seconds(sim, 1);
   assert.equal(speedOf(sim), 0);
-  assert.equal(signature(sim).burn, 0, 'powered engines are not a burning drive');
+  assert.equal(signature(sim).burn, 0, 'running engines are not a burning drive');
 
   go(sim, { type: 'helm.heading', heading: 180 });
   go(sim, { type: 'helm.burn', on: true });
   seconds(sim, 3);
   assert.ok(sim.state.helm.heading > 90 && sim.state.helm.heading < 180, `coming round: ${sim.state.helm.heading}`);
-  assert.equal(signature(sim).burn, 0.5, 'one bar of two on a lit drive');
+  assert.equal(signature(sim).burn, THRUST, 'Margo runs the drive by the book');
   seconds(sim, 40);
   assert.equal(sim.state.helm.heading, 180);
-  const half = speedOf(sim);
-  assert.ok(Math.abs(half - HELM.speed * 0.5) < 1e-6, `half the engines, half the speed: ${half}`);
+  const book = speedOf(sim);
+  assert.ok(Math.abs(book - HELM.speed * THRUST) < 1e-6, `by the book: ${book}`);
 
-  // More power, more speed.
+  // An engineer on the engines gets more out of them.
   fullEngines(sim);
   seconds(sim, 30);
-  assert.ok(Math.abs(speedOf(sim) - HELM.speed) < 1e-6, `flat out: ${speedOf(sim)}`);
+  assert.ok(speedOf(sim) > book * 1.3 && speedOf(sim) <= HELM.speed + 1e-9, `flat out: ${speedOf(sim)}`);
 
   // Cut the drive: she drifts on exactly as she was going, and gives off no burn.
   go(sim, { type: 'helm.burn', on: false });
@@ -120,11 +125,13 @@ test('the helm: she comes round with a pilot and power, the drive pushes her, an
   assert.equal(signature(sim).burn, 0);
   assert.equal(scopeView(sim).burning, false);
 
-  // Nobody at the helm: she will not come round, and the drive cannot be lit.
+  // The pilot sent below, Margo has the helm. With Margo down too nobody has: she will not come round, and the drive cannot be lit.
   go(sim, { type: 'crew.move', crew: 'ilse', room: 'quarters' });
   seconds(sim, 15);
-  assert.match(sim.whyNot({ type: 'helm.heading', heading: 0 }), /nobody is at the helm/);
-  assert.match(sim.whyNot({ type: 'helm.burn', on: true }), /nobody is at the helm/);
+  assert.equal(sim.whyNot({ type: 'helm.heading', heading: 0 }), null);
+  go(sim, { type: 'station.stand', station: 'ai_core', down: true });
+  assert.match(sim.whyNot({ type: 'helm.heading', heading: 0 }), /nobody has the helm/);
+  assert.match(sim.whyNot({ type: 'helm.burn', on: true }), /nobody has the helm/);
 });
 
 // ---------- the scope ----------
@@ -137,26 +144,26 @@ test('a return is worse from far off and better with the sensors up and someone 
     spawn(sim, 'patrol-cutter', { range, bearing: 40 });
     return returnQuality(sim, first(sim));
   };
-  const sensorsOff = (sim) => go(sim, { type: 'power.add', system: 'sensors', delta: -1 });
-  const manned = (sim) => {
-    go(sim, { type: 'crew.move', crew: 'okoro', room: 'sensors' });
-    seconds(sim, 20);
-    assert.equal(sim.state.crew.okoro.room, 'sensors');
+  const sensorsOff = (sim) => go(sim, { type: 'station.stand', station: 'sensors', down: true });
+  const posted = (who) => (sim) => {
+    go(sim, { type: 'crew.post', crew: who, station: 'sensors' });
+    seconds(sim, 25);
+    assert.equal(operatorOf(sim, 'sensors')?.id, who);
   };
   const near = quality(40);
   const far = quality(95);
   assert.ok(far < near, `further is worse: ${far} against ${near}`);
   assert.ok(errorOf(far).bearing > errorOf(near).bearing && errorOf(far).range > errorOf(near).range, 'and the error grows with it');
-  assert.ok(quality(95, sensorsOff) < far, 'sensors without power read worse');
-  assert.ok(quality(95, manned) > far, 'someone in the sensors room reads better');
+  assert.ok(quality(95, sensorsOff) < far, 'sensors stood down read worse');
+  assert.ok(quality(95, posted('ilse')) > far, 'a pilot on the sensors reads better than Margo');
+  assert.ok(quality(95, posted('okoro')) < far, 'and an untrained hand worse');
   assert.equal(quality(SCOPE.reach + 10), 0, 'past the reach of the scope there is nothing');
 });
 
 test('the scope shows a contact as a bearing and a range with an error the truth is always inside, and names it once it can', () => {
   const sim = quietSim('scope-view');
   seconds(sim, 1);
-  go(sim, { type: 'power.add', system: 'sensors', delta: -1 }); // passive: a poor picture
-  goDark(sim);
+  goDark(sim); // the sensors stood down: passive, a poor picture
   const heard = [];
   for (const type of ['contact.sighted', 'contact.identified']) sim.events.on(type, (event) => heard.push([type, event.label]));
   spawn(sim, 'patrol-cutter', { range: 90, bearing: 300, miss: 60 });
@@ -379,9 +386,8 @@ test('slipped with a decoy: a raider stops for a crate put out of the airlock, a
       if (flare && t === 5) s.enqueue({ type: 'decoy.flare' });
       if (t === 35) {
         s.enqueue({ type: 'helm.burn', on: false });
-        s.enqueue({ type: 'power.add', system: 'engines', delta: -1 });
+        s.enqueue({ type: 'station.stand', station: 'engines', down: true });
       }
-      if (t === 36) s.enqueue({ type: 'power.add', system: 'engines', delta: -1 });
     });
   };
   assert.equal(evade(false).outcome, 'docked');

@@ -93,39 +93,16 @@
         "reactor": 8,
         "lightsPerBar": 6,
         "systems": {
-          "shields": {
-            "level": 2,
-            "power": 0
-          },
-          "engines": {
-            "level": 2,
-            "power": 1
-          },
-          "weapons": {
-            "level": 3,
-            "power": 0
-          },
-          "life_support": {
-            "level": 1,
-            "power": 1
-          },
-          "doors": {
-            "level": 1,
-            "power": 1
-          },
-          "sensors": {
-            "level": 1,
-            "power": 1
-          },
-          "medbay": {
-            "level": 1,
-            "power": 0
-          },
-          "ai_core": {
-            "level": 1,
-            "power": 1
-          }
-        }
+          "shields": { "level": 2 },
+          "engines": { "level": 2 },
+          "weapons": { "level": 3 },
+          "life_support": { "level": 1 },
+          "doors": { "level": 1 },
+          "sensors": { "level": 1 },
+          "medbay": { "level": 1 },
+          "ai_core": { "level": 1 }
+        },
+        "down": ["shields", "weapons", "medbay"]
       },
       "hull": [[-0.3, -0.3], [31.3, -0.3], [32.8, 2.0], [33.3, 3.5], [32.6, 5.2], [31.3, 6.3], [29.3, 6.3], [29.3, 12.3], [3.7, 12.3], [3.7, 9.3], [-0.3, 9.3]]
     }
