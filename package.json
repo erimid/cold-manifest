@@ -1,6 +1,6 @@
 {
   "name": "cold-manifest",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "description": "Cold Manifest: a crew-management spaceship roguelite for the browser.",
@@ -11,7 +11,7 @@
     "test": "node --test \"test/**/*.test.js\"",
     "check": "node tools/content-check.js",
     "autoplay": "node tools/autoplay.js",
-    "test:e2e": "node test/e2e/input.e2e.js"
+    "test:e2e": "node test/e2e/ship.e2e.js"
   },
   "engines": {
     "node": ">=22"

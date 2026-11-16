@@ -19,7 +19,7 @@ function typeOut(node, text, msPerChar = 28) {
   return () => clearInterval(timer);
 }
 
-export function renderTitle(root, { greeting, seed, version, contentSummary, onNewRun, onHub, onTestBay }) {
+export function renderTitle(root, { greeting, seed, version, contentSummary, onNewRun, onHub, onShip }) {
   const line = el('p', { class: 'margo__line', 'aria-live': 'polite' });
 
   root.replaceChildren(
@@ -46,14 +46,14 @@ export function renderTitle(root, { greeting, seed, version, contentSummary, onN
           'nav',
           { class: 'title__menu' },
           el('button', { class: 'btn', type: 'button', id: 'btn-new-run', press: onNewRun }, 'New run', el('small', {}, 'Take a contract into the Reach')),
-          el('button', { class: 'btn', type: 'button', id: 'btn-test-bay', press: onTestBay }, 'Test bay', el('small', {}, 'Try the clock, pause and touch controls')),
+          el('button', { class: 'btn', type: 'button', id: 'btn-ship', press: onShip }, 'Walk the ship', el('small', {}, 'Rooms, doors and lights, no crew yet')),
           el('button', { class: 'btn', type: 'button', id: 'btn-hub', press: onHub }, 'Records', el('small', {}, 'The Wall, unlocks, past runs')),
         ),
       ),
       el(
         'footer',
         { class: 'title__foot' },
-        el('span', {}, `Build ${version} · Stage 1, session 2`),
+        el('span', {}, `Build ${version} · Stage 1, session 3`),
         el('span', {}, contentSummary),
         el('span', {}, `Seed ${seed}`),
       ),

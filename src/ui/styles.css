@@ -75,7 +75,8 @@ body {
 
 .title,
 .stub,
-.bay > * {
+.ship .panel,
+.ship .btn {
   pointer-events: auto;
 }
 
@@ -255,85 +256,131 @@ body {
   padding: 10px 18px;
 }
 
-/* ---------- test bay (S1.2, replaced by the ship view in S1.3) ---------- */
+/* ---------- ship view ---------- */
 
-.bay {
+.ship {
   flex: 1;
-  position: relative;
-}
-
-.bay > * {
-  position: absolute;
-}
-
-.bay-readout {
-  top: 0;
-  left: 0;
   display: flex;
-  align-items: center;
-  gap: 18px;
-  padding: 8px 14px;
+  flex-direction: column;
+  justify-content: space-between;
+  position: relative;
+  min-width: 0;
 }
 
-.bay-readout__text {
+.shipbar,
+.shipdock {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.shipbar {
+  align-items: flex-start;
+}
+
+.shipbar__name {
+  display: flex;
+  align-items: baseline;
+  gap: 18px;
+  padding: 9px 14px;
+}
+
+.shipbar__clock {
   margin: 0;
   font: inherit;
   font-size: 0.8em;
-  line-height: 1.35;
   color: var(--amber);
-  column-count: 2;
-  column-gap: 22px;
 }
 
-.bay-back {
-  top: 0;
-  right: 0;
+.shipbar__buttons {
+  display: flex;
+  gap: 10px;
 }
 
-.bay-log {
-  left: 0;
-  bottom: 0;
-  width: min(56%, 640px);
-  height: 96px;
-  padding: 8px 14px;
-  overflow: hidden;
+.shipdock {
+  align-items: stretch;
 }
 
-.bay-log__lines {
-  margin-top: 4px;
-  font-size: 0.78em;
-  line-height: 1.45;
-  color: #7d8593;
-  white-space: nowrap;
-}
-
-.bay-log__new {
-  color: var(--paper);
-}
-
-.bay-panel {
-  width: 190px;
-  padding: 10px 12px;
-  transform: translate(-50%, -50%);
+.status {
+  flex: 1;
+  min-width: 0;
+  min-height: 132px;
+  padding: 10px 14px;
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
-.bay-panel__tally {
+.status__hint {
   margin: 0;
-  font: inherit;
-  font-size: 0.78em;
-  line-height: 1.4;
+  max-width: 60ch;
+  line-height: 1.5;
+  color: #aab2bf;
+}
+
+.status__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 16px;
+}
+
+.status__title {
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--amber);
+}
+
+.status__note {
+  font-size: 0.8em;
+  color: var(--sodium);
+}
+
+.status__stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 22px;
+  font-size: 0.85em;
+}
+
+.stat__label {
+  margin-right: 8px;
+  color: #7d8593;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.85em;
+}
+
+.stat__value {
   color: var(--paper);
 }
 
+.stat.is-alarm .stat__value {
+  color: var(--alarm);
+  font-weight: 700;
+}
+
+.stat.is-alarm .stat__value::before {
+  content: '! ';
+}
+
+.status__controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: auto;
+}
+
+.btn--debug {
+  color: var(--infect);
+  border-left-color: var(--infect);
+}
+
 .btn--pause {
-  right: 0;
-  bottom: 0;
-  min-width: 230px;
+  min-width: 210px;
   min-height: 96px;
-  font-size: 1.35em;
+  font-size: 1.3em;
   border-left-width: 12px;
 }
 
@@ -347,8 +394,9 @@ body {
   color: #3a2a12;
 }
 
-.bay-info {
-  max-width: 270px;
+.ship-info {
+  position: absolute;
+  max-width: 290px;
   padding: 8px 12px;
   font-size: 0.82em;
   line-height: 1.4;
@@ -358,20 +406,21 @@ body {
   box-shadow: 0 4px 0 #05070b;
 }
 
-.bay > .bay-info {
-  pointer-events: none;
+.ship-info[hidden] {
+  display: none;
 }
 
-.bay-info[hidden] {
-  display: none;
+.ship > .ship-info {
+  position: fixed;
+  pointer-events: none;
 }
 
 /* ---------- debug overlay (?debug=1) ---------- */
 
 .debug {
   position: fixed;
-  top: max(72px, env(safe-area-inset-top));
-  right: max(8px, env(safe-area-inset-right));
+  top: max(84px, env(safe-area-inset-top));
+  left: max(28px, env(safe-area-inset-left));
   padding: 8px 10px;
   font-size: 12px;
   line-height: 1.5;

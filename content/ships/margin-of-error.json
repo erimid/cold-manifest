@@ -1,0 +1,66 @@
+{
+  "note": "The starting ship. Bow points right. Coordinates are whole tiles; door x and y are the middle of the doorway on the shared wall. See src/sim/ship.js for the format.",
+  "items": [
+    {
+      "id": "margin-of-error",
+      "name": "Margin of Error",
+      "class": "Halloran-pattern bulk freighter, third owner",
+      "rooms": [
+        { "id": "engines", "name": "Engines", "system": "engines", "x": 0, "y": 4, "w": 4, "h": 6 },
+        { "id": "reactor", "name": "Reactor", "system": "reactor", "x": 4, "y": 1, "w": 5, "h": 5 },
+        { "id": "life_support", "name": "Life support", "system": "life_support", "x": 9, "y": 2, "w": 4, "h": 4 },
+        { "id": "medbay", "name": "Medbay", "system": "medbay", "x": 13, "y": 2, "w": 4, "h": 4 },
+        { "id": "quarters", "name": "Quarters and mess", "system": "quarters", "x": 17, "y": 2, "w": 5, "h": 4 },
+        { "id": "ai_core", "name": "AI core", "system": "ai_core", "x": 22, "y": 2, "w": 4, "h": 4 },
+        { "id": "sensors", "name": "Sensors", "system": "sensors", "x": 27, "y": 2, "w": 3, "h": 3 },
+        { "id": "bridge", "name": "Bridge", "kind": "helm", "x": 27, "y": 5, "w": 4, "h": 4 },
+        { "id": "aft_corridor", "name": "Aft corridor", "kind": "corridor", "x": 4, "y": 6, "w": 12, "h": 2 },
+        { "id": "fore_corridor", "name": "Fore corridor", "kind": "corridor", "x": 16, "y": 6, "w": 11, "h": 2 },
+        { "id": "cargo", "name": "Cargo hold", "system": "cargo", "x": 4, "y": 8, "w": 7, "h": 5 },
+        { "id": "brig", "name": "Brig", "system": "brig", "x": 11, "y": 8, "w": 3, "h": 3 },
+        { "id": "door_control", "name": "Door control", "system": "doors", "x": 14, "y": 8, "w": 3, "h": 3 },
+        { "id": "shields", "name": "Shields", "system": "shields", "x": 17, "y": 8, "w": 4, "h": 4 },
+        { "id": "weapons", "name": "Weapons", "system": "weapons", "x": 21, "y": 8, "w": 5, "h": 4 }
+      ],
+      "doors": [
+        { "id": "d_engines_reactor", "a": "engines", "b": "reactor", "x": 4, "y": 5, "vertical": true },
+        { "id": "d_engines_corridor", "a": "engines", "b": "aft_corridor", "x": 4, "y": 7, "vertical": true },
+        { "id": "d_engines_cargo", "a": "engines", "b": "cargo", "x": 4, "y": 9, "vertical": true },
+        { "id": "d_reactor", "a": "reactor", "b": "aft_corridor", "x": 6.5, "y": 6, "vertical": false },
+        { "id": "d_life_support", "a": "life_support", "b": "aft_corridor", "x": 11, "y": 6, "vertical": false },
+        { "id": "d_medbay", "a": "medbay", "b": "aft_corridor", "x": 14.5, "y": 6, "vertical": false },
+        { "id": "d_medbay_quarters", "a": "medbay", "b": "quarters", "x": 17, "y": 4, "vertical": true },
+        { "id": "d_quarters", "a": "quarters", "b": "fore_corridor", "x": 19.5, "y": 6, "vertical": false },
+        { "id": "d_ai_core", "a": "ai_core", "b": "fore_corridor", "x": 24, "y": 6, "vertical": false },
+        { "id": "d_sensors", "a": "sensors", "b": "bridge", "x": 28.5, "y": 5, "vertical": false },
+        { "id": "d_bridge", "a": "fore_corridor", "b": "bridge", "x": 27, "y": 7, "vertical": true },
+        { "id": "d_bulkhead", "a": "aft_corridor", "b": "fore_corridor", "x": 16, "y": 7, "vertical": true },
+        { "id": "d_cargo", "a": "aft_corridor", "b": "cargo", "x": 7.5, "y": 8, "vertical": false },
+        { "id": "d_brig", "a": "aft_corridor", "b": "brig", "x": 12.5, "y": 8, "vertical": false },
+        { "id": "d_door_control", "a": "aft_corridor", "b": "door_control", "x": 15, "y": 8, "vertical": false },
+        { "id": "d_shields", "a": "fore_corridor", "b": "shields", "x": 19, "y": 8, "vertical": false },
+        { "id": "d_weapons", "a": "fore_corridor", "b": "weapons", "x": 23.5, "y": 8, "vertical": false },
+        { "id": "airlock_aft", "name": "Aft airlock", "a": "engines", "b": "space", "x": 0, "y": 7, "vertical": true },
+        { "id": "airlock_cargo", "name": "Cargo airlock", "a": "cargo", "b": "space", "x": 7.5, "y": 13, "vertical": false },
+        { "id": "airlock_dorsal", "name": "Dorsal hatch", "a": "quarters", "b": "space", "x": 19.5, "y": 2, "vertical": false },
+        { "id": "airlock_weapons", "name": "Ordnance hatch", "a": "weapons", "b": "space", "x": 23.5, "y": 12, "vertical": false }
+      ],
+      "vents": [
+        { "id": "v_engines_cargo", "a": "engines", "b": "cargo" },
+        { "id": "v_cargo_reactor", "a": "cargo", "b": "reactor" },
+        { "id": "v_reactor_life", "a": "reactor", "b": "life_support" },
+        { "id": "v_life_quarters", "a": "life_support", "b": "quarters" },
+        { "id": "v_quarters_ai", "a": "quarters", "b": "ai_core" },
+        { "id": "v_cargo_brig", "a": "cargo", "b": "brig" },
+        { "id": "v_brig_shields", "a": "brig", "b": "shields" },
+        { "id": "v_shields_weapons", "a": "shields", "b": "weapons" },
+        { "id": "v_weapons_bridge", "a": "weapons", "b": "bridge" }
+      ],
+      "hull": [
+        [-0.7, 3.3], [3.3, 3.3], [3.3, 0.3], [9.7, 0.3], [9.7, 1.3], [30.7, 1.3], [30.7, 4.3], [31.7, 4.3],
+        [33.6, 6.1], [33.6, 7.9], [31.7, 9.7], [26.7, 9.7], [26.7, 12.7], [16.3, 12.7], [16.3, 11.7],
+        [11.7, 11.7], [11.7, 13.7], [3.3, 13.7], [3.3, 10.7], [-0.7, 10.7]
+      ]
+    }
+  ]
+}

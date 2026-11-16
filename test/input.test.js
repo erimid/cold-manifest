@@ -112,12 +112,20 @@ test('higher priority wins where targets overlap', () => {
   assert.equal(pickTarget([crew, door, room], 200, 120, 'mouse').id, 'room');
 });
 
-test('being inside a target beats a near miss on a more important one', () => {
-  // 6px outside the crew circle, but squarely inside the room.
-  assert.equal(pickTarget([room, crew], 150, 168, 'touch').id, 'room');
-  // Outside everything: the closest edge wins.
+test('a near miss on a more important target beats the room it stands in', () => {
+  // 6px outside the crew circle, squarely inside the room: a finger means the crew member.
+  assert.equal(pickTarget([room, crew], 150, 168, 'touch').id, 'crew');
+  // A mouse is precise, so the same spot is the room.
+  assert.equal(pickTarget([room, crew], 150, 168, 'mouse').id, 'room');
+  // Just beside a door, inside the room: the door.
+  assert.equal(pickTarget([room, door], 280, 150, 'touch').id, 'door');
+  assert.equal(pickTarget([room, door], 270, 150, 'touch').id, 'room');
+});
+
+test('between targets of the same priority, inside beats a near miss and closer beats farther', () => {
   const a = { id: 'a', x: 0, y: 0, w: 50, h: 50 };
   const b = { id: 'b', x: 62, y: 0, w: 50, h: 50 };
+  assert.equal(pickTarget([a, b], 48, 25, 'touch').id, 'a', 'inside a, 14px from b');
   assert.equal(pickTarget([a, b], 54, 25, 'touch').id, 'a');
   assert.equal(pickTarget([a, b], 58, 25, 'touch').id, 'b');
 });

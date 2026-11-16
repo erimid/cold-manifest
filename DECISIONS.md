@@ -21,11 +21,15 @@ Items here are known shortcuts. Each names the stage that must clear it.
 | DF-04 | Faction and port names are provisional (see D-012). | Stage 7 (S7.4) | Open |
 | DF-05 | Vent graph is data only, not used by anything, until the creature exists. | Stage 6 (S6.1) | Open |
 | DF-06 | Pre-fight talk/bribe uses a placeholder negotiation value until crew skills exist. | Stage 4 (S4.1) | Open |
-| DF-07 | The sim's only contents are test-bay probes and `reactorDrift` (D-018, D-021). The test bay screen is temporary. | S1.3 (ship replaces the bay), S1.4 (remove `reactorDrift`), S1.6 (crew replace probes) | Open |
+| ~~DF-07~~ | ~~The sim's only contents were test-bay probes and `reactorDrift`.~~ | S1.3 | Done in S1.3: the ship replaced the test bay; probes and `reactorDrift` are gone |
 | ~~DF-08~~ | ~~GitHub Pages must be switched on once in the repo settings.~~ | Stage 1 | Done: Eric confirmed 2026-11-15 |
 | ~~DF-09~~ | ~~No Playwright touch tests in CI yet.~~ | S1.2 | Done in S1.2 |
 | DF-10 | Pinch-zoom and two-finger pan are not handled: the input module tracks one pointer at a time. | S1.3 if the ship view needs a camera, otherwise S11.5 | Open |
 | DF-11 | Auto-pause triggers and their settings (brief §7) are not wired; the clock supports a pause requested mid-tick. | S1.7 | Open |
+| DF-12 | Room values (oxygen, temperature, noise, hull, fire, breach) are stored and drawn but nothing changes them except the debug command. | S1.4 (power, lights as a draw), S1.5 (air, fire, breaches) | Open |
+| DF-13 | Hull damage and temperature have no visual of their own yet; they only show in the status panel. | S1.5 (frost/heat), S11.1 (look pass) | Open |
+| DF-14 | Doors open by remote from anywhere with no power or crew needed. | S1.4 (door control system, manual doors without power) | Open |
+| DF-15 | Autoplay takes about 35 s for 100 runs because invariants and stuck checks run every tick. Fine for now; sample them if it grows. | Stage 3 | Open |
 
 ---
 
@@ -125,6 +129,26 @@ Items here are known shortcuts. Each names the stage that must clear it.
 **What:** `npm run test:e2e` drives the built site with Playwright on an emulated iPad (touch) and a desktop (mouse, keyboard). Playwright is not in `package.json`; CI installs a pinned version in its own job, and local runs use a globally installed one.
 **Why:** Keeps `npm ci` small and avoids a second browser download on machines that already have Playwright. Emulation does not replace a real iPad (D-007).
 
+### D-024 Ship layout format (S1.3)
+**What:** A ship is one item in `content/ships/`: rooms as whole-tile rectangles, doors as a point on the wall two rooms share (or `"b": "space"` for an airlock), vents as room-to-room links, and a hull outline. `src/sim/ship.js` validates it (no overlaps, doors on shared walls, every room reachable, every system in exactly one room, at least one airlock) and builds the graphs. The content checker runs the same validation. Corridors are rooms with `kind: "corridor"`; the bridge is `kind: "helm"` and holds no system, since the brief's system table has none for it.
+**Why:** Stage 9 adds two more ships, so the format has to be content from the start. The *Margin of Error* has 15 rooms, 17 interior doors, 4 airlocks and 9 vents.
+
+### D-025 Door state lives on doors (S1.3; clarifies brief §6)
+**What:** The brief lists "a door state" among each room's values. Doors here are their own objects between two rooms, each with a state (open, closed, locked, jammed) and an `openness` from 0 to 1 that slides over 0.35 s. Air, crew and the creature will read `openness`.
+**Why:** A door belongs to two rooms; storing its state on either would duplicate it.
+
+### D-026 What a tap on the ship does (S1.3)
+**What:** Tapping a room selects it and shows its status. Tapping an interior door selects it and toggles it open or closed. Tapping an airlock or a locked door only selects it: those are worked from the status panel. A jammed door refuses everything.
+**Why:** Brief §18 asks for door control by tapping a door. Airlocks kill, so they need a deliberate second press (and brief §7 worries about a slip of the finger).
+
+### D-027 Hit-test priority (S1.3; replaces the rule in D-022)
+**What:** Among targets within reach of a pointer, the highest priority wins (crew over doors over rooms) even on a near miss; within one priority, inside beats a near miss, then nearest edge, then smallest. D-022 originally said a point inside any target always beat a near miss.
+**Why:** A door sits on a room's wall, so every near miss on a door is inside a room. Under the old rule touch padding could never help with doors, which are the smallest targets on the ship. Caught by the browser test.
+
+### D-028 Rendering split (S1.3)
+**What:** `src/ui/ship-render.js` draws hull, floors, walls and stencils once to an offscreen canvas, and lighting, doors, fire, frost and alarms on top each frame. Animation runs on game time, so flames and alarm pulses freeze on pause. Alarms pair colour with a shape and letter (triangle F, diamond B, circle O); locked doors carry a pip and jammed doors hazard stripes.
+**Why:** Performance on iPad, the pause rule, and the brief's colourblind requirement (§17).
+
 ---
 
 ## Stage notes
@@ -134,4 +158,5 @@ _None yet. Stage 1 note goes here when Stage 1 is done._
 ### Session log
 
 - **S1.1 (2026-11-15):** Vite scaffold, folder layout, seeded RNG with substreams, content registry with browser and Node loaders, content checker, autoplay skeleton, title screen with stub screens, debug overlay, CI. 30 unit tests. GitHub Pages deploy workflow with per-PR previews. Known gap: DF-08 (Pages must be switched on in repo settings).
-- **S1.2 (2026-11-15):** Fixed-timestep clock with pause, command queue, game event bus, input module (tap, drag, long-press, padded hit areas, keyboard), temporary test bay screen, autoplay bot that gives orders and pauses, 59 unit tests, 18 browser checks. DF-08 cleared: Eric switched Pages on and confirmed the preview works. DF-09 cleared.
+- **S1.2 (2026-11-15):** Fixed-timestep clock with pause, command queue, game event bus, input module (tap, drag, long-press, padded hit areas, keyboard), temporary test bay screen, autoplay bot that gives orders and pauses, 59 unit tests, 18 browser checks. DF-08 cleared: Eric switched Pages on and confirmed the preview works. DF-09 cleared. Eric tested on his iPad: looks, responds and feels good.
+- **S1.3 (2026-11-15):** Ship layout format and validation, the *Margin of Error* (15 rooms, 21 doors, 9 vents), room and door state in the sim, door and light orders, debug room/door commands, cutaway renderer with per-room lighting, fire, frost and alarms, ship view with status panel. Test bay and probes removed. 76 unit tests, 25 browser checks.
