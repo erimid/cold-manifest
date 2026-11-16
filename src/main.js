@@ -25,7 +25,7 @@ import { createShipView } from './ui/shipview.js';
 import { renderContracts, renderEvent, renderHub, renderPort, renderScene, renderSummary } from './ui/screens.js';
 import { renderTitle } from './ui/title.js';
 
-const VERSION = '0.23.0';
+const VERSION = '0.24.0';
 
 const params = new URLSearchParams(window.location.search);
 const flags = {

@@ -30,7 +30,7 @@ export const IDLE_MAX_SECONDS = 90;
 export const QUEUE_MAX = 6;
 export const LOG_MAX = 60;
 
-const crewName = (sim, event) => ({ crew_name: findCrew(sim, event.crew)?.member.name });
+const crewName = (sim, event) => ({ crew_name: findCrew(sim, event.crew)?.member.name ?? event.name });
 /** For lines about a person in a place: an order she is holding, or one a crew member turned down. */
 const crewAndRoom = (sim, event) => ({ ...crewName(sim, event), room: sim.layout.room(event.room)?.name });
 
@@ -107,6 +107,18 @@ export const TRIGGERS = Object.freeze({
   'contact.hailed': { category: 'combat_progress', priority: 4, ttl: 10, own: true, when: (event) => event.ok === false },
   'contact.lost': { category: 'combat_end', priority: 3, ttl: 15, own: true },
   'contact.passed': { category: 'combat_end', priority: 2, ttl: 15, own: true },
+  // Boarded (H.2, D-165): a party at the lock, aboard, finding things, and gone.
+  'boarding.demand': { category: 'combat_start', priority: 5, ttl: 15, own: true },
+  'boarding.aboard': { category: 'combat_progress', priority: 4, ttl: 10, own: true },
+  'boarding.bribed': { category: 'combat_progress', priority: 4, ttl: 10, own: true, when: (event) => event.ok === false },
+  'boarding.hostile': { category: 'combat_progress', priority: 4, ttl: 10, own: true },
+  'cargo.seized': { category: 'cargo', priority: 3, ttl: 10, cooldown: 20, own: true },
+  'crate.taken': { category: 'cargo', priority: 3, ttl: 10, cooldown: 20, own: true },
+  'crew.found': { category: 'crew_injury', priority: 4, ttl: 10, cooldown: 15, own: true, slots: crewName },
+  'crew.taken': { category: 'crew_death', priority: 5, ttl: 30, own: true, slots: crewName },
+  'system.stripped': { category: 'hazard', priority: 4, ttl: 12, own: true },
+  'room.vented': { category: 'order_confirm', priority: 2, ttl: 8, cooldown: 30, own: true, when: (event) => event.open },
+  'boarding.ended': { category: 'combat_end', priority: 3, ttl: 15, own: true },
 });
 
 export function newVoiceState() {

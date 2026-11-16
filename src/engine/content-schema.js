@@ -267,7 +267,7 @@ const ITEM_RULES = {
   contracts: checkContract,
   ports: (item) => checkPort(item),
   factions: (item) => checkFaction(item),
-  encounters: (item, refs) => validateEncounter(item, { ships: refs.ships, nodeKinds: new Set(Object.keys(NODE_KINDS)) }),
+  encounters: (item, refs) => validateEncounter(item, { ships: refs.ships, factions: refs.factions, nodeKinds: new Set(Object.keys(NODE_KINDS)) }),
 };
 
 /**
@@ -294,6 +294,7 @@ export function gatherRefs(files) {
     events: of('events'),
     threats: of('threats'),
     factions: of('factions'),
+    encounters: of('encounters'),
     orders: new Set(COMMAND_TYPES),
   };
 }

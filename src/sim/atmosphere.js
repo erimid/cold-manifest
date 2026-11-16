@@ -18,6 +18,8 @@ import { SPACE } from './systems.js';
 export const DOOR_FLOW = 8;
 export const AIRLOCK_FLOW = 30;
 export const BREACH_FLOW = 6;
+/** An emergency vent open in a room (H.2, `room.vent`): its air goes out about as fast as through an open airlock. */
+export const VENT_FLOW = 24;
 
 /** Oxygen a room regains per second for each bar on life support, and loses per second with none. */
 export const O2_REFILL_PER_BAR = 1 / 60;
@@ -53,7 +55,7 @@ const volume = (room) => room.w * room.h;
 
 /** Is this room open to space right now, through an airlock or a breach? */
 export function isExposed(sim, roomId) {
-  if (sim.state.rooms[roomId].breach > 0) return true;
+  if (sim.state.rooms[roomId].breach > 0 || sim.state.rooms[roomId].vent) return true;
   return sim.layout.exits(roomId).some((exit) => exit.to === SPACE && sim.state.doors[exit.door].openness > 0);
 }
 
@@ -96,6 +98,7 @@ function stepAir(sim, seconds) {
       if (r.breached) sim.events.emit('breach.opened', { room: room.id, tick: sim.state.tick });
     }
     if (r.breach > 0 && r.oxygen > 0) r.oxygen = clamp01(r.oxygen * (1 - Math.min(1, (BREACH_FLOW * r.breach * seconds) / volume(room))));
+    if (r.vent && r.oxygen > 0) r.oxygen = clamp01(r.oxygen * (1 - Math.min(1, (VENT_FLOW * seconds) / volume(room))));
   }
 }
 
@@ -187,7 +190,7 @@ export function crewEmit(ship, member, type, payload) {
 export function killCrew(sim, id, cause) {
   const member = sim.state.crew[id];
   if (!member || member.alive === false) return;
-  Object.assign(member, { alive: false, health: 0, goal: null, path: [], task: 'dead', board: null, crossEnds: null, job: null });
+  Object.assign(member, { alive: false, health: 0, goal: null, path: [], task: 'dead', board: null, crossEnds: null, job: null, hidden: null });
   crewEmit(sim, member, 'crew.died', { crew: id, room: member.room, cause, tick: sim.state.tick });
 }
 
@@ -257,7 +260,7 @@ export const ATMOSPHERE_COMMANDS = {
       const room = sim.layout.room(cmd.room);
       const r = sim.state.rooms[cmd.room];
       const hadFire = r.fire > 0;
-      Object.assign(r, { jettisoned: true, oxygen: 0, temperature: -270, light: 0, lightsOn: false, noise: 0, hull: 0, fire: 0, breach: 0, scorch: 0, burning: false, breached: false });
+      Object.assign(r, { jettisoned: true, oxygen: 0, temperature: -270, light: 0, lightsOn: false, noise: 0, hull: 0, fire: 0, breach: 0, scorch: 0, burning: false, breached: false, vent: false });
       if (hadFire) sim.events.emit('fire.out', { room: cmd.room, tick: sim.state.tick });
       // Every door that led there is welded shut for good.
       for (const exit of sim.layout.exits(cmd.room)) {

@@ -57,8 +57,18 @@ export const MEDBAY_HEAL = 1 / 40;
 export const WALKABLE = 0.9;
 /** Hand to hand: one healthy fighter takes a healthy one down alone in this many seconds. Hurt fighters hit softer. */
 export const MELEE_SECONDS = 14;
+/** A stunner (a bounty party's, H.2) knocks people down to this much health and no further. */
+export const STUN_FLOOR = 0.1;
 /** A boarder left alone with a system breaks a bar of it every this many seconds. */
 export const SABOTAGE_SECONDS = 9;
+/** Seconds for an agent (agents.js, H.2) to force a door: a locked one is cut, a jammed one levered. Forced, it hangs open, jammed. */
+export const FORCE_SECONDS = Object.freeze({ locked: 10, jammed: 14 });
+/** How loud forcing a door is. */
+export const FORCE_NOISE = 0.7;
+/** Air an agent without a suit will not stand in, and will not walk through if there is any other way. */
+export const THIN_AIR = 0.3;
+/** What walking through thin air costs an agent without a suit, in seconds, when planning a way. */
+const THIN_AIR_COST = 60;
 
 /** Where crew stand in a room, as offsets along its floor from the middle, by their place on the roster. Side-on, everyone stands on the deck. */
 const SPOTS = [0, -1, 1, -2, 2, -0.5, 0.5, 1.5];
@@ -101,6 +111,7 @@ export function newCrewMember(layout, { id, name, role = null, engineer = false,
     wreck: 0, // 0 to 1 progress toward breaking the next bar of the system they are sabotaging
     carry: null, // the crate in their arms (hold.js)
     job: null, // a crate job under way: { kind, crate, to, slot, phase, t, since } (hold.js)
+    hidden: null, // where they are hiding (agents.js, H.2): 'locker' or 'crawlway'; null when in plain sight
     memories: [], // what they remember: { type, tick, room, who, dark } (memory.js)
     dread: 0, // 0 to 1: how the dark is wearing on them (memory.js)
     lampUntil: 0, // the tick until which they will not sit in the dark again
@@ -142,6 +153,14 @@ export function isPassable(sim, doorId) {
   return true;
 }
 
+/** Can `who` force this door, if it is shut against them? Agents (a boarding party, H.2) can; our crew cannot. */
+export function isForceable(sim, doorId, who) {
+  if (!who?.forces) return false;
+  const door = sim.layout.door(doorId);
+  const d = sim.state.doors[doorId];
+  return !door.airlock && !d.sealed && (d.state === 'locked' || d.state === 'jammed');
+}
+
 
 /** The middle of a room's floor, for estimating how long a trip takes. */
 const floorMid = (room) => ({ x: room.x + room.w / 2, y: room.y + room.h - STAND });
@@ -169,14 +188,19 @@ export function findRoute(sim, from, to, who = null) {
     const at = floorMid(room);
     const edges = [];
     for (const exit of layout.exits(here)) {
-      if (exit.to === SPACE || !isPassable(sim, exit.door)) continue;
+      if (exit.to === SPACE) continue;
+      const passable = isPassable(sim, exit.door);
+      if (!passable && !isForceable(sim, exit.door, who)) continue;
       const door = layout.door(exit.door);
       const next = layout.room(exit.to);
       const there = floorMid(next);
       const walk = (Math.abs(door.x - at.x) + Math.abs(there.x - door.x)) / WALK_SPEED;
       // Up or down a deck lift, or along the main shaft.
       const ride = !door.vertical || room.kind === 'lift' || next.kind === 'lift' ? Math.abs(there.y - at.y) / (WALK_SPEED * rise) : 0;
-      edges.push({ to: exit.to, cost: walk + ride, step: { door: exit.door, from: here } });
+      // An agent counts the time to force a shut door, and walks round air it cannot breathe if it can.
+      const force = passable ? 0 : FORCE_SECONDS[sim.state.doors[exit.door].state] ?? 0;
+      const air = who?.forces && !who.suit && sim.state.rooms[exit.to].oxygen < THIN_AIR ? THIN_AIR_COST : 0;
+      edges.push({ to: exit.to, cost: walk + ride + force + air, step: { door: exit.door, from: here } });
     }
     if (who?.engineer && !who.carry) {
       for (const exit of layout.crawlExits(here)) {
@@ -372,6 +396,19 @@ function walk(sim, member, seconds) {
     if (next.door) {
       // Standing at a door. Is it still a way through, and is it open yet?
       const d = sim.state.doors[next.door];
+      if (!isPassable(sim, next.door) && isForceable(sim, next.door, member)) {
+        // An agent cuts a locked door and levers a jammed one; it hangs open, jammed, after.
+        member.task = 'forcing';
+        member.forcing = (member.forcing ?? 0) + ((0.5 + 0.5 * member.health) * time) / FORCE_SECONDS[d.state];
+        const here = sim.state.rooms[member.room];
+        here.noise = Math.max(here.noise, FORCE_NOISE); // a bang (senses.js) that rings as long as the cutting goes on
+        if (member.forcing < 1) return;
+        member.forcing = 0;
+        d.openness = 1;
+        setDoor(sim, next.door, 'jammed', member.id);
+        sim.events.emit('door.forced', { door: next.door, by: member.id, tick: sim.state.tick });
+        continue;
+      }
       if (!isPassable(sim, next.door)) {
         const detour = planPath(sim, member, member.goal);
         if (!detour) return stop(sim, member, 'door', next.door);
@@ -406,7 +443,8 @@ function jobIn(sim, member) {
   const r = sim.state.rooms[member.room];
   if (r.jettisoned) return null;
   if (!isHome(sim, member)) {
-    // Aboard their ship, there is nothing to save and a system to break.
+    // Aboard their ship, there is nothing to save and a system to break. A boarding party (H.2) breaks only what it came to strip.
+    if (member.party && member.agent?.strip !== room.system) return null;
     const system = room.system ? sim.state.systems[room.system] : null;
     return system && !system.lost && system.damage < system.level ? { type: 'sabotage', system: room.system } : null;
   }
@@ -414,7 +452,7 @@ function jobIn(sim, member) {
   if (r.breach > 0) return { type: 'patch' };
   if (room.system) {
     const system = sim.state.systems[room.system];
-    if (system.damage > 0 && !system.lost) return { type: 'repair', system: room.system };
+    if (system.damage > 0 && !system.lost && !system.stripped) return { type: 'repair', system: room.system };
   }
   for (const exit of sim.layout.exits(member.room)) {
     const d = sim.state.doors[exit.door];
@@ -423,22 +461,38 @@ function jobIn(sim, member) {
   return null;
 }
 
-/** The other side's people in this crew member's room, still on their feet and not in the docking tube. */
+/**
+ * The other side's people in this crew member's room, still on their feet and not in the docking tube.
+ * Nobody hiding fights or is fought (H.2), and a boarding party that has come peacefully (an inspection,
+ * a salvage crew who think her dead) is not fought until it turns hostile.
+ */
 export function hostilesBeside(sim, member) {
-  return Object.values(sim.state.crew).filter((other) => other.alive && other.room === member.room && other.owner !== member.owner && other.task !== 'crossing');
+  // Hidden, or beaten down by a stunner (H.2) and not yet back on their feet: out of the fight.
+  if (member.hidden || (member.stunned && member.health <= STUN_FLOOR + 0.05)) return [];
+  const calm = sim.state.boarding && !sim.state.boarding.hostile;
+  return Object.values(sim.state.crew).filter((other) => other.alive && other.room === member.room && other.owner !== member.owner && other.task !== 'crossing' && !other.hidden && !(calm && (other.party || member.party)));
 }
 
+/** Hit someone; false if there is nobody here this one would hit (a bounty party and the one it came for). */
 function fight(sim, member, foes, seconds) {
-  member.task = 'fighting';
   // Everyone goes for whoever is closest to dropping. Stage 4 skills and traits change who wins (brief §7).
-  // Security hit harder (D-131).
-  const target = foes.reduce((weakest, other) => (other.health < weakest.health ? other : weakest));
-  harmCrew(sim, target.id, ((0.5 + 0.5 * member.health) * skillFactor(skillOf(member, 'combat')) * seconds) / MELEE_SECONDS, 'melee');
+  // Security hit harder (D-131). A party that came for one of us (H.2) wants them alive.
+  // A bounty party (stun) beats people down but kills nobody: it is paid for one of them alive.
+  const spare = member.agent?.spare;
+  const stun = member.agent?.stun;
+  const struck = foes.filter((other) => other.id !== spare && !(stun && other.health <= STUN_FLOOR + 1e-9));
+  if (!struck.length) return false;
+  member.task = 'fighting';
+  const target = struck.reduce((weakest, other) => (other.health < weakest.health ? other : weakest));
+  const blow = ((0.5 + 0.5 * member.health) * skillFactor(skillOf(member, 'combat')) * seconds) / MELEE_SECONDS;
+  harmCrew(sim, target.id, stun ? Math.min(blow, target.health - STUN_FLOOR) : blow, 'melee');
+  if (stun && target.health <= STUN_FLOOR + 1e-9) target.stunned = true;
+  return true;
 }
 
 function work(sim, member, seconds) {
   const foes = hostilesBeside(sim, member);
-  if (foes.length) return fight(sim, member, foes, seconds);
+  if (foes.length && fight(sim, member, foes, seconds)) return;
   if (member.job) return; // a crate job (hold.js) comes before the room's own trouble
   const job = jobIn(sim, member);
   member.task = job ? job.type : 'idle';
@@ -503,11 +557,26 @@ export function stepCrew(sim, seconds) {
     member.px = member.x;
     member.py = member.y;
     if (!member.alive) continue;
+    // Anyone sent somewhere, or given a job, comes out of hiding to do it (H.2).
+    if (member.hidden && (member.path.length || member.job || member.carry)) unhide(sim, member);
+    if (member.hidden) {
+      member.task = 'hiding';
+      continue;
+    }
     if (member.path.length) walk(sim, member, seconds);
     else if (!member.board) work(sim, member, seconds); // at the airlock, or in the tube: boarding.js has them
     // Someone left standing in a doorway or on a deck lift when their way was cut short steps back into the room.
     if (member.alive && !member.path.length && !member.board && !inside(sim.layout.room(member.room), member)) member.path = [spotIn(sim.layout.room(member.room), member.index)];
   }
+}
+
+/** Out of hiding: by an order, or found. */
+export function unhide(sim, member, by = null) {
+  if (!member.hidden) return;
+  const spot = member.hidden;
+  member.hidden = null;
+  if (member.task === 'hiding') member.task = 'idle';
+  crewEmit(sim, member, by ? 'crew.found' : 'crew.unhid', { crew: member.id, room: member.room, spot, by, tick: sim.state.tick });
 }
 
 const inside = (room, member) => member.x >= room.x && member.x <= room.x + room.w && member.y >= room.y && member.y <= room.y + room.h;
@@ -539,6 +608,14 @@ export function describeTask(sim, member) {
       return `Repairing ${SYSTEMS[room.system].name.toLowerCase()}`;
     case 'unjam':
       return 'Freeing a jammed door';
+    case 'hiding':
+      return member.hidden === 'crawlway' ? 'Hiding in a service crawlway' : 'Hiding in a locker';
+    case 'forcing':
+      return 'Forcing a door';
+    case 'grabbing':
+      return 'Dragging someone off';
+    case 'searching':
+      return 'Searching the room';
     default:
       return isHome(sim, member) && room.system === 'medbay' && member.health < 1 && sim.state.systems.medbay.power > 0 ? 'Being patched up' : 'Standing by';
   }

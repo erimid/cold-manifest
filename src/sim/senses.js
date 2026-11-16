@@ -126,7 +126,7 @@ function byRoom(ship) {
 const copyFacts = (to, from) => {
   for (const field of ROOM_FACTS) to[field] = from[field];
 };
-const WORK = new Set(['extinguish', 'patch', 'repair', 'unjam', 'sabotage', 'lifting', 'opening', 'loading', 'cycling']);
+const WORK = new Set(['extinguish', 'patch', 'repair', 'unjam', 'sabotage', 'lifting', 'opening', 'loading', 'cycling', 'stashing', 'forcing', 'searching', 'grabbing']);
 
 /** The share of the reactor's output in use, 0 to 1. */
 export function reactorLoad(ship) {

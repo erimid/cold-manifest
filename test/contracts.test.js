@@ -212,7 +212,8 @@ test('carrying contraband through a checkpoint brings the inspection before any 
   const smuggler = contractSim(SMUGGLING, { seed: 'inspect', events: true });
   flyTo(smuggler, findCheckpoint(smuggler).id);
   assert.equal(smuggler.state.run.events.open?.id, 'checkpoint.inspection');
-  assert.ok(eventView(smuggler).choices.some((choice) => choice.id === 'bribe' && choice.available), '320 credits pays a bribe');
+  // From H.2 the inspection is a boarding (boarders.js): standing by the lock is always open; the bribe is paid at the lock.
+  assert.ok(eventView(smuggler).choices.some((choice) => choice.id === 'submit' && choice.available));
 
   const courier = contractSim(COURIER, { seed: 'inspect', events: true });
   flyTo(courier, findCheckpoint(courier).id);

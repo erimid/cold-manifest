@@ -323,6 +323,7 @@ export function whyNoCourseJump(sim) {
   const lane = laneBetween(run.map, run.at, run.plot);
   if (run.fuel < lane.fuel) return `that lane takes ${lane.fuel} fuel and we have ${run.fuel}`;
   if (heldAlongside(sim)) return 'a ship is alongside: she cannot jump with it this close';
+  if (sim.state.boarding) return 'a ship is clamped to our airlock';
   return whyNoJump(sim);
 }
 

@@ -15,6 +15,7 @@
 //   crate.open      walk to it and break the seal
 //   crate.move      walk to it, lift it, carry it to a room, set it down
 //   crate.jettison  carry it to the nearest airlock and cycle it out
+//   crate.stash     carry it to the nearest free compartment and hide it there (H.2, agents.js)
 //   weapon.load     carry an ordnance crate to the weapons room and load a gun
 // A job runs in phases: fetch (walk to the crate), lift, carry, work. Carrying
 // is slow and needs both hands, so nobody carries through a service crawlway.
@@ -23,6 +24,7 @@
 // way is shut, the crate is gone) ends with `crew.blocked`, and no job runs
 // longer than JOB_SECONDS, so nobody is ever stuck on an ammo run.
 
+import { compartmentsFree, nearestCompartment } from './agents.js';
 import { crewEmit } from './atmosphere.js';
 import { CARRY_SPEED, findRoute, hostilesBeside, isHome, letGo, planPath } from './crew.js';
 import { bang } from './senses.js';
@@ -34,6 +36,8 @@ export const LIFT_SECONDS = 1.5;
 export const OPEN_SECONDS = 3;
 export const LOAD_SECONDS = 3;
 export const CYCLE_SECONDS = 3;
+/** Seconds to get a crate under the deck plates of a compartment and the plates back down (H.2). */
+export const STASH_SECONDS = 4;
 export { CARRY_SPEED };
 /** No job runs longer than this; it is given up and the crate set down. */
 export const JOB_SECONDS = 120;
@@ -77,6 +81,7 @@ function makeCrate(id, { kind, room, label, contents, rounds, contract = false, 
     by: null, // who is carrying it, while someone is
     contract: Boolean(contract), // part of the run's contract cargo (contracts.js, S3.4)
     contraband: Boolean(contraband), // what an inspection looks for
+    hidden: false, // stashed in a compartment (H.2): a search has to find it
   };
 }
 
@@ -202,6 +207,9 @@ function reach(ship, member, crate, to) {
 
 function startJob(ship, member, job) {
   letGo(ship, member, { keep: job.crate });
+  // Whatever is done with a stashed crate, it comes out of its compartment first.
+  const crate = ship.state.crates[job.crate];
+  if (crate?.hidden && job.kind !== 'stash') crate.hidden = false;
   member.job = { ...job, phase: member.carry === job.crate ? 'carry' : 'fetch', t: 0, since: ship.state.tick };
   // Someone caught mid-stride (in a doorway, on a lift) first steps back to their spot in the room they are in.
   member.goal = member.path.length ? member.room : null;
@@ -257,6 +265,25 @@ export const HOLD_COMMANDS = {
       const member = ship.state.crew[cmd.crew];
       const crate = ship.state.crates[cmd.crate];
       startJob(ship, member, { kind: 'jettison', crate: cmd.crate, to: nearestAirlock(ship, crate.room ?? member.room) });
+    },
+  },
+  // Carry a crate to the nearest compartment with room in it and hide it under the deck plates (H.2).
+  'crate.stash': {
+    check(ship, cmd) {
+      const member = hand(ship, cmd);
+      if (typeof member === 'string') return member;
+      const crate = crateFor(ship, cmd, member);
+      if (typeof crate === 'string') return crate;
+      if (crate.hidden) return 'it is already stashed';
+      if (!ship.layout.rooms.some((room) => room.compartment)) return 'this ship has no hidden compartment';
+      const to = nearestCompartment(ship, crate.room ?? member.room);
+      if (!to) return 'every compartment is full, or none can be reached';
+      return reach(ship, member, crate, to);
+    },
+    apply(ship, cmd) {
+      const member = ship.state.crew[cmd.crew];
+      const crate = ship.state.crates[cmd.crate];
+      startJob(ship, member, { kind: 'stash', crate: cmd.crate, to: nearestCompartment(ship, crate.room ?? member.room) });
     },
   },
   // Fetch an ordnance crate from wherever it is and load a heavy gun from it. `crate` is optional: the nearest is used.
@@ -351,12 +378,18 @@ function stepJob(ship, member, seconds) {
     job.phase = 'work';
     job.t = 0;
   }
-  // Working with it: breaking the seal, loading the gun, or cycling the airlock.
-  member.task = job.kind === 'open' ? 'opening' : job.kind === 'load' ? 'loading' : 'cycling';
+  // Working with it: breaking the seal, loading the gun, stashing it, or cycling the airlock.
+  member.task = job.kind === 'open' ? 'opening' : job.kind === 'load' ? 'loading' : job.kind === 'stash' ? 'stashing' : 'cycling';
   job.t += rate;
-  const need = job.kind === 'open' ? OPEN_SECONDS : job.kind === 'load' ? LOAD_SECONDS : CYCLE_SECONDS;
+  const need = job.kind === 'open' ? OPEN_SECONDS : job.kind === 'load' ? LOAD_SECONDS : job.kind === 'stash' ? STASH_SECONDS : CYCLE_SECONDS;
   if (job.t < need) return;
-  if (job.kind === 'open') {
+  if (job.kind === 'stash') {
+    // Someone else filled it while they carried: they set the crate down instead.
+    const fits = compartmentsFree(ship, member.room) > 0;
+    letGo(ship, member);
+    if (fits) crate.hidden = true;
+    crewEmit(ship, member, fits ? 'crate.stashed' : 'crew.blocked', fits ? { crew: member.id, crate: crate.id, room: member.room, tick } : { crew: member.id, room: member.room, reason: 'full', tick });
+  } else if (job.kind === 'open') {
     crate.sealed = false;
     crewEmit(ship, member, 'crate.opened', { crew: member.id, crate: crate.id, kind: crate.kind, label: crate.label, contents: crate.contents, room: crate.room, tick });
   } else if (job.kind === 'load') {
@@ -384,7 +417,9 @@ function stepJob(ship, member, seconds) {
  */
 export function stepHold(ship, seconds) {
   for (const member of Object.values(ship.state.crew)) {
-    if (member.carry && (!member.alive || !isHome(ship, member) || member.board)) letGo(ship, member);
+    // A boarding party's crates are boarders.js's to carry (H.2).
+    if (member.carry && (!member.alive || (!isHome(ship, member) && !member.party) || member.board)) letGo(ship, member);
+    if (member.party) continue;
     if (!member.alive || !member.job || member.board) continue;
     if (ship.state.tick - member.job.since > JOB_SECONDS * 20) {
       // Too long: whatever is in the way, they give it up and step back to their spot in the room they are in.
@@ -416,9 +451,11 @@ export function describeJob(ship, member) {
   if (member.task === 'opening') return 'Breaking a seal';
   if (member.task === 'loading') return `Loading the ${ship.catalog.weapon(ship.state.weapons[job.slot].id).name.toLowerCase()}`;
   if (member.task === 'cycling') return 'Cycling a crate out of the airlock';
+  if (member.task === 'stashing') return 'Stashing a crate under the deck plates';
   if (job.phase === 'fetch') return job.kind === 'load' ? 'Fetching rounds' : `Going for ${what}`;
   if (job.kind === 'load') return 'Carrying rounds to the guns';
   if (job.kind === 'jettison') return 'Carrying a crate to the airlock';
+  if (job.kind === 'stash') return 'Carrying a crate to the compartment';
   return `Carrying ${what}${to ? ` to ${to}` : ''}`;
 }
 
@@ -432,6 +469,13 @@ export function checkHoldInvariants(ship) {
     if (crate.room !== null && (!ship.layout.room(crate.room) || crate.room === SPACE)) problems.push(`${crate.id} is in unknown room "${crate.room}"`);
     if (crate.by !== null && crew[crate.by]?.carry !== crate.id) problems.push(`${crate.id} is carried by ${crate.by}, who is not holding it`);
     if (!(Number.isInteger(crate.rounds) && crate.rounds >= 0)) problems.push(`${crate.id} holds ${crate.rounds} rounds`);
+    if (crate.hidden && (crate.room === null || !ship.layout.room(crate.room)?.compartment)) problems.push(`${crate.id} is stashed where there is no compartment`);
+  }
+  for (const room of ship.layout.rooms) {
+    if (room.compartment && compartmentsFree(ship, room.id) === 0) {
+      const stashed = Object.values(ship.state.crates).filter((crate) => crate.room === room.id && crate.hidden).length;
+      if (stashed > room.compartment) problems.push(`${room.id} has ${stashed} crates stashed in room for ${room.compartment}`);
+    }
   }
   for (const member of Object.values(crew)) {
     if (member.carry && ship.state.crates[member.carry]?.by !== member.id) problems.push(`${member.id} holds ${member.carry}, which is not in their hands`);

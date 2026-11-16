@@ -306,7 +306,7 @@ export function checkValue(value, type, env, what) {
     if (path.length) return ['data', 'memory'].includes(found) ? [] : [`${what}: "$${name}" is a ${found}, so it has no .${path.join('.')}`];
     return found === type || found === 'data' || type === 'any' ? [] : [`${what}: "$${name}" is a ${found}, and a ${type} is wanted`];
   }
-  const sets = { room: 'rooms', crew: 'crew', door: 'doors', system: 'systems', trait: 'traits', memory: 'memories', ship: 'ships', scene: 'scenes', event: 'events', threat: 'threats', faction: 'factions' };
+  const sets = { room: 'rooms', crew: 'crew', door: 'doors', system: 'systems', trait: 'traits', memory: 'memories', ship: 'ships', scene: 'scenes', event: 'events', threat: 'threats', faction: 'factions', encounter: 'encounters' };
   if (type === 'faction' && value === 'client') return []; // the contract's client, whoever that is
   if (type === 'boolean') return typeof value === 'boolean' ? [] : [`${what} must be true or false`];
   if (type === 'number') return typeof value === 'number' && Number.isFinite(value) ? [] : [`${what} must be a number`];

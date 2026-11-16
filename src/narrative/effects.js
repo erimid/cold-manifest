@@ -15,7 +15,9 @@
 // announce themselves on the bus; Stage 4 and Stage 6 pick them up.
 
 import { harmCrew } from '../sim/atmosphere.js';
+import { startBoarding } from '../sim/boarders.js';
 import { startFight } from '../sim/combat.js';
+import { spawnContact } from '../sim/encounters.js';
 import { changeReputation, contractActive, contractOf, failContract, FAILURES, loadCargo, seizeCargo } from '../sim/contracts.js';
 import { CRATE_KINDS, addCrate } from '../sim/hold.js';
 import { remember } from '../sim/memory.js';
@@ -200,6 +202,24 @@ export const EFFECTS = Object.freeze({
       if (sim.state.fight && !sim.state.fight.over) return;
       if (sim.state.fight) ctx.endFight(sim);
       startFight(sim, a.ship, ctx.newShipState);
+    },
+  },
+  // A ship is already alongside and its party comes to our lock (H.2, boarders.js): an inspection at a
+  // checkpoint, say. Does nothing if a party is already docked.
+  board: {
+    args: { encounter: typed('encounter') },
+    run(sim, a) {
+      const def = sim.encounters.byId.get(a.encounter);
+      if (def) startBoarding(sim, def);
+    },
+  },
+  // A ship turns up on the scope already sure of us and closing, `range` scope units out (H.1).
+  contact: {
+    args: { encounter: typed('encounter'), range: count },
+    optional: ['range'],
+    run(sim, a, ctx) {
+      const def = sim.encounters.byId.get(a.encounter);
+      if (def) spawnContact(sim, def, { range: a.range ?? 30, bearing: rng(ctx).range(0, 360), state: 'closing' });
     },
   },
   // Hook (Stage 4 and 8): a scene is waiting to be played.
