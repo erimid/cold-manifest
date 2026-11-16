@@ -63,7 +63,7 @@ test('an enemy ship may say how many it sends to board, and only a crewed one ca
 
 test('every ship has an airlock to board from, and crew find the nearest one on foot', () => {
   const sim = newCrewedSim();
-  assert.deepEqual(airlockRooms(sim).sort(), ['cargo', 'engines', 'quarters', 'weapons']);
+  assert.deepEqual(airlockRooms(sim).sort(), ['cargo', 'engines', 'hold', 'quarters']);
   assert.equal(nearestAirlock(sim, 'bridge'), 'quarters');
   assert.equal(nearestAirlock(sim, 'reactor'), 'engines');
 });

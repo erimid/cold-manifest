@@ -19,7 +19,7 @@ import { AUTO_PAUSE, createSettings } from './ui/settings.js';
 import { createShipView } from './ui/shipview.js';
 import { renderStub, renderTitle } from './ui/title.js';
 
-const VERSION = '0.11.0';
+const VERSION = '0.12.0';
 
 const params = new URLSearchParams(window.location.search);
 const flags = {
@@ -54,7 +54,7 @@ setPressBinder(input.press);
 
 // The simulation and the one clock that drives it.
 // Placeholder crew until Stage 4 generates them (DECISIONS DF-03, DF-23).
-const crew = content.all('crew').map(({ id, name }) => ({ id, name }));
+const crew = content.all('crew').map(({ id, name, engineer }) => ({ id, name, engineer }));
 const sim = createSim({ seed: flags.seed, ship: content.require('ships', 'margin-of-error'), crew, lines: content.all('ai-lines'), weapons: content.all('weapons'), ships: content.all('ships') });
 const clock = createClock({ sim, tickSeconds: TICK_SECONDS });
 

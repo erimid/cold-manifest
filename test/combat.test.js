@@ -68,7 +68,7 @@ test('a player ship needs hull points and 2 to 4 hardpoints; an enemy may be muc
   assert.deepEqual(validateLayout(drone), []);
   const layout = buildLayout(drone);
   assert.equal(layout.enemy, true);
-  assert.equal(layout.facing, 'up');
+  assert.equal(layout.facing, 'left');
   assert.equal(layout.hasSystem('medbay'), false);
   const { enemy, ...asPlayer } = drone;
   assert.ok(validateLayout(asPlayer).some((p) => /no room holds the medbay system/.test(p)), 'only an enemy may leave systems out');

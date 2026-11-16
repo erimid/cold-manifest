@@ -59,7 +59,7 @@ const ticks = Math.round(minutes * 60 * TICK_RATE);
 const content = createContent(readContentFiles());
 const shipId = String(option('ship', 'margin-of-error'));
 const ship = content.require('ships', shipId);
-const roster = content.all('crew').map(({ id, name }) => ({ id, name }));
+const roster = content.all('crew').map(({ id, name, engineer }) => ({ id, name, engineer }));
 const lines = content.all('ai-lines');
 const weapons = content.all('weapons');
 const ships = content.all('ships');

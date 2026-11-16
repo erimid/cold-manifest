@@ -37,9 +37,9 @@ test('routes follow the door graph and respect locked and jammed doors', () => {
   assert.deepEqual(doors(findRoute(sim, 'reactor', 'cargo')), ['d_engines_reactor', 'd_engines_cargo']);
   assert.deepEqual(doors(findRoute(sim, 'bridge', 'weapons')), ['d_bridge', 'd_weapons']);
 
-  // Lock the direct ways from the reactor: the route bends round through the corridor.
+  // Lock the direct way from the reactor: the route bends round, down the ladder to the corridor.
   give(sim, { type: 'door.set', door: 'd_engines_reactor', state: 'locked' });
-  assert.deepEqual(doors(findRoute(sim, 'reactor', 'cargo')), ['d_reactor', 'd_cargo']);
+  assert.deepEqual(doors(findRoute(sim, 'reactor', 'cargo')), ['d_reactor', 'd_engines_corridor', 'd_engines_cargo']);
   give(sim, { type: 'debug.door', door: 'd_reactor', jammed: true });
   assert.equal(findRoute(sim, 'reactor', 'cargo'), null, 'locked one way, jammed shut the other');
   assert.match(sim.whyNot({ type: 'crew.move', crew: 'nobody', room: 'cargo' }), /no crew member/);
@@ -50,7 +50,7 @@ test('routes follow the door graph and respect locked and jammed doors', () => {
   seconds(sim, 1);
   give(sim, { type: 'debug.door', door: 'd_reactor', jammed: true });
   assert.ok(sim.state.doors.d_reactor.openness >= WALKABLE);
-  assert.deepEqual(doors(findRoute(sim, 'reactor', 'cargo')), ['d_reactor', 'd_cargo']);
+  assert.deepEqual(doors(findRoute(sim, 'reactor', 'cargo')), ['d_reactor', 'd_engines_corridor', 'd_engines_cargo']);
 });
 
 test('a move order walks someone there, opening doors and shutting them behind', () => {
@@ -112,6 +112,7 @@ test('move orders are refused when there is no way, and for the dead and the gon
 test('a door locked in their face: they go round, or stop and say so', () => {
   const sim = newCrewedSim();
   const blocked = listen(sim, 'crew.blocked');
+  sim.state.crew.dace.engineer = false; // or she would simply take a crawlway
   // Dace leaves the reactor for the cargo hold by the engine room; lock that way once she is moving.
   give(sim, { type: 'crew.move', crew: 'dace', room: 'cargo' }, { type: 'door.set', door: 'd_engines_reactor', state: 'locked' });
   seconds(sim, 15);
@@ -119,7 +120,7 @@ test('a door locked in their face: they go round, or stop and say so', () => {
   assert.equal(blocked.length, 0);
 
   // Now seal her in and send her out: the order is refused, and one already under way is abandoned.
-  give(sim, { type: 'crew.move', crew: 'dace', room: 'bridge' }, { type: 'door.set', door: 'd_cargo', state: 'locked' }, { type: 'door.set', door: 'd_engines_cargo', state: 'locked' });
+  give(sim, { type: 'crew.move', crew: 'dace', room: 'bridge' }, { type: 'door.set', door: 'd_cargo', state: 'locked' }, { type: 'door.set', door: 'd_engines_cargo', state: 'locked' }, { type: 'door.set', door: 'd_hold', state: 'locked' });
   seconds(sim, 5);
   const dace = sim.state.crew.dace;
   assert.equal(dace.room, 'cargo');
@@ -148,9 +149,67 @@ test('a suit slows the walk', () => {
   const heavy = newCrewedSim();
   give(heavy, { type: 'crew.suit', crew: 'okoro', on: true });
   for (const sim of [light, heavy]) give(sim, { type: 'crew.move', crew: 'okoro', room: 'engines' });
-  seconds(light, 4);
-  seconds(heavy, 4);
-  assert.ok(heavy.state.crew.okoro.x > light.state.crew.okoro.x + 1, 'the suited one is well behind (the engines are aft, at low x)');
+  const arrivedAt = (sim) => {
+    for (let i = 0; i < 60 * TICK_RATE; i++) {
+      sim.step();
+      if (sim.state.crew.okoro.room === 'engines' && !sim.state.crew.okoro.path.length) return sim.state.tick;
+    }
+    return Infinity;
+  };
+  const quick = arrivedAt(light);
+  const slow = arrivedAt(heavy);
+  assert.ok(Number.isFinite(slow) && slow > quick + 2 * TICK_RATE, `unsuited ${quick} ticks, suited ${slow}`);
+});
+
+test('ladders are slow, the lift is quick while door control has power, and dead without it', () => {
+  const sim = newSim();
+  // Bridge to the main hold: by the lift, two decks down.
+  assert.deepEqual(doors(findRoute(sim, 'bridge', 'hold')), ['d_lift_bridge', 'd_lift_hold']);
+  const timeTo = (dark) => {
+    const s = newCrewedSim();
+    if (dark) give(s, { type: 'power.add', system: 'doors', delta: -s.state.systems.doors.power });
+    give(s, { type: 'crew.move', crew: 'ilse', room: 'hold' });
+    for (let i = 0; i < 90 * TICK_RATE; i++) {
+      s.step();
+      if (s.state.crew.ilse.room === 'hold' && !s.state.crew.ilse.path.length) return { tick: s.state.tick };
+    }
+    return { tick: Infinity };
+  };
+  const lit = timeTo(false);
+  const dark = timeTo(true);
+  assert.ok(Number.isFinite(lit.tick) && Number.isFinite(dark.tick), `lit ${lit.tick}, dark ${dark.tick}`);
+  assert.ok(dark.tick > lit.tick + 2 * TICK_RATE, `the dark way round is slower: lit ${lit.tick}, dark ${dark.tick}`);
+});
+
+test('engineers take the service crawlways; nobody else can', () => {
+  const sim = newSim();
+  const engineer = { engineer: true };
+  // Cargo to the brig: round by the corridor on foot, one crawl for an engineer.
+  assert.ok(doors(findRoute(sim, 'cargo', 'brig')).every(Boolean));
+  assert.deepEqual(findRoute(sim, 'cargo', 'brig', engineer).map((s) => s.crawlway ?? s.door), ['c_cargo_brig']);
+  // The creature's ducts are never theirs.
+  assert.ok(!(findRoute(sim, 'brig', 'hold', engineer) ?? []).some((s) => s.crawlway === 'c_brig_hold'));
+
+  // Dace is the engineer: seal the cargo hold's doors and she crawls out anyway.
+  const crewed = newCrewedSim();
+  const dace = crewed.state.crew.dace;
+  assert.equal(dace.engineer, true);
+  give(crewed, { type: 'crew.move', crew: 'dace', room: 'cargo' });
+  seconds(crewed, 15);
+  assert.equal(dace.room, 'cargo');
+  for (const door of ['d_cargo', 'd_engines_cargo', 'd_hold']) give(crewed, { type: 'door.set', door, state: 'locked' });
+  assert.equal(crewed.whyNot({ type: 'crew.move', crew: 'dace', room: 'brig' }), null);
+  give(crewed, { type: 'crew.move', crew: 'dace', room: 'brig' });
+  let crawled = false;
+  for (let i = 0; i < 20 * TICK_RATE && dace.room !== 'brig'; i++) {
+    crewed.step();
+    if (dace.task === 'crawling') crawled = true;
+  }
+  assert.ok(crawled, 'she went by the crawlway');
+  assert.equal(describeTask(crewed, { ...dace, task: 'crawling' }), 'In a service crawlway');
+  seconds(crewed, 3);
+  assert.equal(dace.room, 'brig');
+  assert.deepEqual(checkInvariants(crewed), []);
 });
 
 test('you can fight a fire and patch a breach with three crew', () => {

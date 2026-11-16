@@ -12,7 +12,7 @@ export const SHIP = content.require('ships', 'margin-of-error');
 export const CATALOG = { weapons: content.all('weapons'), ships: content.all('ships') };
 
 /** The placeholder starting crew. */
-export const CREW = content.all('crew').map(({ id, name }) => ({ id, name }));
+export const CREW = content.all('crew').map(({ id, name, engineer }) => ({ id, name, engineer }));
 
 /** A fresh sim on the starting ship with its three crew aboard. */
 export const newCrewedSim = (seed = 'test') => createSim({ seed, ship: SHIP, crew: CREW, ...CATALOG });

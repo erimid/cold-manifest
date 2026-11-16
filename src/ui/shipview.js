@@ -72,11 +72,13 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
   let selectedWeapon = null; // a weapon slot; while set, tapping a room on the enemy ship aims it there
   let foe = null; // the enemy ship's renderer, while there is one: { id, renderer }
   let foeView = null; // where the enemy ship is drawn
+  let monitor = { x: 0, y: 0, w: 0, h: 0 }; // Margo's schematic screen, in CSS pixels
+  let sensorBox = null; // the enemy's sensor-return screen, in a fight
   let fightBar = null; // the weapons bar's live parts
   let impacts = []; // shots that just landed, for a moment: { side, room, result, damage, effects, tick }
   let shake = null; // { tick, strength } the last hit on our ship, while the screen shakes
   let roster = null; // the crew bar's live parts
-  let showVents = false;
+  let showCrawlways = false;
   let subscriptions = [];
   let nodes = null;
   let panel = null; // the status panel's live parts for the current selection
@@ -104,6 +106,8 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
       const room = layout.room(target.id);
       if (room.system) return `${room.name}. ${SYSTEMS[room.system].blurb}`;
       if (room.kind === 'helm') return `${room.name}. Where the ship is flown from.`;
+      if (room.kind === 'lift') return `${room.name}. Runs on door control power. Without it, everyone takes the ladders.`;
+      if (room.kind === 'hold' || room.kind === 'cargo') return `${room.name}. Where the paying cargo goes, when there is any.`;
       return `${room.name}. Gets you from one problem to the next.`;
     }
     if (target?.kind === 'foe') {
@@ -131,8 +135,8 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     // The ship gets the space between the top bar and the bottom panels, and is refitted if either moves.
     const top = Math.round(nodes.top.getBoundingClientRect().bottom) + 10;
-    const bottom = Math.round(nodes.bottom.getBoundingClientRect().top) - 10;
     const enemyId = sim.state.fight?.enemy.ship ?? null;
+    const bottom = Math.round(nodes.bottom.getBoundingClientRect().top) - 10;
     if (w === size.w && h === size.h && dpr === size.dpr && top === size.top && bottom === size.bottom && enemyId === size.enemyId) return;
     if (w !== size.w || h !== size.h || dpr !== size.dpr) {
       canvas.width = Math.round(w * dpr);
@@ -140,18 +144,21 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     }
     size = { w, h, dpr, top, bottom, enemyId };
-    const area = { x: 16, y: top, w: w - 32, h: Math.max(80, bottom - top) };
+    // The monitor: the space between the top bar and the dock, with a bezel round the schematic.
+    monitor = { x: 12, y: top, w: w - 24, h: Math.max(80, bottom - top) };
     if (!enemyId) {
       foe = null;
       foeView = null;
-      view = renderer.fit(area);
+      sensorBox = null;
+      view = renderer.fit({ x: monitor.x + 12, y: monitor.y + 10, w: monitor.w - 24, h: monitor.h - 20 });
       return;
     }
-    // A fight: their ship stands in a column on the right, under its name; ours keeps the rest.
-    if (foe?.id !== enemyId) foe = { id: enemyId, renderer: createShipRenderer(enemyOf(sim).layout) };
-    const column = Math.round(area.w * 0.27);
-    view = renderer.fit({ ...area, w: area.w - column - 14 });
-    foeView = foe.renderer.fit({ x: area.x + area.w - column, y: area.y + 24, w: column, h: area.h - 28 });
+    // A fight: their ship is a sensor return in a small green screen let into the corner of Margo's (D-073).
+    if (foe?.id !== enemyId) foe = { id: enemyId, renderer: createShipRenderer(enemyOf(sim).layout, { sensor: true }) };
+    const boxW = Math.round(Math.min(320, Math.max(240, monitor.w * 0.29)));
+    sensorBox = { x: monitor.x + monitor.w - boxW - 10, y: monitor.y + 10, w: boxW, h: monitor.h - 20 };
+    view = renderer.fit({ x: monitor.x + 12, y: monitor.y + 10, w: monitor.w - boxW - 34, h: monitor.h - 20 });
+    foeView = foe.renderer.fit({ x: sensorBox.x + 8, y: sensorBox.y + 24, w: sensorBox.w - 16, h: sensorBox.h - 32 });
   }
 
   /** Our own people aboard a ship: the ones that can be tapped. Their boarders are only looked at. */
@@ -239,7 +246,7 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
     } }, label, el('small', {}, on ? 'On' : 'Off'));
     nodes.sheet.replaceChildren(
       el('div', { class: 'stencil' }, 'Settings'),
-      el('div', { class: 'sheet__pairs' }, toggle('set-sound', 'Sound', 'sound', settings.values.sound), toggle('set-shake', 'Screen shake', 'shake', settings.values.shake)),
+      el('div', { class: 'sheet__pairs' }, toggle('set-sound', 'Sound', 'sound', settings.values.sound), toggle('set-shake', 'Screen shake', 'shake', settings.values.shake), toggle('set-scanlines', 'Scanlines', 'scanlines', settings.values.scanlines !== false)),
       el('div', { class: 'stencil sheet__sub' }, 'Pause the game when'),
       el('div', { class: 'sheet__pairs' }, ...AUTO_PAUSE.map((item) => toggle(`set-pause-${item.id}`, item.label, `autoPause.${item.id}`, settings.values.autoPause[item.id]))),
     );
@@ -272,8 +279,8 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
       el('div', { class: 'stencil sheet__sub' }, 'Push the fight to an ending'),
       el('div', { class: 'sheet__grid' }, DEBUG_ACTIONS.map((action) => button(`btn-dbg-end-${action}`, DEBUG_LABELS[action], act(() => order({ type: 'debug.combat', action })), 'btn--debug'))),
       el('div', { class: 'stencil sheet__sub' }, 'View'),
-      el('div', { class: 'sheet__grid' }, button('btn-vents', showVents ? 'Hide vents' : 'Show vents', () => {
-        showVents = !showVents;
+      el('div', { class: 'sheet__grid' }, button('btn-crawlways', showCrawlways ? 'Hide crawlways' : 'Show crawlways', () => {
+        showCrawlways = !showCrawlways;
         drawDebug();
       }, 'btn--debug')),
     );
@@ -497,19 +504,111 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
     }
   }
 
+  // ---------- Margo's monitor ----------
+
+  /** A cheap company CRT: a dark glass screen in a chunky bezel, behind the schematic. */
+  function drawBezel() {
+    const { x, y, w, h } = monitor;
+    if (w <= 0) return;
+    ctx.fillStyle = '#0b0f14';
+    ctx.strokeStyle = '#3a414c';
+    ctx.lineWidth = 6;
+    roundRect(x, y, w, h, 18);
+    ctx.fill();
+    ctx.stroke();
+    const glow = ctx.createRadialGradient(x + w / 2, y + h / 2, Math.min(w, h) * 0.2, x + w / 2, y + h / 2, Math.max(w, h) * 0.65);
+    glow.addColorStop(0, 'rgba(255, 179, 71, 0.05)');
+    glow.addColorStop(1, 'rgba(0, 0, 0, 0.35)');
+    ctx.fillStyle = glow;
+    roundRect(x + 3, y + 3, w - 6, h - 6, 16);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(168, 116, 44, 0.75)';
+    ctx.font = "700 10px ui-monospace, 'SF Mono', Menlo, Consolas, monospace";
+    ctx.textBaseline = 'bottom';
+    ctx.textAlign = 'right';
+    ctx.fillText('M.A.R.G.O. SCHEMATIC · COMPANY ISSUE', x + w - (sensorBox ? sensorBox.w + 28 : 18), y + h - 6);
+    if (sensorBox) {
+      const b = sensorBox;
+      ctx.fillStyle = '#04100a';
+      ctx.strokeStyle = '#2f5a3c';
+      ctx.lineWidth = 3;
+      roundRect(b.x, b.y, b.w, b.h, 8);
+      ctx.fill();
+      ctx.stroke();
+      // Range rings, and a sweep going round.
+      const cx = b.x + b.w / 2;
+      const cy = b.y + 14 + (b.h - 14) / 2;
+      ctx.save();
+      roundRect(b.x, b.y, b.w, b.h, 8);
+      ctx.clip();
+      ctx.strokeStyle = 'rgba(127, 227, 154, 0.12)';
+      ctx.lineWidth = 1;
+      for (let r = 40; r < b.w; r += 40) {
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+      if (!reduce) {
+        const angle = ((sim.state.tick + clock.alpha) * TICK_SECONDS * 1.4) % (Math.PI * 2);
+        ctx.strokeStyle = 'rgba(127, 227, 154, 0.35)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.lineTo(cx + Math.cos(angle) * b.w, cy + Math.sin(angle) * b.w);
+        ctx.stroke();
+      }
+      ctx.restore();
+      ctx.fillStyle = '#7fe39a';
+      ctx.font = "700 11px ui-monospace, 'SF Mono', Menlo, Consolas, monospace";
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      ctx.fillText(`SENSOR RETURN · ${enemyOf(sim)?.layout.name.toUpperCase() ?? ''}`, b.x + 10, b.y + 7, b.w - 20);
+    }
+    ctx.textAlign = 'start';
+    ctx.textBaseline = 'alphabetic';
+  }
+
+  /** Faint scanlines and a vignette over the screen. Off in settings for anyone who finds them tiring. */
+  let scanPattern = null;
+  function drawScanlines() {
+    const off = settings?.values.scanlines === false;
+    if (document.body.classList.contains('no-scanlines') !== off) document.body.classList.toggle('no-scanlines', off);
+    if (off) return;
+    const { x, y, w, h } = monitor;
+    if (w <= 0) return;
+    if (!scanPattern) {
+      const tile = document.createElement('canvas');
+      tile.width = 4;
+      tile.height = 3;
+      const t = tile.getContext('2d');
+      t.fillStyle = 'rgba(0, 0, 0, 0.22)';
+      t.fillRect(0, 2, 4, 1);
+      scanPattern = ctx.createPattern(tile, 'repeat');
+    }
+    ctx.save();
+    roundRect(x + 3, y + 3, w - 6, h - 6, 16);
+    ctx.clip();
+    ctx.fillStyle = scanPattern;
+    ctx.fillRect(x, y, w, h);
+    ctx.restore();
+  }
+
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
   // ---------- shots and their results, drawn over both ships ----------
 
   function drawFight(alpha) {
     const fight = sim.state.fight;
     if (!fight || !foe) return;
-    const enemy = enemyOf(sim);
-    // Their name, over their ship.
-    ctx.fillStyle = 'rgba(233, 220, 195, 0.8)';
-    ctx.font = "700 12px ui-monospace, 'SF Mono', Menlo, Consolas, monospace";
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'top';
-    const mid = foeView.ox + (enemy.layout.bounds.x + enemy.layout.bounds.w / 2) * foeView.scale;
-    ctx.fillText(enemy.layout.name.toUpperCase(), mid, size.top + 4);
 
     const now = sim.state.tick - 1 + alpha; // the frame sits between the last tick and this one, as crew do
     for (const shot of fight.shots) {
@@ -982,13 +1081,13 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
       aiText: el('span', { class: 'aibox__text', id: 'ai-text' }),
       sheet: el('div', { class: 'panel sheet', id: 'sheet', hidden: true }),
     };
+    // Margo: her face on the monitor, and what she is saying (D-073).
     nodes.ai = el(
       'div',
       { class: 'panel aibox', id: 'aibox' },
-      el('span', { class: 'stencil aibox__name' }, 'M.A.R.G.O.'),
-      nodes.aiText,
-      button('btn-log', 'Log', () => openSheet('log')),
-      settings && button('btn-settings', 'Settings', () => openSheet('settings')),
+      el('div', { class: 'margo-face', 'aria-hidden': 'true' }, el('div', { class: 'margo-face__eye' }, el('div', { class: 'margo-face__iris' })), el('div', { class: 'margo-face__mouth' })),
+      el('div', { class: 'aibox__body' }, el('span', { class: 'stencil aibox__name' }, 'M.A.R.G.O.'), nodes.aiText),
+      el('div', { class: 'aibox__buttons' }, button('btn-log', 'Log', () => openSheet('log')), settings && button('btn-settings', 'Settings', () => openSheet('settings'))),
     );
     nodes.pause = el('button', { class: 'btn btn--pause', type: 'button', id: 'btn-pause', press: () => clock.toggle() }, nodes.pauseLabel, nodes.pauseNote);
     nodes.top = el(
@@ -1062,6 +1161,7 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
       const enemy = enemyOf(sim);
       const jolt = shakeOffset(clock.alpha);
       ctx.clearRect(0, 0, size.w, size.h);
+      drawBezel();
       ctx.save();
       ctx.translate(jolt.x, jolt.y);
       renderer.draw(ctx, {
@@ -1076,7 +1176,7 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
         alpha: clock.alpha,
         selected: selected?.kind === 'foe' ? null : selected,
         selectedCrew,
-        showVents,
+        showCrawlways,
         charges: sim.state.weapons.map((_, slot) => chargeOf(sim, slot)),
         chosenWeapon: selectedWeapon,
         aimed: enemy ? aimedBy(enemy) : null,
@@ -1101,6 +1201,7 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
       }
       drawImpacts(clock.alpha);
       ctx.restore();
+      drawScanlines();
       updateClock();
       updatePanel();
       updatePower();

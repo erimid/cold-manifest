@@ -1,7 +1,20 @@
 {
   "items": [
-    { "id": "ilse", "name": "Ilse", "placeholder": true },
-    { "id": "dace", "name": "Dace", "placeholder": true },
-    { "id": "okoro", "name": "Okoro", "placeholder": true }
+    {
+      "id": "ilse",
+      "name": "Ilse",
+      "placeholder": true
+    },
+    {
+      "id": "dace",
+      "name": "Dace",
+      "placeholder": true,
+      "engineer": true
+    },
+    {
+      "id": "okoro",
+      "name": "Okoro",
+      "placeholder": true
+    }
   ]
 }

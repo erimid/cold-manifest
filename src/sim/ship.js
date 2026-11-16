@@ -2,13 +2,23 @@
 // content/ships/. This module checks a layout and turns it into the graphs
 // the sim and renderer use. Pure and DOM-free.
 //
-// Layouts are drawn on a grid of square tiles:
+// Layouts are drawn on a grid of square tiles. From S2.6 (D-071) the player's
+// ship is drawn side-on: x runs along the ship, y runs down through its decks,
+// so a room's floor is its bottom edge.
+//   decks   optional [{ id, name, y, h }]: the horizontal bands rooms sit in, for
+//           the schematic's deck labels. Every room fits inside its decks; a
+//           room may span several (a tall hold, an engine room, a lift shaft).
 //   rooms   rectangles { id, name, x, y, w, h, kind?, system?, jettison? } in whole
 //           tiles. `jettison: true` marks a section that can be cut loose.
+//           `kind: "lift"` is a lift shaft: crew ride it fast while door control
+//           has power, and cannot use it at all while it has none.
 //   doors   { id, a, b, x, y, vertical } where (x, y) is the middle of the
 //           doorway on the wall the two rooms share, and `vertical` says the
-//           wall runs up and down. `b` may be "space" for an airlock.
-//   vents   { id, a, b }: crawlspaces between rooms. Crew cannot use them.
+//           wall runs up and down. `b` may be "space" for an airlock. A door
+//           in a floor or ceiling (vertical: false) is a hatch with a ladder.
+//   crawlways  { id, a, b, creature? } (D-072): service crawlways between two
+//           rooms that share a wall. Only engineers use them (slowly), and
+//           `creature: true` marks a duct too narrow for anyone but the creature.
 //   hull    the outline of the ship as a list of [x, y] points
 //   crewStart  room ids where the starting crew stand, in roster order
 //   power   { reactor, lightsPerBar, systems: { id: { level, power } } }: the
@@ -17,7 +27,7 @@
 //   hullPoints  how much punishment the ship takes before it breaks up
 //   hardpoints  [{ id, x, y }]: where weapons mount on the hull, 2 to 4
 //   weapons     ids from content/weapons/, fitted to the hardpoints in order
-//   facing      "right" (the default) or "up": which way the bow points
+//   facing      "right" (the default), "left" or "up": which way the bow points
 //   enemy       true for a ship the player fights rather than flies. An enemy
 //               may leave systems out, mount no weapons and carry no crew.
 //   crew        enemies only: who is aboard, [{ id, name }], placed in crewStart
@@ -48,6 +58,41 @@ export function wallOf(room, door) {
 
 const OPPOSITE = { left: 'right', right: 'left', top: 'bottom', bottom: 'top' };
 
+/**
+ * Where two rooms touch: the shared stretch of wall at least one tile long, as
+ * { vertical, at, from, to } (at is the wall's x or y; from and to run along it), or null.
+ */
+export function sharedWall(a, b) {
+  const span = (lo1, hi1, lo2, hi2) => [Math.max(lo1, lo2), Math.min(hi1, hi2)];
+  if (a.x + a.w === b.x || b.x + b.w === a.x) {
+    const [from, to] = span(a.y, a.y + a.h, b.y, b.y + b.h);
+    if (to - from >= 1) return { vertical: true, at: a.x + a.w === b.x ? b.x : a.x, from, to };
+  }
+  if (a.y + a.h === b.y || b.y + b.h === a.y) {
+    const [from, to] = span(a.x, a.x + a.w, b.x, b.x + b.w);
+    if (to - from >= 1) return { vertical: false, at: a.y + a.h === b.y ? b.y : a.y, from, to };
+  }
+  return null;
+}
+
+/**
+ * The two ends of a crawlway: a service hatch in each room, either side of the
+ * shared wall (above the doorways for a wall, by the wall's far end for a floor).
+ */
+export function crawlHatches(a, b) {
+  const wall = sharedWall(a, b);
+  const inset = 0.55;
+  if (wall.vertical) {
+    // Waist high above the floor of the lower of the two, clear of any doorway (doors are a tile tall, at floor level).
+    const y = wall.to - wall.from >= 2.5 ? wall.to - 1.5 : (wall.from + wall.to) / 2;
+    const side = (room) => (room.x < wall.at ? -inset : inset);
+    return { [a.id]: { x: wall.at + side(a), y }, [b.id]: { x: wall.at + side(b), y } };
+  }
+  const x = wall.to - inset;
+  const side = (room) => (room.y < wall.at ? -inset : inset);
+  return { [a.id]: { x, y: wall.at + side(a) }, [b.id]: { x, y: wall.at + side(b) } };
+}
+
 function overlaps(a, b) {
   return a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
 }
@@ -75,8 +120,9 @@ export function validateLayout(data) {
   if (typeof data.name !== 'string' || !data.name.trim()) problems.push('missing name');
   if (!Array.isArray(data.rooms) || !data.rooms.length) return [...problems, 'needs a "rooms" list'];
   if (!Array.isArray(data.doors)) return [...problems, 'needs a "doors" list'];
-  const vents = data.vents ?? [];
-  if (!Array.isArray(vents)) return [...problems, '"vents" must be a list'];
+  if (data.vents !== undefined) problems.push('"vents" became "crawlways" in S2.6');
+  const crawlways = data.crawlways ?? [];
+  if (!Array.isArray(crawlways)) return [...problems, '"crawlways" must be a list'];
 
   // Rooms
   const rooms = new Map();
@@ -95,6 +141,7 @@ export function validateLayout(data) {
     }
     if (room.jettison !== undefined && typeof room.jettison !== 'boolean') problems.push(`${label}: "jettison" must be true or false`);
     if (room.system !== undefined && !SYSTEM_IDS.includes(room.system)) problems.push(`${label}: unknown system "${room.system}"`);
+    if (room.kind === 'lift' && room.system !== undefined) problems.push(`${label}: a lift shaft holds no system`);
     for (const other of rooms.values()) {
       if (overlaps(room, other)) problems.push(`${label}: overlaps room "${other.id}"`);
     }
@@ -166,18 +213,36 @@ export function validateLayout(data) {
     }
   }
 
-  // Vents
-  const ventIds = new Set();
-  for (const vent of vents) {
-    const label = `vent "${vent?.id}"`;
-    if (!vent || typeof vent.id !== 'string' || !vent.id) {
-      problems.push('a vent is missing its id');
+  // Decks: bands that do not overlap, and every room inside the ones it spans
+  const decks = data.decks ?? [];
+  if (!Array.isArray(decks) || !decks.every((d) => d && typeof d.id === 'string' && d.id && typeof d.name === 'string' && Number.isInteger(d.y) && Number.isInteger(d.h) && d.h >= 1)) {
+    problems.push('"decks" must be a list of { id, name, y, h } in whole tiles');
+  } else if (decks.length) {
+    const sorted = [...decks].sort((a, b) => a.y - b.y);
+    for (let i = 1; i < sorted.length; i++) if (sorted[i].y < sorted[i - 1].y + sorted[i - 1].h) problems.push(`deck "${sorted[i].id}" overlaps deck "${sorted[i - 1].id}"`);
+    for (const room of rooms.values()) {
+      const top = sorted.find((d) => d.y === room.y);
+      const bottom = sorted.find((d) => d.y + d.h === room.y + room.h);
+      if (!top || !bottom) problems.push(`room "${room.id}": its ceiling and floor must line up with decks`);
+    }
+  }
+
+  // Crawlways
+  const crawlIds = new Set();
+  for (const crawl of crawlways) {
+    const label = `crawlway "${crawl?.id}"`;
+    if (!crawl || typeof crawl.id !== 'string' || !crawl.id) {
+      problems.push('a crawlway is missing its id');
       continue;
     }
-    if (ventIds.has(vent.id)) problems.push(`${label}: duplicate vent id`);
-    ventIds.add(vent.id);
-    if (!rooms.has(vent.a) || !rooms.has(vent.b)) problems.push(`${label}: both ends must be rooms`);
-    else if (vent.a === vent.b) problems.push(`${label}: both ends are the same room`);
+    if (crawlIds.has(crawl.id)) problems.push(`${label}: duplicate crawlway id`);
+    crawlIds.add(crawl.id);
+    if (crawl.creature !== undefined && typeof crawl.creature !== 'boolean') problems.push(`${label}: "creature" must be true or false`);
+    const a = rooms.get(crawl.a);
+    const b = rooms.get(crawl.b);
+    if (!a || !b) problems.push(`${label}: both ends must be rooms`);
+    else if (a === b) problems.push(`${label}: both ends are the same room`);
+    else if (!sharedWall(a, b)) problems.push(`${label}: rooms "${a.id}" and "${b.id}" do not share a wall`);
   }
 
   // Hull outline
@@ -214,7 +279,7 @@ export function validateLayout(data) {
     if (!Array.isArray(fitted) || !fitted.every((id) => typeof id === 'string' && id)) problems.push('"weapons" must be a list of weapon ids');
     else if (fitted.length > hardpoints.length) problems.push(`${fitted.length} weapons fitted but only ${hardpoints.length} hardpoints`);
   }
-  if (data.facing !== undefined && !['right', 'up'].includes(data.facing)) problems.push('"facing" must be "right" or "up"');
+  if (data.facing !== undefined && !['right', 'up', 'left'].includes(data.facing)) problems.push('"facing" must be "right", "left" or "up"');
 
   return problems;
 }
@@ -229,7 +294,12 @@ export function buildLayout(data) {
 
   const rooms = data.rooms.map((room) => Object.freeze({ kind: 'room', ...room }));
   const doors = data.doors.map((door) => Object.freeze({ ...door, airlock: door.b === SPACE }));
-  const vents = (data.vents ?? []).map((vent) => Object.freeze({ ...vent }));
+  const decks = Object.freeze((data.decks ?? []).map((deck) => Object.freeze({ ...deck })));
+  const crawlways = (data.crawlways ?? []).map((crawl) => {
+    const a = data.rooms.find((r) => r.id === crawl.a);
+    const b = data.rooms.find((r) => r.id === crawl.b);
+    return Object.freeze({ creature: false, ...crawl, hatches: Object.freeze(crawlHatches(a, b)) });
+  });
   const roomById = new Map(rooms.map((r) => [r.id, r]));
   const doorById = new Map(doors.map((d) => [d.id, d]));
 
@@ -239,12 +309,13 @@ export function buildLayout(data) {
     exits.get(door.a).push({ door: door.id, to: door.b });
     if (!door.airlock) exits.get(door.b).push({ door: door.id, to: door.a });
   }
-  // roomId -> [{ vent, to }]
-  const ventExits = new Map(rooms.map((r) => [r.id, []]));
-  for (const vent of vents) {
-    ventExits.get(vent.a).push({ vent: vent.id, to: vent.b });
-    ventExits.get(vent.b).push({ vent: vent.id, to: vent.a });
+  // roomId -> [{ crawlway, to }]
+  const crawlExits = new Map(rooms.map((r) => [r.id, []]));
+  for (const crawl of crawlways) {
+    crawlExits.get(crawl.a).push({ crawlway: crawl.id, to: crawl.b, creature: crawl.creature });
+    crawlExits.get(crawl.b).push({ crawlway: crawl.id, to: crawl.a, creature: crawl.creature });
   }
+  const crawlById = new Map(crawlways.map((c) => [c.id, c]));
 
   const xs = data.hull.map((p) => p[0]);
   const ys = data.hull.map((p) => p[1]);
@@ -257,7 +328,8 @@ export function buildLayout(data) {
     bounds,
     rooms,
     doors,
-    vents,
+    decks,
+    crawlways,
     power: Object.freeze(structuredClone(data.power)),
     crewStart: Object.freeze([...data.crewStart]),
     enemy: data.enemy === true,
@@ -271,7 +343,8 @@ export function buildLayout(data) {
     room: (id) => roomById.get(id),
     door: (id) => doorById.get(id),
     exits: (roomId) => exits.get(roomId) ?? [],
-    ventExits: (roomId) => ventExits.get(roomId) ?? [],
+    crawlExits: (roomId) => crawlExits.get(roomId) ?? [],
+    crawlway: (id) => crawlById.get(id),
     roomOfSystem: (system) => rooms.find((r) => r.system === system),
   });
 }

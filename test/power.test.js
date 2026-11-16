@@ -67,7 +67,7 @@ test('lights draw power: dark rooms free a bar, and relighting needs one', () =>
   const rooms = sim.layout.rooms.map((r) => r.id);
   for (const room of rooms.slice(0, 5)) sim.enqueue({ type: 'room.lights', room, on: false });
   sim.step();
-  assert.equal(litRooms(sim), 10);
+  assert.equal(litRooms(sim), 12);
   assert.equal(lightsDraw(sim), 2);
   assert.equal(free(sim), 1);
   // A room can come back on while the lights' own bar has room for it...
@@ -75,7 +75,7 @@ test('lights draw power: dark rooms free a bar, and relighting needs one', () =>
   assert.equal(lightsDraw(sim), 3);
   assert.equal(free(sim), 0);
   give(sim, { type: 'room.lights', room: rooms[1], on: true });
-  assert.equal(litRooms(sim), 12);
+  assert.equal(litRooms(sim), 14);
   // ...but not once that would take a bar that is spent elsewhere.
   for (const room of rooms.slice(0, 5)) sim.enqueue({ type: 'room.lights', room, on: false });
   sim.step();
