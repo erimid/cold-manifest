@@ -23,10 +23,14 @@ function areaOf(target) {
  * The target a pointer at (x, y) means, or null.
  *
  * Targets are rectangles { id, x, y, w, h } or circles { id, cx, cy, r },
- * with an optional `priority` (higher wins; doors beat the rooms they sit on).
- * A point inside a target always beats a near miss on another. Among targets
- * the point is inside, higher priority wins, then the smaller target. Among
- * near misses, the closest edge wins.
+ * with an optional `priority` (higher wins; doors beat the rooms they sit on,
+ * crew beat both).
+ *
+ * Every target within reach (inside it, or within the padding for this kind
+ * of pointer) is a candidate. The highest priority candidate wins, so a
+ * fingertip that lands just beside a door still gets the door rather than the
+ * room it is standing in. Between candidates of the same priority, being
+ * inside beats a near miss, then the closest edge wins, then the smaller target.
  */
 export function pickTarget(targets, x, y, pointerType = 'mouse') {
   const padding = HIT_PADDING[pointerType] ?? HIT_PADDING.mouse;
@@ -35,12 +39,10 @@ export function pickTarget(targets, x, y, pointerType = 'mouse') {
   for (const target of targets) {
     const distance = distanceToTarget(target, x, y);
     if (distance > padding) continue;
-    const inside = distance === 0;
     // Lower key wins, compared field by field.
-    const key = inside
-      ? [0, -(target.priority ?? 0), areaOf(target)]
-      : [1, distance, -(target.priority ?? 0)];
-    if (!bestKey || key[0] < bestKey[0] || (key[0] === bestKey[0] && (key[1] < bestKey[1] || (key[1] === bestKey[1] && key[2] < bestKey[2])))) {
+    const key = [-(target.priority ?? 0), distance, areaOf(target)];
+    const better = !bestKey || key[0] < bestKey[0] || (key[0] === bestKey[0] && (key[1] < bestKey[1] || (key[1] === bestKey[1] && key[2] < bestKey[2])));
+    if (better) {
       best = target;
       bestKey = key;
     }

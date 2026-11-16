@@ -15,7 +15,7 @@ npm install
 npm run dev        # play at http://localhost:5173
 ```
 
-URL flags: `?debug=1` shows the debug overlay, `?seed=ABCD-EFGH` fixes the seed, `?auto=1` is reserved for the autoplay bot.
+URL flags: `?debug=1` shows the debug overlay and debug buttons (start a fire, breach a room, jam a door, show vents), `?seed=ABCD-EFGH` fixes the seed, `?auto=1` is reserved for the autoplay bot.
 
 ## Play it online
 

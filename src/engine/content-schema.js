@@ -2,6 +2,7 @@
 // Each stage adds the rules for the content types it introduces (PLAN.md §4).
 
 import { AI_CATEGORIES, AI_SLOTS } from '../ai/categories.js';
+import { validateLayout } from '../sim/ship.js';
 import { CONTENT_TYPES, typeOfPath } from './content.js';
 
 const ID_PATTERN = /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/;
@@ -57,6 +58,7 @@ function checkAiLine(item) {
 
 const ITEM_RULES = {
   'ai-lines': checkAiLine,
+  ships: validateLayout,
 };
 
 /**

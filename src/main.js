@@ -1,7 +1,7 @@
 // Boot, frame loop and the top-level screen state machine (brief §4).
 //
-// S1.2: the sim clock, pause and the input layer are real, and the test bay
-// screen exercises them. The ship view arrives in S1.3.
+// S1.3: the ship view shows the Margin of Error's rooms and doors. Power, air,
+// hazards and crew plug into it over the rest of Stage 1.
 
 import { AI_SLOTS } from './ai/categories.js';
 import { createClock } from './engine/clock.js';
@@ -12,10 +12,10 @@ import { createStateMachine } from './engine/state-machine.js';
 import { TICK_SECONDS, createSim } from './sim/sim.js';
 import { createBackdrop } from './ui/backdrop.js';
 import { el, setPressBinder } from './ui/dom.js';
-import { createTestBay } from './ui/testbay.js';
+import { createShipView } from './ui/shipview.js';
 import { renderStub, renderTitle } from './ui/title.js';
 
-const VERSION = '0.2.0';
+const VERSION = '0.3.0';
 
 const params = new URLSearchParams(window.location.search);
 const flags = {
@@ -34,11 +34,11 @@ const input = createInput({ canvas: viewCanvas });
 setPressBinder(input.press);
 
 // The simulation and the one clock that drives it.
-const sim = createSim({ seed: flags.seed });
+const sim = createSim({ seed: flags.seed, ship: content.require('ships', 'margin-of-error') });
 const clock = createClock({ sim, tickSeconds: TICK_SECONDS });
 
 /** Screens where the sim is live. Everywhere else the clock does not run. */
-const LIVE_STATES = new Set(['testbay']);
+const LIVE_STATES = new Set(['ship']);
 
 /** A greeting for the title screen: a seeded pick from lines that need no slots. */
 function pickGreeting() {
@@ -51,7 +51,7 @@ function pickGreeting() {
 
 let stopTyping = () => {};
 
-const testBay = createTestBay({ canvas: viewCanvas, root, input, sim, clock, onBack: () => machine.go('title') });
+const shipView = createShipView({ canvas: viewCanvas, root, input, sim, clock, debug: flags.debug, onBack: () => machine.go('title') });
 
 const machine = createStateMachine({
   title: {
@@ -62,7 +62,7 @@ const machine = createStateMachine({
         version: VERSION,
         contentSummary: `${content.count('ai-lines')} lines loaded`,
         onNewRun: () => machine.go('contracts'),
-        onTestBay: () => machine.go('testbay'),
+        onShip: () => machine.go('ship'),
         onHub: () => machine.go('hub'),
       });
     },
@@ -70,7 +70,7 @@ const machine = createStateMachine({
       stopTyping();
     },
   },
-  testbay: testBay,
+  ship: shipView,
   contracts: {
     enter() {
       renderStub(root, {
@@ -137,4 +137,4 @@ machine.go('title');
 requestAnimationFrame(frame);
 
 // Handle for the browser console and for automated tests.
-window.coldManifest = { version: VERSION, flags, machine, content, sim, clock, input, testBay };
+window.coldManifest = { version: VERSION, flags, machine, content, sim, clock, input, shipView };
