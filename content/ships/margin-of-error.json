@@ -57,6 +57,13 @@
         { "id": "v_weapons_bridge", "a": "weapons", "b": "bridge" }
       ],
       "crewStart": ["bridge", "reactor", "quarters"],
+      "hullPoints": 20,
+      "hardpoints": [
+        { "id": "hp_fore", "x": 26.7, "y": 10.4 },
+        { "id": "hp_mid", "x": 26.7, "y": 11.9 },
+        { "id": "hp_keel", "x": 24, "y": 12.7 }
+      ],
+      "weapons": ["pulse-laser", "slug-thrower"],
       "power": {
         "reactor": 8,
         "lightsPerBar": 5,

@@ -53,6 +53,8 @@ const shipId = String(option('ship', 'margin-of-error'));
 const ship = content.require('ships', shipId);
 const roster = content.all('crew').map(({ id, name }) => ({ id, name }));
 const lines = content.all('ai-lines');
+const weapons = content.all('weapons');
+const ships = content.all('ships');
 
 /** The longest anyone should stand still with somewhere to be: a hand-worked door, with a wide margin. */
 const MAX_STILL_TICKS = 200;
@@ -62,11 +64,11 @@ const MAX_DOOR_TICKS = Math.ceil(MANUAL_DOOR_SECONDS * TICK_RATE) + 3;
 
 /** Play one run to the end. Returns its stats, or throws on any failure. */
 function playRun(seed) {
-  const sim = createSim({ seed, ship, crew: roster, lines });
+  const sim = createSim({ seed, ship, crew: roster, lines, weapons, ships });
   const clock = createClock({ sim, tickSeconds: TICK_SECONDS });
   // The bot's own dice, kept apart from the sim's so its choices are not part of the game state.
   const bot = createRng(`bot:${seed}`);
-  const stats = { orders: 0, refused: 0, dropped: 0, doorMoves: 0, pauses: 0, powerMoves: 0, brownouts: 0, darkTicks: 0, fires: 0, spreads: 0, firesOut: 0, scorched: 0, jettisons: 0, airlessTicks: 0, moves: 0, arrivals: 0, blocked: 0, deaths: 0, firesFought: 0, patches: 0, repairs: 0 };
+  const stats = { orders: 0, refused: 0, dropped: 0, doorMoves: 0, pauses: 0, powerMoves: 0, brownouts: 0, darkTicks: 0, fires: 0, spreads: 0, firesOut: 0, scorched: 0, jettisons: 0, airlessTicks: 0, moves: 0, arrivals: 0, blocked: 0, deaths: 0, firesFought: 0, patches: 0, repairs: 0, fights: 0, shots: 0, hits: 0, absorbed: 0, missed: 0, kills: 0 };
   const watch = stuckWatch(sim);
   const movingSince = new Map(); // door id -> tick its last order was applied
 
@@ -93,6 +95,10 @@ function playRun(seed) {
   sim.events.on('fire.out', ({ by }) => by && (stats.firesFought += 1));
   sim.events.on('breach.sealed', () => (stats.patches += 1));
   sim.events.on('system.repaired', () => (stats.repairs += 1));
+  sim.events.on('fight.started', () => (stats.fights += 1));
+  sim.events.on('weapon.fired', () => (stats.shots += 1));
+  sim.events.on('shot.resolved', ({ result }) => (stats[result === 'hit' ? 'hits' : result === 'shield' ? 'absorbed' : 'missed'] += 1));
+  sim.events.on('fight.over', ({ outcome }) => outcome === 'destroyed' && (stats.kills += 1));
 
   /** Give an order the way a player would: only if the game would accept it. */
   function order(command) {
@@ -127,8 +133,28 @@ function playRun(seed) {
     order({ type: 'crew.move', crew: member.id, room: room.id });
   }
 
+  /** Pick a fight, aim at things, set fire to the other ship, walk away: in no sensible order. */
+  function fightAct() {
+    const fight = sim.state.fight;
+    if (!fight) return order({ type: 'debug.fight', enemy: bot.pick(sim.catalog.enemies) });
+    if (fight.over) return order({ type: bot.chance(0.7) ? 'fight.dismiss' : 'debug.fight', enemy: null });
+    const roll = bot.next();
+    const enemyRooms = Object.keys(fight.enemy.rooms);
+    if (roll < 0.7) return order({ type: 'weapon.target', slot: bot.between(0, sim.state.weapons.length), room: bot.chance(0.85) ? bot.pick(enemyRooms) : null });
+    if (roll < 0.9) return order({ type: 'power.add', system: bot.pick(['weapons', 'shields', 'engines']), delta: 1 });
+    if (roll < 0.97) {
+      // Not an order a player has: the hazard code is poked directly, as S2.2's hits will.
+      const room = fight.enemy.rooms[bot.pick(enemyRooms)];
+      if (bot.chance(0.5)) room.fire = bot.next();
+      else room.breach = bot.next();
+      return undefined;
+    }
+    return order({ type: 'debug.fight', enemy: null });
+  }
+
   function act() {
     if (bot.chance(0.3)) return crewAct();
+    if (bot.chance(0.25)) return fightAct();
     const roll = bot.next();
     if (roll < 0.25) {
       // Like a player, it wants the doors working: half the time it tries to get door control back first.
@@ -228,7 +254,7 @@ const SCENARIO_MINUTES = 5;
  * leaves the doors alone. Returns how it went, or throws on any failure.
  */
 function playScenario(seed) {
-  const sim = createSim({ seed, ship, crew: roster, lines });
+  const sim = createSim({ seed, ship, crew: roster, lines, weapons, ships });
   const bot = createRng(`scenario:${seed}`);
   const watch = stuckWatch(sim);
   const rooms = bot.shuffle(sim.layout.rooms.map((room) => room.id));
@@ -303,10 +329,57 @@ function playScenario(seed) {
   };
 }
 
+const GUNNERY_MINUTES = 5;
+
+/**
+ * Target practice: a drone comes alongside, the bot strips power from what it
+ * can spare, feeds the guns, and aims both at the drone. Returns how long the
+ * drone lasted, or throws on any failure.
+ */
+function playGunnery(seed) {
+  const sim = createSim({ seed, ship, crew: roster, lines, weapons, ships });
+  const bot = createRng(`gunnery:${seed}`);
+  const end = GUNNERY_MINUTES * 60 * TICK_RATE;
+  const tally = { shots: 0, hit: 0, shield: 0, miss: 0 };
+  sim.events.on('weapon.fired', () => (tally.shots += 1));
+  sim.events.on('shot.resolved', ({ result }) => (tally[result] += 1));
+  const order = (command) => !sim.whyNot(command) && sim.enqueue(command);
+  const enemyId = bot.pick(sim.catalog.enemies);
+  const spare = bot.shuffle(['sensors', 'doors', 'medbay', 'engines', 'shields']);
+
+  while (sim.state.tick < end && !sim.state.fight?.over) {
+    if (sim.state.tick === TICK_RATE) order({ type: 'debug.fight', enemy: enemyId });
+    if (sim.state.fight && sim.state.tick % TICK_RATE === 0) {
+      // Feed the guns: take a bar from something it can spare, give it to weapons.
+      const guns = sim.state.systems.weapons;
+      if (guns.power < guns.level - guns.damage) {
+        if (sim.whyNot({ type: 'power.add', system: 'weapons', delta: 1 })) {
+          const from = spare.find((id) => sim.state.systems[id].power > 0);
+          if (from) order({ type: 'power.add', system: from, delta: -1 });
+        } else order({ type: 'power.add', system: 'weapons', delta: 1 });
+      }
+      const rooms = Object.keys(sim.state.fight.enemy.rooms);
+      sim.state.weapons.forEach((slot, index) => {
+        if (slot.target === null) order({ type: 'weapon.target', slot: index, room: bot.pick(rooms) });
+      });
+    }
+    sim.step();
+    const problems = checkInvariants(sim);
+    if (problems.length) throw new Error(`tick ${sim.state.tick}: ${problems.join('; ')}`);
+  }
+  const bad = findBadNumbers(sim.state);
+  if (bad.length) throw new Error(`non-finite numbers at ${bad.join(', ')}`);
+  const over = sim.state.fight?.over ?? null;
+  if (!over) throw new Error(`the ${enemyId} was still there after ${GUNNERY_MINUTES} minutes (${sim.state.fight?.enemy.hull.points} hull left, ${tally.shots} shots)`);
+  if (tally.shots < tally.hit + tally.shield + tally.miss) throw new Error('more shots landed than were fired');
+  return { ...tally, outcome: over.outcome, seconds: (over.tick - sim.state.fight.started) / TICK_RATE, ourHull: sim.state.hull.points, hash: hashState(sim.snapshot()) };
+}
+
 const started = performance.now();
 const failures = [];
-const totals = { orders: 0, refused: 0, dropped: 0, doorMoves: 0, pauses: 0, powerMoves: 0, brownouts: 0, darkTicks: 0, fires: 0, spreads: 0, firesOut: 0, scorched: 0, jettisons: 0, airlessTicks: 0, moves: 0, arrivals: 0, blocked: 0, deaths: 0, firesFought: 0, patches: 0, repairs: 0, said: 0 };
+const totals = { orders: 0, refused: 0, dropped: 0, doorMoves: 0, pauses: 0, powerMoves: 0, brownouts: 0, darkTicks: 0, fires: 0, spreads: 0, firesOut: 0, scorched: 0, jettisons: 0, airlessTicks: 0, moves: 0, arrivals: 0, blocked: 0, deaths: 0, firesFought: 0, patches: 0, repairs: 0, fights: 0, shots: 0, hits: 0, absorbed: 0, missed: 0, kills: 0, said: 0 };
 const scenarios = [];
+const gunnery = [];
 for (let i = 1; i <= runs; i++) {
   const seed = `${baseSeed}-${i}`;
   try {
@@ -325,6 +398,14 @@ for (let i = 1; i <= runs; i++) {
   } catch (err) {
     failures.push({ seed, reason: `scenario: ${err.message}` });
   }
+  try {
+    const first = playGunnery(seed);
+    const second = playGunnery(seed);
+    if (first.hash !== second.hash) failures.push({ seed, reason: `gunnery replay mismatch (${first.hash} vs ${second.hash})` });
+    gunnery.push(first);
+  } catch (err) {
+    failures.push({ seed, reason: `gunnery: ${err.message}` });
+  }
 }
 const seconds = (performance.now() - started) / 1000;
 const per = (n) => (n / runs).toFixed(1);
@@ -335,7 +416,7 @@ const pct = (n, of) => (of ? `${Math.round((100 * n) / of)}%` : 'n/a');
 
 const out = [];
 out.push('Cold Manifest autoplay');
-out.push(`  runs:              ${runs} (seeds ${baseSeed}-1 to ${baseSeed}-${runs}), each played as chaos and as a scenario, each twice`);
+out.push(`  runs:              ${runs} (seeds ${baseSeed}-1 to ${baseSeed}-${runs}), each played as chaos, as a hazard scenario and as target practice, each twice`);
 out.push(`  ship:              ${ship.name}, crew of ${roster.length}, ${lines.length} AI lines`);
 out.push(`  crashed or bad:    ${failures.length}`);
 out.push('');
@@ -347,6 +428,7 @@ out.push(`  hazards per run:   ${per(totals.fires)} fires lit, ${per(totals.spre
 out.push(`  crew per run:      ${per(totals.moves)} sent, ${per(totals.arrivals)} arrived, ${per(totals.blocked)} blocked, ${per(totals.deaths)} of ${roster.length} died`);
 out.push(`  crew work per run: ${per(totals.firesFought)} fires put out, ${per(totals.patches)} breaches patched, ${per(totals.repairs)} system bars repaired`);
 out.push(`  air:               rooms were unbreathable ${((100 * totals.airlessTicks) / (runs * ticks * ship.rooms.length)).toFixed(0)}% of room-time`);
+out.push(`  fights per run:    ${per(totals.fights)} started, ${per(totals.shots)} shots fired (${per(totals.hits)} hit, ${per(totals.absorbed)} stopped by shields, ${per(totals.missed)} missed), ${per(totals.kills)} enemies destroyed`);
 out.push(`  AI lines per run:  ${per(totals.said)} (about one every ${totals.said ? Math.round((runs * minutes * 60) / totals.said) : 0} seconds)`);
 out.push(`  pauses per run:    ${per(totals.pauses)} (state checked every paused frame)`);
 out.push('');
@@ -359,10 +441,17 @@ out.push(`  crew alive at end: ${mean(scenarios.map((s) => s.alive)).toFixed(2)}
 out.push(`  system damage:     ${mean(scenarios.map((s) => s.damage)).toFixed(1)} bars left broken at the end`);
 out.push(`  AI lines:          ${mean(scenarios.map((s) => s.said)).toFixed(1)} per scenario`);
 out.push('');
+const killTimes = gunnery.map((g) => g.seconds).sort((a, b) => a - b);
+const fired = gunnery.reduce((sum, g) => sum + g.shots, 0);
+out.push(`Target practice (up to ${GUNNERY_MINUTES} game minutes each): a gunnery drone alongside, and a bot feeding and aiming the guns`);
+out.push(`  completed:         ${gunnery.length} of ${runs}; drone destroyed in ${gunnery.filter((g) => g.outcome === 'destroyed').length}`);
+out.push(`  time to destroy:   median ${killTimes.length ? Math.round(killTimes[Math.floor(killTimes.length / 2)]) : 'n/a'}s, fastest ${killTimes.length ? Math.round(killTimes[0]) : 'n/a'}s, slowest ${killTimes.length ? Math.round(killTimes.at(-1)) : 'n/a'}s`);
+out.push(`  shots:             ${mean(gunnery.map((g) => g.shots)).toFixed(1)} per fight; ${pct(gunnery.reduce((n, g) => n + g.hit, 0), fired)} hit, ${pct(gunnery.reduce((n, g) => n + g.shield, 0), fired)} stopped by shields, ${pct(gunnery.reduce((n, g) => n + g.miss, 0), fired)} missed`);
+out.push('');
 out.push(`  wall time:         ${seconds.toFixed(2)}s`);
 const verdict = failures.length
   ? `FAILED: ${failures.length} problem(s).`
-  : 'PASSED: no crashes, no stuck doors, no crew stuck on a path, power never over supply, no fire without air, nothing moved while paused, every run replays from its seed.';
+  : 'PASSED: no crashes, no stuck doors, no crew stuck on a path, power never over supply, no fire without air, no fight left hanging, nothing moved while paused, every run replays from its seed.';
 
 console.log(out.join('\n'));
 const reportPath = option('report', null);

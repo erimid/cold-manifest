@@ -15,11 +15,14 @@
 // be jettisoned. It has crew (crew.js): they walk the room and door graph and
 // fight fires, patch breaches and repair systems where they stand. And it has
 // a voice (ai/voice.js): the ship AI remarks on what happens, on the same clock.
+// And it can fight (combat.js): in a fight the enemy is a second whole ship,
+// stepped by the same code as the player's.
 
 import { attachVoice, checkVoiceInvariants, newVoiceState, stepVoice } from '../ai/voice.js';
 import { createEventBus } from '../engine/events.js';
 import { createRngSet } from '../engine/rng.js';
 import { ATMOSPHERE_COMMANDS, checkAtmosphereInvariants, stepAtmosphere } from './atmosphere.js';
+import { checkCombatInvariants, checkFightInvariants, combatCommands, enemyOf, newCombatState, stepCombat } from './combat.js';
 import { CREW_COMMANDS, checkCrewInvariants, newCrewState, stepCrew } from './crew.js';
 import { POWER_COMMANDS, checkPowerInvariants, isPowered, lightsNeedPower, newSystemsState, stepPower } from './power.js';
 import { buildLayout } from './ship.js';
@@ -68,6 +71,21 @@ function newDoorState() {
   return {
     state: 'closed', // open | closed | locked | jammed
     openness: 0, // 0 shut to 1 fully open; what crew, air and the creature actually meet
+  };
+}
+
+/**
+ * Everything that makes up one ship's state: the player's, or an enemy's in a fight.
+ * `roster` is the crew aboard: [{ id, name }].
+ */
+export function newShipState(layout, roster) {
+  const systems = newSystemsState(layout);
+  return {
+    rooms: Object.fromEntries(layout.rooms.map((room) => [room.id, newRoomState()])),
+    doors: Object.fromEntries(layout.doors.map((door) => [door.id, newDoorState()])),
+    systems,
+    crew: newCrewState(layout, roster),
+    ...newCombatState(layout, systems),
   };
 }
 
@@ -155,6 +173,7 @@ const COMMANDS = {
   ...POWER_COMMANDS,
   ...ATMOSPHERE_COMMANDS,
   ...CREW_COMMANDS,
+  ...combatCommands(newShipState),
 };
 
 function stepDoors(sim) {
@@ -180,7 +199,17 @@ function stepLights(sim) {
 /** Everything that happens each tick, in order. Later sessions add systems here. */
 // Order matters: crew act on the world as it stood, then fire can break a system, so power is settled
 // after the air and before anything reads it.
-const SYSTEMS = [(sim) => stepCrew(sim, TICK_SECONDS), (sim) => stepAtmosphere(sim, TICK_SECONDS), stepPower, stepDoors, stepLights, stepVoice];
+// In a fight the enemy ship then takes the same steps, and the shooting is settled once both ships are up to date.
+const SHIP_SYSTEMS = [(ship) => stepCrew(ship, TICK_SECONDS), (ship) => stepAtmosphere(ship, TICK_SECONDS), stepPower, stepDoors, stepLights];
+
+function stepEnemy(sim) {
+  const enemy = enemyOf(sim);
+  if (!enemy) return;
+  enemy.state.tick = sim.state.tick;
+  for (const system of SHIP_SYSTEMS) system(enemy);
+}
+
+const SYSTEMS = [...SHIP_SYSTEMS, stepEnemy, (sim) => stepCombat(sim, TICK_SECONDS), stepVoice];
 
 /**
  * Create a simulation.
@@ -188,10 +217,35 @@ const SYSTEMS = [(sim) => stepCrew(sim, TICK_SECONDS), (sim) => stepAtmosphere(s
  *   ship    a ship layout item from content/ships/
  *   crew    the starting roster: [{ id, name }], placed in the ship's crewStart rooms
  *   lines   the AI line library from content/ai-lines/ (she is silent without it)
+ *   weapons the weapon items from content/weapons/
+ *   ships   every ship item from content/ships/, so enemies can be brought alongside
  */
-export function createSim({ seed, ship, crew = [], lines = [] }) {
+export function createSim({ seed, ship, crew = [], lines = [], weapons = [], ships = [] }) {
   const layout = buildLayout(ship);
+  const weaponById = new Map(weapons.map((item) => [item.id, item]));
+  const shipById = new Map(ships.map((item) => [item.id, item]));
+  const layouts = new Map([[layout.id, layout]]);
+  const catalog = {
+    weapon(id) {
+      const item = weaponById.get(id);
+      if (!item) throw new Error(`Unknown weapon "${id}"`);
+      return item;
+    },
+    layout(id) {
+      if (!layouts.has(id)) {
+        if (!shipById.has(id)) throw new Error(`Unknown ship "${id}"`);
+        layouts.set(id, buildLayout(shipById.get(id)));
+      }
+      return layouts.get(id);
+    },
+    /** Ships that can be fought. */
+    enemies: ships.filter((item) => item.enemy === true).map((item) => item.id),
+  };
+  for (const id of layout.weapons) catalog.weapon(id);
   const sim = {
+    side: 'player',
+    /** Content the sim looks things up in: weapons and other ships. Never changes during a run. */
+    catalog,
     /** The ship's fixed shape: rooms, doors, vents. Never changes during a run. */
     layout,
     /** Everything the AI could say. Content, not state. */
@@ -202,10 +256,8 @@ export function createSim({ seed, ship, crew = [], lines = [] }) {
       tick: 0,
       nextCommandId: 1,
       commands: [], // orders waiting for the next tick
-      rooms: Object.fromEntries(layout.rooms.map((room) => [room.id, newRoomState()])),
-      doors: Object.fromEntries(layout.doors.map((door) => [door.id, newDoorState()])),
-      systems: newSystemsState(layout.power),
-      crew: newCrewState(layout, crew),
+      ...newShipState(layout, crew),
+      fight: null, // the fight in progress, enemy ship and all (combat.js)
       ai: newVoiceState(),
     },
     rng: createRngSet(seed),
@@ -271,11 +323,10 @@ export function createSim({ seed, ship, crew = [], lines = [] }) {
   return sim;
 }
 
-/** Problems with a sim state that should never happen. Empty means healthy. */
-export function checkInvariants(sim) {
+/** Problems aboard one ship (the player's or the enemy's) that should never happen. */
+function shipProblems(ship, foe) {
   const problems = [];
-  const { state, layout } = sim;
-  if (!Number.isInteger(state.tick) || state.tick < 0) problems.push(`tick is ${state.tick}`);
+  const { state, layout } = ship;
   const in01 = (value) => value >= 0 && value <= 1;
 
   for (const room of layout.rooms) {
@@ -299,8 +350,18 @@ export function checkInvariants(sim) {
     if (!['open', 'closed', 'locked', 'jammed'].includes(d.state)) problems.push(`${door.id}.state is ${d.state}`);
     if (!in01(d.openness)) problems.push(`${door.id}.openness is ${d.openness}`);
   }
-  problems.push(...checkPowerInvariants(sim), ...checkAtmosphereInvariants(sim), ...checkCrewInvariants(sim), ...checkVoiceInvariants(sim));
+  problems.push(...checkPowerInvariants(ship), ...checkAtmosphereInvariants(ship), ...checkCrewInvariants(ship), ...checkCombatInvariants(ship, foe));
   if (Object.keys(state.rooms).length !== layout.rooms.length) problems.push('room states do not match the layout');
   if (Object.keys(state.doors).length !== layout.doors.length) problems.push('door states do not match the layout');
+  return problems;
+}
+
+/** Problems with a sim state that should never happen. Empty means healthy. */
+export function checkInvariants(sim) {
+  const problems = [];
+  if (!Number.isInteger(sim.state.tick) || sim.state.tick < 0) problems.push(`tick is ${sim.state.tick}`);
+  const enemy = enemyOf(sim);
+  problems.push(...shipProblems(sim, enemy), ...checkVoiceInvariants(sim), ...checkFightInvariants(sim));
+  if (enemy) problems.push(...shipProblems(enemy, sim).map((problem) => `enemy: ${problem}`));
   return problems;
 }

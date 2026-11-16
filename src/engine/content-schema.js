@@ -56,9 +56,28 @@ function checkAiLine(item) {
   return problems;
 }
 
+/** Rules for one weapon (brief §7; the fields are described in content/weapons/weapons.json). */
+function checkWeapon(item) {
+  const problems = [];
+  const positive = (v) => typeof v === 'number' && Number.isFinite(v) && v > 0;
+  const chance = (v) => typeof v === 'number' && v >= 0 && v <= 1;
+  if (!isNonEmptyString(item.name)) problems.push('missing name');
+  if (!isNonEmptyString(item.short) || item.short.length > 8) problems.push('needs a "short" name of at most 8 characters for the weapons panel');
+  if (!['energy', 'kinetic'].includes(item.kind)) problems.push('kind must be "energy" or "kinetic"');
+  if (!Number.isInteger(item.power) || item.power < 1) problems.push('power must be a whole number of bars, at least 1');
+  if (!positive(item.charge)) problems.push('charge must be seconds above 0');
+  if (!positive(item.flight)) problems.push('flight must be seconds above 0');
+  if (!Number.isInteger(item.damage) || item.damage < 0) problems.push('damage must be a whole number, 0 or more');
+  if (!Number.isInteger(item.pierce) || item.pierce < 0) problems.push('pierce must be a whole number of shield layers, 0 or more');
+  const effects = item.effects;
+  if (!effects || typeof effects !== 'object' || !chance(effects.fire) || !chance(effects.breach) || !chance(effects.crew)) problems.push('effects needs fire, breach and crew, each between 0 and 1');
+  return problems;
+}
+
 const ITEM_RULES = {
   'ai-lines': checkAiLine,
   ships: validateLayout,
+  weapons: checkWeapon,
 };
 
 /**
@@ -71,6 +90,7 @@ export function validateContent(files) {
   const warnings = [];
   const seenIds = new Map(CONTENT_TYPES.map((type) => [type, new Map()]));
   const seenLines = new Map();
+  const fittedWeapons = []; // [label, weapon id] for every weapon a ship mounts
 
   for (const file of [...files].sort((a, b) => a.path.localeCompare(b.path))) {
     const { path, data, error } = file;
@@ -110,6 +130,8 @@ export function validateContent(files) {
       const rule = ITEM_RULES[type];
       if (rule) for (const problem of rule(item)) errors.push(`${label}: ${problem}`);
 
+      if (type === 'ships' && Array.isArray(item.weapons)) for (const id of item.weapons) fittedWeapons.push([label, id]);
+
       if (type === 'ai-lines' && isNonEmptyString(item.text)) {
         const key = normalizeLine(item.text);
         if (seenLines.has(key)) {
@@ -119,6 +141,10 @@ export function validateContent(files) {
         }
       }
     });
+  }
+
+  for (const [label, id] of fittedWeapons) {
+    if (!seenIds.get('weapons').has(id)) errors.push(`${label}: fits a weapon that does not exist: "${id}"`);
   }
 
   return { errors, warnings };

@@ -4,8 +4,13 @@
 // (or right-click) anything for a description. The power panel along the
 // bottom routes the reactor's bars between systems (S1.4). Air, fire and crew
 // arrive in the next sessions and plug into this screen.
+//
+// In a fight (S2.1) the enemy ship stands in a column on the right and a
+// weapons bar appears above the status panel: tap a weapon, then a room on
+// their ship, to aim it. It all works while paused.
 
 import { pickTarget } from '../engine/hit.js';
+import { chargeOf, enemyOf, evasion, shieldLayers, shieldMax } from '../sim/combat.js';
 import { describeTask } from '../sim/crew.js';
 import { POWERED, aiCoreStatus, free, lightsDraw, litRooms, supply, usable } from '../sim/power.js';
 import { SPACE, SYSTEMS } from '../sim/systems.js';
@@ -16,6 +21,10 @@ import { createShipRenderer } from './ship-render.js';
 
 const percent = (value) => `${Math.round(value * 100)}%`;
 const POWER_KEYS = 'QWERTYUI';
+const WEAPON_KEYS = 'ASDF';
+/** How long a shot's result stays on screen, in seconds of game time. */
+const IMPACT_SECONDS = 0.9;
+const IMPACT_TEXT = { hit: 'HIT', shield: 'SHIELD', miss: 'MISS' };
 /** Short task names for the crew bar, where there is no room for a sentence. */
 const CHIP_TASKS = { walking: 'Walking', waiting: 'At a door', extinguish: 'Fighting fire', patch: 'Patching hull', repair: 'Repairing', unjam: 'Freeing door', idle: 'Standing by' };
 /** Start a sentence with a capital: the sim's reasons are written to follow "because". */
@@ -33,6 +42,11 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
   let view = { scale: 1, ox: 0, oy: 0 };
   let selected = null; // { kind: 'room' | 'door', id }
   let selectedCrew = null; // a crew id; while set, tapping a room sends them there
+  let selectedWeapon = null; // a weapon slot; while set, tapping a room on the enemy ship aims it there
+  let foe = null; // the enemy ship's renderer, while there is one: { id, renderer }
+  let foeView = null; // where the enemy ship is drawn
+  let fightBar = null; // the weapons bar's live parts
+  let impacts = []; // shots that just landed, for a moment: { side, room, result, tick }
   let roster = null; // the crew bar's live parts
   let showVents = false;
   let subscriptions = [];
@@ -49,6 +63,7 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
   // ---------- naming ----------
 
   const roomName = (id) => (id === SPACE ? 'space' : layout.room(id).name);
+  const weaponOf = (slot) => sim.catalog.weapon(sim.state.weapons[slot].id);
 
   function doorName(door) {
     return door.name ?? `Door, ${roomName(door.a)} to ${roomName(door.b)}`;
@@ -60,6 +75,11 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
       if (room.system) return `${room.name}. ${SYSTEMS[room.system].blurb}`;
       if (room.kind === 'helm') return `${room.name}. Where the ship is flown from.`;
       return `${room.name}. Gets you from one problem to the next.`;
+    }
+    if (target?.kind === 'foe') {
+      const enemy = enemyOf(sim);
+      const room = enemy.layout.room(target.id);
+      return `${enemy.layout.name}: ${room.name}. ${room.system ? SYSTEMS[room.system].blurb : 'Part of their ship.'}`;
     }
     if (target?.kind === 'crew') {
       const member = sim.state.crew[target.id];
@@ -82,14 +102,32 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
     // The ship gets the space between the top bar and the bottom panels, and is refitted if either moves.
     const top = Math.round(nodes.top.getBoundingClientRect().bottom) + 10;
     const bottom = Math.round(nodes.bottom.getBoundingClientRect().top) - 10;
-    if (w === size.w && h === size.h && dpr === size.dpr && top === size.top && bottom === size.bottom) return;
+    const enemyId = sim.state.fight?.enemy.ship ?? null;
+    if (w === size.w && h === size.h && dpr === size.dpr && top === size.top && bottom === size.bottom && enemyId === size.enemyId) return;
     if (w !== size.w || h !== size.h || dpr !== size.dpr) {
       canvas.width = Math.round(w * dpr);
       canvas.height = Math.round(h * dpr);
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     }
-    size = { w, h, dpr, top, bottom };
-    view = renderer.fit({ x: 16, y: top, w: w - 32, h: Math.max(80, bottom - top) });
+    size = { w, h, dpr, top, bottom, enemyId };
+    const area = { x: 16, y: top, w: w - 32, h: Math.max(80, bottom - top) };
+    if (!enemyId) {
+      foe = null;
+      foeView = null;
+      view = renderer.fit(area);
+      return;
+    }
+    // A fight: their ship stands in a column on the right, under its name; ours keeps the rest.
+    if (foe?.id !== enemyId) foe = { id: enemyId, renderer: createShipRenderer(enemyOf(sim).layout) };
+    const column = Math.round(area.w * 0.27);
+    view = renderer.fit({ ...area, w: area.w - column - 14 });
+    foeView = foe.renderer.fit({ x: area.x + area.w - column, y: area.y + 24, w: column, h: area.h - 28 });
+  }
+
+  /** Everything tappable on the canvas: our ship, and in a fight the rooms of theirs. */
+  function allTargets() {
+    const own = renderer.targets(view, sim.state.crew);
+    return foe && foeView ? [...own, ...foe.renderer.targets(foeView, {}, { foe: true })] : own;
   }
 
   // ---------- orders ----------
@@ -238,13 +276,15 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
     }
   }
 
-  const queuedFor = (key, id) => sim.state.commands.some((c) => c[key] === id);
+  // A weapon order names a room on their ship, which may share an id with one of ours.
+  const queuedFor = (key, id) => sim.state.commands.some((c) => c[key] === id && (key === 'slot') === c.type.startsWith('weapon.'));
 
   // ---------- the status panel ----------
 
   function select(next) {
     selected = next;
     if (next) selectedCrew = null;
+    if (next) selectedWeapon = null;
     nodes.info.hidden = true;
     buildPanel();
   }
@@ -258,9 +298,170 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
     return el('button', { class: `btn btn--small ${extraClass}`, type: 'button', id, press }, label);
   }
 
+  function selectWeapon(slot) {
+    selectedWeapon = slot;
+    if (slot !== null) {
+      selected = null;
+      selectedCrew = null;
+    }
+    nodes.info.hidden = true;
+    buildPanel();
+  }
+
+  // ---------- the weapons bar (fights only) ----------
+
+  function sideStats(id, title) {
+    const fill = el('i', {});
+    const hull = el('span', { class: 'fightside__hull', id: `${id}-hull` });
+    const line = el('span', { class: 'fightside__line', id: `${id}-line` });
+    const name = el('span', { class: 'stencil' }, title);
+    return { node: el('div', { class: 'fightside', id }, el('div', { class: 'fightside__head' }, name, hull), el('span', { class: 'fightside__bar' }, fill), line), fill, hull, line, name };
+  }
+
+  function buildFightBar() {
+    const tiles = sim.state.weapons.map((slot, index) => {
+      const weapon = sim.catalog.weapon(slot.id);
+      const charge = el('i', { class: 'crewchip__health' });
+      const state = el('span', { class: 'crewchip__task' });
+      const node = el(
+        'button',
+        { class: 'btn crewchip weapon', type: 'button', id: `weapon-${index}`, 'aria-label': `Aim the ${weapon.name}`, press: () => selectWeapon(selectedWeapon === index ? null : index) },
+        el('span', { class: 'crewchip__num weapon__num' }, WEAPON_KEYS[index]),
+        el('span', { class: 'crewchip__body' }, el('span', { class: 'crewchip__name' }, `${index + 1} ${weapon.short}`), state, el('span', { class: 'crewchip__bar' }, charge)),
+      );
+      return { index, node, charge, state };
+    });
+    const own = sideStats('fight-own', 'Our hull');
+    const theirs = sideStats('fight-foe', 'Their hull');
+    const leave = button('btn-fight-leave', 'Leave it', () => order({ type: 'fight.dismiss' }));
+    fightBar = { tiles, own, theirs, leave };
+    fightBar.node = el('div', { class: 'panel fightbar', id: 'fightbar', hidden: true }, own.node, el('div', { class: 'fightbar__weapons' }, tiles.map((t) => t.node)), theirs.node, leave);
+    return fightBar.node;
+  }
+
+  function updateSide(part, ship) {
+    const { hull } = ship.state;
+    setText(part.hull, `${hull.points}/${hull.max}`);
+    const width = `${Math.round((hull.points / hull.max) * 100)}%`;
+    if (part.fill.style.width !== width) part.fill.style.width = width;
+    part.node.classList.toggle('is-alarm', hull.points <= hull.max * 0.3);
+    setText(part.line, `Shields ${shieldLayers(ship)}/${shieldMax(ship)} · Evade ${percent(evasion(ship))}`);
+  }
+
+  function weaponStatus(slot) {
+    const state = sim.state.weapons[slot];
+    const weapon = weaponOf(slot);
+    if (!state.powered) return `No power: needs ${weapon.power}`;
+    const aim = state.target ? enemyOf(sim)?.layout.room(state.target)?.name : null;
+    if (chargeOf(sim, slot) < 1) return aim ? `Charging · ${aim}` : 'Charging · no target';
+    return aim ? `Firing · ${aim}` : 'Ready · no target';
+  }
+
+  function updateFight() {
+    const fight = sim.state.fight;
+    if (fightBar.node.hidden !== !fight) fightBar.node.hidden = !fight;
+    if (!fight) {
+      // The fight is gone: let go of anything that pointed at it.
+      if (selectedWeapon !== null) selectWeapon(null);
+      if (selected?.kind === 'foe') select(null);
+      impacts = [];
+      return;
+    }
+    const enemy = enemyOf(sim);
+    updateSide(fightBar.own, sim);
+    updateSide(fightBar.theirs, enemy);
+    setText(fightBar.theirs.name, fight.over ? (fight.over.outcome === 'destroyed' ? 'Destroyed' : 'They won') : enemy.layout.name);
+    fightBar.leave.hidden = !fight.over;
+    for (const tile of fightBar.tiles) {
+      const state = sim.state.weapons[tile.index];
+      setText(tile.state, weaponStatus(tile.index));
+      const width = `${Math.round(chargeOf(sim, tile.index) * 100)}%`;
+      if (tile.charge.style.width !== width) tile.charge.style.width = width;
+      tile.node.classList.toggle('is-selected', selectedWeapon === tile.index);
+      tile.node.classList.toggle('is-dead', !state.powered);
+      tile.node.classList.toggle('is-ready', state.powered && chargeOf(sim, tile.index) >= 1);
+    }
+  }
+
+  // ---------- shots and their results, drawn over both ships ----------
+
+  function drawFight(alpha) {
+    const fight = sim.state.fight;
+    if (!fight || !foe) return;
+    const enemy = enemyOf(sim);
+    // Their name, over their ship.
+    ctx.fillStyle = 'rgba(233, 220, 195, 0.8)';
+    ctx.font = "700 12px ui-monospace, 'SF Mono', Menlo, Consolas, monospace";
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    const mid = foeView.ox + (enemy.layout.bounds.x + enemy.layout.bounds.w / 2) * foeView.scale;
+    ctx.fillText(enemy.layout.name.toUpperCase(), mid, size.top + 4);
+
+    const now = sim.state.tick - 1 + alpha; // the frame sits between the last tick and this one, as crew do
+    for (const shot of fight.shots) {
+      const ours = shot.side === 'player';
+      const from = ours ? renderer.hardpointAt(view, shot.slot) : foe.renderer.hardpointAt(foeView, shot.slot);
+      const to = ours ? foe.renderer.roomCentre(foeView, shot.room) : renderer.roomCentre(view, shot.room);
+      const t = Math.max(0, Math.min(1, (now - shot.born) / (shot.lands - shot.born)));
+      const tail = Math.max(0, t - 0.12);
+      const at = (k) => ({ x: from.x + (to.x - from.x) * k, y: from.y + (to.y - from.y) * k });
+      const head = at(t);
+      const back = at(tail);
+      const kinetic = sim.catalog.weapon(shot.weapon).kind === 'kinetic';
+      ctx.lineCap = 'round';
+      ctx.strokeStyle = kinetic ? 'rgba(233, 220, 195, 0.55)' : 'rgba(255, 179, 71, 0.9)';
+      ctx.lineWidth = kinetic ? 2 : 4;
+      ctx.beginPath();
+      ctx.moveTo(back.x, back.y);
+      ctx.lineTo(head.x, head.y);
+      ctx.stroke();
+      ctx.fillStyle = kinetic ? '#e9dcc3' : '#fff3d6';
+      ctx.beginPath();
+      ctx.arc(head.x, head.y, kinetic ? 4 : 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // What the last shots did: a ring where they landed and a word, so the result never rests on colour alone.
+    impacts = impacts.filter((impact) => (now - impact.tick) * TICK_SECONDS < IMPACT_SECONDS && now >= impact.tick - 1);
+    for (const impact of impacts) {
+      const age = Math.max(0, ((now - impact.tick) * TICK_SECONDS) / IMPACT_SECONDS);
+      const ours = impact.side === 'player';
+      const r = ours ? foe.renderer : renderer;
+      const v = ours ? foeView : view;
+      if (!r || !v) continue;
+      const at = r.roomCentre(v, impact.room);
+      const colour = impact.result === 'hit' ? '255, 120, 40' : impact.result === 'shield' ? '127, 212, 255' : '233, 220, 195';
+      if (impact.result !== 'miss') {
+        ctx.strokeStyle = `rgba(${colour}, ${1 - age})`;
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(at.x, at.y, 6 + age * v.scale * 1.4, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      ctx.fillStyle = `rgba(${colour}, ${1 - age * age})`;
+      ctx.font = "700 13px ui-monospace, 'SF Mono', Menlo, Consolas, monospace";
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(IMPACT_TEXT[impact.result], at.x, at.y - 14 - age * 14);
+    }
+    ctx.textAlign = 'start';
+    ctx.textBaseline = 'alphabetic';
+    ctx.lineCap = 'butt';
+  }
+
+  /** Which rooms the weapons of `ship` are pointed at: Map of room id -> [slots]. */
+  function aimedBy(ship) {
+    const aimed = new Map();
+    ship.state.weapons.forEach((slot, index) => {
+      if (slot.target !== null) aimed.set(slot.target, [...(aimed.get(slot.target) ?? []), index]);
+    });
+    return aimed;
+  }
+
   function selectCrew(id) {
     selectedCrew = id;
     if (id) selected = null;
+    if (id) selectedWeapon = null;
     nodes.info.hidden = true;
     buildPanel();
   }
@@ -312,6 +513,37 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
         ),
       );
       panel = { kind: 'crew', id: member.id, stats, suit, note };
+      updatePanel();
+      return;
+    }
+    if (selectedWeapon !== null) {
+      const weapon = weaponOf(selectedWeapon);
+      const stats = { needs: stat('Needs'), charge: stat('Charge'), damage: stat('Damage'), target: stat('Aimed at') };
+      setText(stats.needs.value, `${weapon.power} ${weapon.power === 1 ? 'bar' : 'bars'}`);
+      setText(stats.damage.value, `${weapon.damage}${weapon.pierce ? `, ignores ${weapon.pierce} shield` : ''}`);
+      const slot = selectedWeapon;
+      const clear = button('btn-clear-target', 'Hold fire', () => order({ type: 'weapon.target', slot, room: null }));
+      const note = el('span', { class: 'status__note' });
+      nodes.status.replaceChildren(
+        el('div', { class: 'status__head' }, el('div', { class: 'status__title', id: 'status-title' }, weapon.name), el('div', { class: 'stencil' }, `Weapon ${slot + 1}`), note),
+        el('div', { class: 'status__stats' }, Object.values(stats).map((s) => s.node)),
+        el('div', { class: 'status__controls' }, clear, el('span', { class: 'status__hint status__hint--inline', id: 'weapon-hint' }, 'Tap a room on their ship to aim it there.')),
+      );
+      panel = { kind: 'weapon', slot, stats, clear, note };
+      updatePanel();
+      return;
+    }
+    if (selected?.kind === 'foe') {
+      const enemy = enemyOf(sim);
+      const room = enemy.layout.room(selected.id);
+      const stats = { system: stat(room.system ? SYSTEMS[room.system].name : 'Room'), hull: stat('Hull'), fire: stat('Fire'), breach: stat('Breach'), oxygen: stat('Oxygen') };
+      const note = el('span', { class: 'status__note' });
+      nodes.status.replaceChildren(
+        el('div', { class: 'status__head' }, el('div', { class: 'status__title', id: 'status-title' }, room.name), el('div', { class: 'stencil' }, enemy.layout.name), note),
+        el('div', { class: 'status__stats' }, Object.values(stats).map((s) => s.node)),
+        el('p', { class: 'status__hint' }, 'Their ship. Tap a weapon, then a room here, to aim at it.'),
+      );
+      panel = { kind: 'foe', id: room.id, sys: room.system ?? null, stats, note };
       updatePanel();
       return;
     }
@@ -401,6 +633,33 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
   /** Refresh the numbers and button states in place. The panel's elements are never rebuilt mid-press. */
   function updatePanel() {
     if (!panel) return;
+    if (panel.kind === 'weapon') {
+      const state = sim.state.weapons[panel.slot];
+      const weapon = weaponOf(panel.slot);
+      setText(panel.stats.charge.value, state.powered ? `${Math.floor(state.charge)} of ${weapon.charge}s` : 'no power');
+      panel.stats.charge.node.classList.toggle('is-alarm', !state.powered);
+      setText(panel.stats.target.value, state.target ? (enemyOf(sim)?.layout.room(state.target)?.name ?? 'nothing') : 'nothing');
+      panel.clear.disabled = state.target === null;
+      setText(panel.note, queuedFor('slot', panel.slot) ? 'Order queued' : refusalText() || (state.powered ? '' : 'Route power to weapons (WPN) to charge it.'));
+      return;
+    }
+    if (panel.kind === 'foe') {
+      const enemy = enemyOf(sim);
+      if (!enemy) return;
+      const r = enemy.state.rooms[panel.id];
+      if (panel.sys) {
+        const system = enemy.state.systems[panel.sys];
+        const works = system.level - system.damage;
+        setText(panel.stats.system.value, panel.sys === 'reactor' ? `${works} of ${system.level} bars` : POWERED.includes(panel.sys) ? `power ${system.power} of ${works}` : system.damage ? 'damaged' : 'working');
+        panel.stats.system.node.classList.toggle('is-alarm', system.damage > 0);
+      } else setText(panel.stats.system.value, 'no system');
+      setText(panel.stats.hull.value, percent(r.hull));
+      setText(panel.stats.fire.value, r.fire > 0 ? percent(r.fire) : 'none');
+      setText(panel.stats.breach.value, r.breach > 0 ? percent(r.breach) : 'none');
+      setText(panel.stats.oxygen.value, percent(r.oxygen));
+      setText(panel.note, refusalText());
+      return;
+    }
     if (panel.kind === 'crew') {
       const member = sim.state.crew[panel.id];
       setText(panel.stats.health.value, member.alive ? percent(member.health) : 'dead');
@@ -476,10 +735,17 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
 
   function onTap({ x, y, pointerType }) {
     counts.canvasTaps += 1;
-    const target = pickTarget(renderer.targets(view, sim.state.crew), x, y, pointerType);
+    const target = pickTarget(allTargets(), x, y, pointerType);
     if (!target) {
       selectedCrew = null;
+      selectedWeapon = null;
       select(null);
+      return;
+    }
+    if (target.kind === 'foe') {
+      // A weapon is selected: a room of theirs is what it should shoot. It stays selected, to change its mind.
+      if (selectedWeapon !== null) order({ type: 'weapon.target', slot: selectedWeapon, room: target.id });
+      else select({ kind: 'foe', id: target.id });
       return;
     }
     if (target.kind === 'crew') {
@@ -502,7 +768,7 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
 
   function onInfo({ x, y, pointerType }) {
     counts.infos += 1;
-    const text = describe(pickTarget(renderer.targets(view, sim.state.crew), x, y, pointerType)) ?? 'Open space. Cold, and a long way from anywhere.';
+    const text = describe(pickTarget(allTargets(), x, y, pointerType)) ?? 'Open space. Cold, and a long way from anywhere.';
     nodes.info.textContent = text;
     nodes.info.hidden = false;
     nodes.info.style.left = `${Math.max(8, Math.min(x + 14, size.w - 300))}px`;
@@ -515,6 +781,11 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
       if (system) order({ type: 'power.add', system, delta: shift ? -1 : 1 });
       return;
     }
+    if (action.startsWith('weapon-')) {
+      const slot = Number(action.slice(7)) - 1;
+      if (sim.state.fight && sim.state.weapons[slot]) selectWeapon(selectedWeapon === slot ? null : slot);
+      return;
+    }
     if (action.startsWith('select-')) {
       const member = Object.values(sim.state.crew)[Number(action.slice(7)) - 1];
       if (member) selectCrew(selectedCrew === member.id ? null : member.id);
@@ -522,6 +793,7 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
     }
     if (action !== 'back') return;
     if (sheet) openSheet(sheet);
+    else if (selectedWeapon !== null) selectWeapon(null);
     else if (selectedCrew) selectCrew(null);
     else if (selected) select(null);
     else onBack();
@@ -557,6 +829,7 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
         'div',
         { class: 'shipbar__buttons' },
         debug && button('btn-dbg-step', 'Step', () => clock.stepOnce(), 'btn--debug'),
+        debug && button('btn-dbg-fight', 'Fight', () => order({ type: 'debug.fight', enemy: sim.state.fight ? null : sim.catalog.enemies[0] }), 'btn--debug'),
         debug &&
           button('btn-vents', 'Vents', () => {
             showVents = !showVents;
@@ -564,7 +837,7 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
         button('btn-back', 'Back', onBack),
       ),
     );
-    nodes.bottom = el('div', { class: 'shipdock' }, nodes.sheet, nodes.ai, el('div', { class: 'shipdock__row' }, nodes.status, nodes.pause), buildPower());
+    nodes.bottom = el('div', { class: 'shipdock' }, nodes.sheet, nodes.ai, buildFightBar(), el('div', { class: 'shipdock__row' }, nodes.status, nodes.pause), buildPower());
     root.replaceChildren(el('section', { class: 'ship' }, nodes.top, nodes.bottom, nodes.info));
     buildPanel();
   }
@@ -597,7 +870,13 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
       canvas.hidden = false;
       size = { w: 0, h: 0, dpr: 1 }; // force a measure
       measure();
-      subscriptions = [input.on('tap', onTap), input.on('info', onInfo), input.on('key', onKey), input.on('dragstart', () => (nodes.info.hidden = true))];
+      subscriptions = [
+        input.on('tap', onTap),
+        input.on('info', onInfo),
+        input.on('key', onKey),
+        input.on('dragstart', () => (nodes.info.hidden = true)),
+        sim.events.on('shot.resolved', (event) => impacts.push({ side: event.side, room: event.room, result: event.result, tick: event.tick })),
+      ];
     },
     exit() {
       for (const stop of subscriptions) stop();
@@ -606,7 +885,9 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
     },
     /** Called every rendered frame, paused or not. */
     update() {
+      updateFight(); // first: the weapons bar coming or going moves the space the ships are fitted to
       measure();
+      const enemy = enemyOf(sim);
       renderer.draw(ctx, {
         view,
         width: size.w,
@@ -616,10 +897,30 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
         // Game time, so flames and alarms hold still while paused.
         time: (sim.state.tick + clock.alpha) * TICK_SECONDS,
         alpha: clock.alpha,
-        selected,
+        selected: selected?.kind === 'foe' ? null : selected,
         selectedCrew,
         showVents,
+        charges: sim.state.weapons.map((_, slot) => chargeOf(sim, slot)),
+        chosenWeapon: selectedWeapon,
+        aimed: enemy ? aimedBy(enemy) : null,
       });
+      if (enemy && foe) {
+        foe.renderer.draw(ctx, {
+          view: foeView,
+          width: size.w,
+          height: size.h,
+          dpr: size.dpr,
+          state: enemy.state,
+          time: (sim.state.tick + clock.alpha) * TICK_SECONDS,
+          alpha: clock.alpha,
+          selected: selected?.kind === 'foe' ? selected : null,
+          clear: false,
+          charges: enemy.state.weapons.map((_, slot) => chargeOf(enemy, slot)),
+          aimed: aimedBy(sim),
+          inviting: selectedWeapon !== null && !sim.state.fight.over,
+        });
+        drawFight(clock.alpha);
+      }
       updateClock();
       updatePanel();
       updatePower();
@@ -633,6 +934,13 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
     /** For automated tests and the debug console. */
     debug: {
       targets: () => renderer.targets(view, sim.state.crew),
+      foeTargets: () => (foe && foeView ? foe.renderer.targets(foeView, {}, { foe: true }) : []),
+      get selectedWeapon() {
+        return selectedWeapon;
+      },
+      get foeView() {
+        return foeView;
+      },
       get selectedCrew() {
         return selectedCrew;
       },

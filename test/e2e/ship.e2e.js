@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Browser tests for the ship view, the clock, pause, the AI's voice, sound and the input layer, on an emulated iPad
+// Browser tests for the ship view, the clock, pause, the AI's voice, sound, fights and the input layer, on an emulated iPad
 // (touch) and on a desktop (mouse and keyboard). Run with: npm run test:e2e
 //
 // Builds nothing itself: run `npm run build` first. Serves dist/ with
@@ -399,7 +399,8 @@ async function touchTests(browser) {
     await page.touchscreen.tap(t.mx, t.my);
     const sizes = await page.$$eval('button', (list) => list.map((b) => ({ id: b.id, w: b.getBoundingClientRect().width, h: b.getBoundingClientRect().height })));
     assert.ok(sizes.length >= 5);
-    for (const s of sizes) assert.ok(s.w >= 44 && s.h >= 44, `${s.id} is ${Math.round(s.w)}x${Math.round(s.h)}`);
+    // Buttons that are not on screen (the weapons bar outside a fight) have no size to check.
+    for (const s of sizes.filter((b) => b.w > 0)) assert.ok(s.w >= 44 && s.h >= 44, `${s.id} is ${Math.round(s.w)}x${Math.round(s.h)}`);
   });
 
   await check('back returns to the title and the clock stops', async () => {
@@ -655,12 +656,194 @@ async function voiceTests(browser) {
   await context.close();
 }
 
+async function fightTests(browser) {
+  console.log('iPad: a fight with the gunnery drone');
+  const context = await browser.newContext({ ...devices['iPad (gen 7) landscape'] });
+  const page = await context.newPage();
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  await page.goto(`http://localhost:${PORT}/?seed=E2E-FIGHT&autopause=0&debug=1`);
+  await page.waitForFunction(() => window.coldManifest?.machine.state === 'title');
+  await page.tap('#btn-ship');
+  await page.waitForFunction(() => window.coldManifest.machine.state === 'ship');
+  const fight = () => game(page, () => window.coldManifest.sim.state.fight);
+  const weapon = (slot) => game(page, (i) => ({ ...window.coldManifest.sim.state.weapons[i] }), slot);
+  const foeRoom = async (id) => {
+    // The ships are refitted when a panel changes height; let that frame pass before reading where things are.
+    await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
+    const t = await game(page, (rid) => window.coldManifest.shipView.debug.foeTargets().find((x) => x.id === rid), id);
+    assert.ok(t, `no enemy room ${id}`);
+    return t;
+  };
+  const tapFoe = async (id) => {
+    const t = await foeRoom(id);
+    await page.touchscreen.tap(t.x + t.w / 2, t.y + t.h / 2);
+  };
+
+  await check('no fight: no weapons bar, and the ship has the whole width', async () => {
+    assert.equal(await page.isHidden('#fightbar'), true);
+    assert.deepEqual(await game(page, () => window.coldManifest.shipView.debug.foeTargets()), []);
+  });
+
+  let widthBefore = 0;
+  await check('debug Fight brings the drone alongside: weapons bar, their ship on the right, ours still between the bars', async () => {
+    widthBefore = await game(page, () => window.coldManifest.shipView.debug.view.scale);
+    await page.tap('#btn-dbg-fight');
+    await page.waitForFunction(() => window.coldManifest.sim.state.fight, null, { timeout: 2000 });
+    await page.waitForFunction(() => window.coldManifest.shipView.debug.foeTargets().length === 5, null, { timeout: 2000 });
+    assert.equal(await page.isVisible('#fightbar'), true);
+    assert.match(await page.textContent('#fight-foe'), /Gunnery drone\s*8\/8/);
+    assert.match(await page.textContent('#fight-own'), /20\/20/);
+    const own = await game(page, () => window.coldManifest.shipView.debug.targets().filter((x) => x.kind === 'room'));
+    const theirs = await game(page, () => window.coldManifest.shipView.debug.foeTargets());
+    const top = await page.locator('.shipbar').boundingBox();
+    const dock = (await page.locator('#aibox').boundingBox()).y;
+    for (const t of [...own, ...theirs]) assert.ok(t.y >= top.y + top.height && t.y + t.h <= dock, `${t.id} runs under a bar`);
+    const ourRight = Math.max(...own.map((t) => t.x + t.w));
+    const theirLeft = Math.min(...theirs.map((t) => t.x));
+    assert.ok(theirLeft > ourRight, 'the two ships do not overlap');
+    for (const t of theirs) assert.ok(t.w >= 44 && t.h >= 30, `enemy room ${t.id} is ${Math.round(t.w)}x${Math.round(t.h)}: too small to tap`);
+  });
+
+  await check('a weapon with no power says so, and says what it needs', async () => {
+    assert.match(await page.textContent('#weapon-0'), /No power: needs 1/);
+    assert.match(await page.textContent('#weapon-1'), /No power: needs 2/);
+  });
+
+  await check('routing a bar to weapons starts the laser charging, paused or not', async () => {
+    await page.tap('#btn-power-sensors-minus');
+    await powerIs(page, 'sensors', 0);
+    await page.tap('#btn-power-weapons-plus');
+    await powerIs(page, 'weapons', 1);
+    await page.waitForFunction(() => window.coldManifest.sim.state.weapons[0].charge > 0, null, { timeout: 2000 });
+    assert.match(await page.textContent('#weapon-0'), /Charging · no target/);
+    assert.equal((await weapon(1)).powered, false);
+  });
+
+  await check('tap a weapon, then a room on their ship: the order waits out a pause, then the weapon is aimed', async () => {
+    await page.tap('#btn-pause');
+    assert.equal(await paused(page), true);
+    await page.tap('#weapon-0');
+    assert.equal(await game(page, () => window.coldManifest.shipView.debug.selectedWeapon), 0);
+    assert.equal(await page.textContent('#status-title'), 'Pulse laser');
+    await tapFoe('shields');
+    assert.equal((await weapon(0)).target, null, 'nothing changes while paused');
+    assert.equal(await queued(page), 1);
+    await page.tap('#btn-pause');
+    await page.waitForFunction(() => window.coldManifest.sim.state.weapons[0].target === 'shields', null, { timeout: 2000 });
+    assert.match(await page.textContent('#weapon-0'), /Shields/);
+    assert.equal(await game(page, () => window.coldManifest.shipView.debug.selectedWeapon), 0, 'the weapon stays selected, to change its mind');
+  });
+
+  await check('tapping one of our own rooms lets go of the weapon and does not aim at it', async () => {
+    const own = await game(page, () => window.coldManifest.shipView.debug.targets().find((x) => x.id === 'cargo'));
+    await page.touchscreen.tap(own.x + own.w / 2, own.y + own.h / 2);
+    assert.equal(await game(page, () => window.coldManifest.shipView.debug.selectedWeapon), null);
+    assert.deepEqual(await selected(page), { kind: 'room', id: 'cargo' });
+    assert.equal((await weapon(0)).target, 'shields');
+  });
+
+  await check('tapping their room with no weapon picked shows that room', async () => {
+    await tapFoe('reactor');
+    assert.deepEqual(await selected(page), { kind: 'foe', id: 'reactor' });
+    assert.equal(await page.textContent('#status-title'), 'Reactor');
+    assert.match(await page.textContent('#status'), /Gunnery drone/);
+    assert.equal(await game(page, () => window.coldManifest.sim.state.weapons.some((w) => w.target === 'reactor')), false);
+  });
+
+  await check('long-press on their ship says what the room is', async () => {
+    const t = await foeRoom('engines');
+    await page.touchscreen.tap(t.x + t.w / 2, t.y + t.h / 2); // warm up the pointer
+    const cdp = await context.newCDPSession(page);
+    const point = { x: t.x + t.w / 2, y: t.y + t.h / 2 };
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [point] });
+    await sleep(700);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    assert.match(await infoText(page), /Gunnery drone: Engines/);
+  });
+
+  await check('the laser fires by itself when charged, and the drone\'s shield stops the shot', async () => {
+    const result = await page.evaluate(() => new Promise((resolve) => window.coldManifest.sim.events.on('shot.resolved', resolve)));
+    assert.equal(result.weapon, 'pulse-laser');
+    assert.equal(result.room, 'shields');
+    assert.ok(['shield', 'miss'].includes(result.result), `first shot: ${result.result}`);
+    assert.equal((await fight()).enemy.hull.points, 8);
+    assert.ok((await game(page, () => window.coldManifest.audio.stats.played.shot ?? 0)) > 0, 'the shot was heard');
+  });
+
+  await check('Hold fire clears the target; a hit on a bare hull ends the fight; Leave it sends the wreck away', async () => {
+    await page.tap('#weapon-0');
+    await page.tap('#btn-clear-target');
+    await page.waitForFunction(() => window.coldManifest.sim.state.weapons[0].target === null, null, { timeout: 2000 });
+    assert.equal(await page.isHidden('#btn-fight-leave'), true);
+    // Leave the drone one hull point, no shield and no engines, so the next shot is the last.
+    await game(page, () => {
+      const enemy = window.coldManifest.sim.state.fight.enemy;
+      enemy.hull.points = 1;
+      enemy.systems.shields.power = 0;
+      enemy.systems.engines.power = 0;
+      enemy.shield.charge = 0;
+    });
+    await tapFoe('core');
+    await page.waitForFunction(() => window.coldManifest.sim.state.fight.over, null, { timeout: 12000 });
+    assert.equal((await fight()).over.outcome, 'destroyed');
+    await page.waitForFunction(() => /Destroyed/.test(document.querySelector('#fight-foe').textContent), null, { timeout: 2000 });
+    assert.equal((await weapon(0)).target, null);
+    await page.tap('#btn-fight-leave');
+    await page.waitForFunction(() => window.coldManifest.sim.state.fight === null, null, { timeout: 2000 });
+    await page.waitForFunction(() => document.querySelector('#fightbar').hidden, null, { timeout: 2000 });
+    assert.equal(await game(page, () => window.coldManifest.shipView.debug.selectedWeapon), null);
+    await page.waitForFunction((scale) => window.coldManifest.shipView.debug.view.scale === scale, widthBefore, { timeout: 2000 });
+  });
+
+  await check('every control is at least 44px tall and wide in a fight', async () => {
+    await page.tap('#btn-dbg-fight');
+    await page.waitForFunction(() => window.coldManifest.sim.state.fight, null, { timeout: 2000 });
+    await page.waitForFunction(() => !document.querySelector('#fightbar').hidden);
+    const small = await page.$$eval('.ship .btn', (nodes) => nodes.map((n) => ({ id: n.id, r: n.getBoundingClientRect() })).filter((n) => n.r.width > 0 && (n.r.width < 44 || n.r.height < 44)).map((n) => `${n.id} ${Math.round(n.r.width)}x${Math.round(n.r.height)}`));
+    assert.deepEqual(small, []);
+  });
+
+  await check('no page errors', async () => assert.deepEqual(errors, []));
+  await context.close();
+
+  console.log('Desktop: weapon keys');
+  const desktop = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  const pc = await desktop.newPage();
+  const pcErrors = [];
+  pc.on('pageerror', (e) => pcErrors.push(e.message));
+  await pc.goto(`http://localhost:${PORT}/?seed=E2E-FIGHT-PC&autopause=0`);
+  await pc.waitForFunction(() => window.coldManifest?.machine.state === 'title');
+  await pc.click('#btn-ship');
+  await pc.waitForFunction(() => window.coldManifest.machine.state === 'ship');
+
+  await check('weapon keys: A picks weapon 1, a click on their room aims it, Escape lets go', async () => {
+    await pc.keyboard.press('KeyA');
+    assert.equal(await game(pc, () => window.coldManifest.shipView.debug.selectedWeapon), null, 'no fight, nothing to aim');
+    await game(pc, () => window.coldManifest.sim.enqueue({ type: 'debug.fight', enemy: 'target-drone' }));
+    await pc.waitForFunction(() => window.coldManifest.shipView.debug.foeTargets().length === 5, null, { timeout: 2000 });
+    await pc.keyboard.press('KeyS');
+    assert.equal(await game(pc, () => window.coldManifest.shipView.debug.selectedWeapon), 1);
+    await pc.keyboard.press('KeyA');
+    assert.equal(await game(pc, () => window.coldManifest.shipView.debug.selectedWeapon), 0);
+    const t = await game(pc, () => window.coldManifest.shipView.debug.foeTargets().find((x) => x.id === 'weapons'));
+    await pc.mouse.click(t.x + t.w / 2, t.y + t.h / 2);
+    await pc.waitForFunction(() => window.coldManifest.sim.state.weapons[0].target === 'weapons', null, { timeout: 2000 });
+    await pc.keyboard.press('Escape');
+    assert.equal(await game(pc, () => window.coldManifest.shipView.debug.selectedWeapon), null);
+    assert.equal(await game(pc, () => window.coldManifest.machine.state), 'ship', 'Escape let go of the weapon; it did not leave the screen');
+  });
+  await check('no page errors on desktop', async () => assert.deepEqual(pcErrors, []));
+  await desktop.close();
+}
+
 const server = await startServer();
 const browser = await chromium.launch(process.env.PW_CHROMIUM ? { executablePath: process.env.PW_CHROMIUM } : {});
 try {
   await touchTests(browser);
   await desktopTests(browser);
   await voiceTests(browser);
+  await fightTests(browser);
 } finally {
   await browser.close();
   server.kill();

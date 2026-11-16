@@ -18,7 +18,7 @@ import { AUTO_PAUSE, createSettings } from './ui/settings.js';
 import { createShipView } from './ui/shipview.js';
 import { renderStub, renderTitle } from './ui/title.js';
 
-const VERSION = '0.7.0';
+const VERSION = '0.8.0';
 
 const params = new URLSearchParams(window.location.search);
 const flags = {
@@ -54,7 +54,7 @@ setPressBinder(input.press);
 // The simulation and the one clock that drives it.
 // Placeholder crew until Stage 4 generates them (DECISIONS DF-03, DF-23).
 const crew = content.all('crew').map(({ id, name }) => ({ id, name }));
-const sim = createSim({ seed: flags.seed, ship: content.require('ships', 'margin-of-error'), crew, lines: content.all('ai-lines') });
+const sim = createSim({ seed: flags.seed, ship: content.require('ships', 'margin-of-error'), crew, lines: content.all('ai-lines'), weapons: content.all('weapons'), ships: content.all('ships') });
 const clock = createClock({ sim, tickSeconds: TICK_SECONDS });
 
 // Sound. Nothing can play until the first touch or key press (an iOS rule, and a polite one).
@@ -188,6 +188,7 @@ function frame(now) {
         `auto   ${flags.auto ? 'on' : 'off'}`,
         `crew   ${Object.values(sim.state.crew).filter((c) => c.alive).length} alive`,
         `fires  ${Object.values(sim.state.rooms).filter((r) => r.fire > 0).length}`,
+        `fight  ${sim.state.fight ? `${sim.state.fight.enemy.ship} ${sim.state.fight.enemy.hull.points}hp, ${sim.state.fight.shots.length} shots` : 'none'}`,
         `margo  ${sim.state.ai.said} said, ${sim.state.ai.queue.length} waiting`,
         `sound  ${audio.muted ? 'off' : audio.unlocked ? 'on' : 'locked'}`,
       ].join('\n');

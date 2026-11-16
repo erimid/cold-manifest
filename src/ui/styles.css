@@ -821,3 +821,100 @@ body {
     animation: none;
   }
 }
+
+/* ---------- the weapons bar: fights only (S2.1) ---------- */
+.fightbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 10px;
+}
+.fightbar[hidden] {
+  display: none;
+}
+.fightbar__weapons {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  min-width: 0;
+}
+.btn.crewchip.weapon {
+  width: 210px;
+}
+.weapon__num {
+  background: var(--hull-edge);
+  color: var(--paper);
+  border-radius: 4px;
+}
+.weapon .crewchip__health {
+  background: var(--amber);
+  width: 0;
+}
+.weapon.is-ready .crewchip__health {
+  background: var(--paper);
+}
+.weapon.is-ready .crewchip__num {
+  background: var(--amber);
+  color: #05070b;
+}
+.fightside {
+  width: 190px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-family: var(--mono);
+  font-size: calc(12px * var(--text-scale));
+  color: var(--paper);
+}
+.fightside__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  white-space: nowrap;
+}
+.fightside__bar {
+  display: block;
+  height: 6px;
+  background: #05070b;
+  border: 1px solid var(--hull-edge);
+}
+.fightside__bar i {
+  display: block;
+  height: 100%;
+  background: #8be28b;
+}
+.fightside.is-alarm .fightside__bar i {
+  background: var(--alarm);
+}
+.fightside.is-alarm .fightside__hull::before {
+  content: '! ';
+  color: var(--alarm);
+}
+.fightside__line {
+  opacity: 0.8;
+  white-space: nowrap;
+}
+#btn-fight-leave[hidden] {
+  display: none;
+}
+/* Debug buttons in the top bar stay narrow, so the crew bar keeps its one row. */
+.shipbar__buttons .btn--debug {
+  padding: 10px 8px;
+  letter-spacing: 0.04em;
+  font-size: calc(12px * var(--text-scale));
+}
+/* The crew bar keeps to one row: chips narrow before they wrap (three crew; see DECISIONS DF-25). */
+.crewbar {
+  flex-wrap: nowrap;
+}
+.crewbar .btn.crewchip {
+  flex: 0 1 160px;
+}
+.crewchip__name,
+.crewchip__task {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

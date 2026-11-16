@@ -1,0 +1,56 @@
+{
+  "note": "Ship weapons (brief \u00a76, \u00a77). power: bars it needs. charge: seconds to ready a shot. flight: seconds the shot is in the air. damage: hull points, and system bars from S2.2. pierce: shield layers it ignores. effects: chances of fire and breach and harm to crew in the room, used from S2.2.",
+  "items": [
+    {
+      "id": "pulse-laser",
+      "name": "Pulse laser",
+      "short": "Laser",
+      "kind": "energy",
+      "power": 1,
+      "charge": 8,
+      "flight": 0.5,
+      "damage": 1,
+      "pierce": 0,
+      "effects": {
+        "fire": 0.25,
+        "breach": 0,
+        "crew": 0.15
+      },
+      "blurb": "Cheap, quick, and stopped dead by a shield."
+    },
+    {
+      "id": "slug-thrower",
+      "name": "Slug thrower",
+      "short": "Slugs",
+      "kind": "kinetic",
+      "power": 2,
+      "charge": 13,
+      "flight": 1.1,
+      "damage": 2,
+      "pierce": 0,
+      "effects": {
+        "fire": 0.1,
+        "breach": 0.45,
+        "crew": 0.3
+      },
+      "blurb": "A mass driver salvaged from a mining rig. Slow. Makes holes."
+    },
+    {
+      "id": "breaching-lance",
+      "name": "Breaching lance",
+      "short": "Lance",
+      "kind": "energy",
+      "power": 3,
+      "charge": 18,
+      "flight": 0.3,
+      "damage": 2,
+      "pierce": 1,
+      "effects": {
+        "fire": 0.5,
+        "breach": 0.2,
+        "crew": 0.4
+      },
+      "blurb": "Burns through one shield layer as if it were not there. Hungry."
+    }
+  ]
+}

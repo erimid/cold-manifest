@@ -1,0 +1,187 @@
+{
+  "note": "Enemy ships. Bow points up, so they stand tall in the right-hand column of the fight view. See src/sim/ship.js for the format.",
+  "items": [
+    {
+      "id": "target-drone",
+      "name": "Gunnery drone",
+      "class": "Halloran-pattern target hulk, nobody aboard",
+      "enemy": true,
+      "facing": "up",
+      "rooms": [
+        {
+          "id": "core",
+          "name": "Control core",
+          "system": "ai_core",
+          "x": 1,
+          "y": 0,
+          "w": 4,
+          "h": 3
+        },
+        {
+          "id": "weapons",
+          "name": "Weapons",
+          "system": "weapons",
+          "x": 0,
+          "y": 3,
+          "w": 3,
+          "h": 3
+        },
+        {
+          "id": "shields",
+          "name": "Shields",
+          "system": "shields",
+          "x": 3,
+          "y": 3,
+          "w": 3,
+          "h": 3
+        },
+        {
+          "id": "reactor",
+          "name": "Reactor",
+          "system": "reactor",
+          "x": 1,
+          "y": 6,
+          "w": 4,
+          "h": 3
+        },
+        {
+          "id": "engines",
+          "name": "Engines",
+          "system": "engines",
+          "x": 1,
+          "y": 9,
+          "w": 4,
+          "h": 2
+        }
+      ],
+      "doors": [
+        {
+          "id": "d_core_weapons",
+          "a": "core",
+          "b": "weapons",
+          "x": 2,
+          "y": 3,
+          "vertical": false
+        },
+        {
+          "id": "d_core_shields",
+          "a": "core",
+          "b": "shields",
+          "x": 4,
+          "y": 3,
+          "vertical": false
+        },
+        {
+          "id": "d_weapons_shields",
+          "a": "weapons",
+          "b": "shields",
+          "x": 3,
+          "y": 4.5,
+          "vertical": true
+        },
+        {
+          "id": "d_weapons_reactor",
+          "a": "weapons",
+          "b": "reactor",
+          "x": 2,
+          "y": 6,
+          "vertical": false
+        },
+        {
+          "id": "d_shields_reactor",
+          "a": "shields",
+          "b": "reactor",
+          "x": 4,
+          "y": 6,
+          "vertical": false
+        },
+        {
+          "id": "d_reactor_engines",
+          "a": "reactor",
+          "b": "engines",
+          "x": 3,
+          "y": 9,
+          "vertical": false
+        },
+        {
+          "id": "airlock_port",
+          "name": "Service hatch",
+          "a": "weapons",
+          "b": "space",
+          "x": 0,
+          "y": 4.5,
+          "vertical": true
+        }
+      ],
+      "vents": [],
+      "crewStart": [],
+      "hullPoints": 8,
+      "hardpoints": [],
+      "weapons": [],
+      "power": {
+        "reactor": 4,
+        "lightsPerBar": 5,
+        "systems": {
+          "shields": {
+            "level": 1,
+            "power": 1
+          },
+          "engines": {
+            "level": 1,
+            "power": 1
+          },
+          "weapons": {
+            "level": 1,
+            "power": 0
+          },
+          "ai_core": {
+            "level": 1,
+            "power": 1
+          }
+        }
+      },
+      "hull": [
+        [
+          1.2,
+          -1.4
+        ],
+        [
+          4.8,
+          -1.4
+        ],
+        [
+          6.7,
+          2.3
+        ],
+        [
+          6.7,
+          6.7
+        ],
+        [
+          5.7,
+          6.7
+        ],
+        [
+          5.7,
+          11.7
+        ],
+        [
+          0.3,
+          11.7
+        ],
+        [
+          0.3,
+          6.7
+        ],
+        [
+          -0.7,
+          6.7
+        ],
+        [
+          -0.7,
+          2.3
+        ]
+      ]
+    }
+  ]
+}
