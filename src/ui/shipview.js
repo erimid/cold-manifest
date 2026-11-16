@@ -122,7 +122,7 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
       const room = layout.room(target.id);
       if (room.system) return `${room.name}. ${SYSTEMS[room.system].blurb}`;
       if (room.kind === 'helm') return `${room.name}. Where the ship is flown from.`;
-      if (room.kind === 'lift') return `${room.name}. Runs on door control power. Without it, everyone takes the ladders.`;
+      if (room.kind === 'lift') return `${room.name}. Runs on door control power. Without it, whoever rides it cranks it by hand, slowly.`;
       if (room.kind === 'hold' || room.kind === 'cargo') return `${room.name}. Where the paying cargo goes, when there is any.`;
       return `${room.name}. Gets you from one problem to the next.`;
     }

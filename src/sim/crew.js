@@ -24,9 +24,15 @@ import { SPACE, SYSTEMS } from './systems.js';
 /** Tiles per second on foot. A suit is heavy. */
 export const WALK_SPEED = 3;
 export const SUIT_SPEED = 0.7;
-/** On a ladder, or a lift shaft with no power, crew climb at this share of walking speed; a powered lift carries them at this many times it (D-071). */
-export const CLIMB_SPEED = 0.4;
+/**
+ * Every way between decks is a lift (D-093): the main shaft, and a deck lift
+ * under each hatch. With door control powered a lift carries crew at this many
+ * times walking speed; without it they crank it by hand, at this share of it.
+ */
 export const LIFT_SPEED = 2;
+export const CRANK_SPEED = 0.3;
+/** How fast the lifts run just now: powered, or cranked by hand. */
+export const liftSpeed = (sim) => (isPowered(sim, 'doors') ? LIFT_SPEED : CRANK_SPEED);
 /** Seconds an engineer takes to squeeze through a service crawlway (D-072). */
 export const CRAWL_SECONDS = 2.5;
 /** Carrying a crate (hold.js) slows anyone down to this share of their pace, and nobody carries through a crawlway. */
@@ -124,8 +130,6 @@ export function isPassable(sim, doorId) {
   return true;
 }
 
-/** A lift shaft with power carries crew; without it, it is no way through (they take the ladders). */
-const liftShut = (sim, room) => room.kind === 'lift' && !isPowered(sim, 'doors');
 
 /** The middle of a room's floor, for estimating how long a trip takes. */
 const floorMid = (room) => ({ x: room.x + room.w / 2, y: room.y + room.h - STAND });
@@ -133,7 +137,7 @@ const floorMid = (room) => ({ x: room.x + room.w / 2, y: room.y + room.h - STAND
 /**
  * The quickest way from one room to another, or null if there is no way: a list of
  * steps { door, from } or { crawlway, from }. Trips are costed in seconds on foot:
- * ladders and the lift are slower or faster than walking, and crawlways, open only
+ * the lifts are faster than walking with power and slower cranked by hand, and crawlways, open only
  * to an engineer (`who.engineer`) with empty hands, are slow.
  */
 export function findRoute(sim, from, to, who = null) {
@@ -142,7 +146,7 @@ export function findRoute(sim, from, to, who = null) {
   const best = new Map([[from, { cost: 0, step: null }]]);
   const done = new Set();
   const open = [from];
-  const speedIn = (room, vertical) => (room.kind === 'lift' ? LIFT_SPEED : vertical ? CLIMB_SPEED : 1);
+  const rise = liftSpeed(sim);
   while (open.length) {
     open.sort((a, b) => best.get(a).cost - best.get(b).cost || (a < b ? -1 : 1));
     const here = open.shift();
@@ -157,10 +161,10 @@ export function findRoute(sim, from, to, who = null) {
       const door = layout.door(exit.door);
       const next = layout.room(exit.to);
       const there = floorMid(next);
-      const climb = door.vertical ? 0 : Math.abs(there.y - at.y) / (WALK_SPEED * CLIMB_SPEED);
       const walk = (Math.abs(door.x - at.x) + Math.abs(there.x - door.x)) / WALK_SPEED;
-      const ride = room.kind === 'lift' || next.kind === 'lift' ? Math.abs(there.y - at.y) / (WALK_SPEED * speedIn(room.kind === 'lift' ? room : next, true)) : 0;
-      edges.push({ to: exit.to, cost: walk + (room.kind === 'lift' || next.kind === 'lift' ? ride : climb), step: { door: exit.door, from: here } });
+      // Up or down a deck lift, or along the main shaft.
+      const ride = !door.vertical || room.kind === 'lift' || next.kind === 'lift' ? Math.abs(there.y - at.y) / (WALK_SPEED * rise) : 0;
+      edges.push({ to: exit.to, cost: walk + ride, step: { door: exit.door, from: here } });
     }
     if (who?.engineer && !who.carry) {
       for (const exit of layout.crawlExits(here)) {
@@ -170,9 +174,7 @@ export function findRoute(sim, from, to, who = null) {
       }
     }
     for (const edge of edges) {
-      const next = layout.room(edge.to);
-      // A dead lift shaft can be the end of a trip (someone can stand in it), but not the way through.
-      if (sim.state.rooms[edge.to].jettisoned || (edge.to !== to && liftShut(sim, next))) continue;
+      if (sim.state.rooms[edge.to].jettisoned) continue;
       const cost = best.get(here).cost + edge.cost;
       if (!best.has(edge.to) || cost < best.get(edge.to).cost - 1e-9) {
         best.set(edge.to, { cost, step: edge.step });
@@ -218,7 +220,7 @@ export function planPath(sim, member, to) {
     const next = door.a === step.from ? door.b : door.a;
     const there = layout.room(next);
     if (!door.vertical && door.y === here.y) {
-      // A hatch overhead: to the foot of the ladder, then up.
+      // A hatch overhead: onto the deck lift below it, then up.
       path.push({ x: door.x, y: here.y + here.h - STAND });
       path.push({ ...besideDoor(layout, door, step.from), door: door.id });
       path.push({ ...besideDoor(layout, door, next), enter: next, through: door.id });
@@ -254,7 +256,7 @@ export const CREW_COMMANDS = {
       const room = sim.state.rooms[cmd.room];
       if (!room) return `no room "${cmd.room}"`;
       if (room.jettisoned) return 'that section is gone';
-      if (!findRoute(sim, sim.state.crew[cmd.crew].room, cmd.room, sim.state.crew[cmd.crew])) return 'there is no way through: a door on the way is locked or jammed, or the lift has no power';
+      if (!findRoute(sim, sim.state.crew[cmd.crew].room, cmd.room, sim.state.crew[cmd.crew])) return 'there is no way through: a door on the way is locked or jammed';
       return null;
     },
     apply(sim, cmd) {
@@ -313,15 +315,19 @@ function stop(sim, member, reason, door) {
   crewEmit(sim, member, 'crew.blocked', { crew: member.id, room: member.room, door, reason, tick: sim.state.tick });
 }
 
-/** How fast a leg of a trip goes, as a share of walking: up a ladder, in the lift, or through a crawlway. */
+/** Is this crew member riding a lift just now: their next leg goes up or down? */
+export function onLift(member) {
+  const next = member.path?.[0];
+  return Boolean(next && !next.crawl && Math.abs(next.y - member.y) > Math.abs(next.x - member.x));
+}
+
+/** How fast a leg of a trip goes, as a share of walking: on foot, on a lift, or through a crawlway. */
 function legSpeed(sim, member, next) {
   const dx = Math.abs(next.x - member.x);
   const dy = Math.abs(next.y - member.y);
   if (next.crawl) return next.length / CRAWL_SECONDS / WALK_SPEED; // the same squeeze whatever the wall
   if (dy <= dx) return 1;
-  const room = sim.layout.room(member.room);
-  if (room.kind === 'lift' && isPowered(sim, 'doors')) return LIFT_SPEED;
-  return CLIMB_SPEED;
+  return liftSpeed(sim);
 }
 
 function walk(sim, member, seconds) {
@@ -486,6 +492,7 @@ export function describeTask(sim, member) {
       return 'In a service crawlway';
     case 'walking':
       if (member.board) return 'Heading for the airlock';
+      if (onLift(member) && !isPowered(sim, 'doors')) return `Cranking the lift by hand, to ${sim.layout.room(member.goal)?.name ?? 'somewhere'}`;
       return `Walking to ${sim.layout.room(member.goal)?.name ?? 'somewhere'}`;
     case 'crossing':
       return isHome(sim, member) ? 'Crossing over' : 'Crossing back';

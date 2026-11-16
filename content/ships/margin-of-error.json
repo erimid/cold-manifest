@@ -1,5 +1,5 @@
 {
-  "note": "The starting ship, drawn side-on (D-071): bow to the right, decks stacked top to bottom, so a room's floor is its bottom edge. Coordinates are whole tiles; door x and y are the middle of the doorway on the shared wall, and a door in a floor or ceiling is a hatch with a ladder. See src/sim/ship.js for the format.",
+  "note": "The starting ship, drawn side-on (D-071): bow to the right, decks stacked top to bottom, so a room's floor is its bottom edge. Coordinates are whole tiles; door x and y are the middle of the doorway on the shared wall, and a door in a floor or ceiling is a hatch with a deck lift under it (D-093). See src/sim/ship.js for the format.",
   "items": [
     {
       "id": "margin-of-error",

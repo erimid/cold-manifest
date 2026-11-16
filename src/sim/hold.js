@@ -201,7 +201,7 @@ function reach(ship, member, crate, to) {
 function startJob(ship, member, job) {
   letGo(ship, member, { keep: job.crate });
   member.job = { ...job, phase: member.carry === job.crate ? 'carry' : 'fetch', t: 0, since: ship.state.tick };
-  // Someone caught mid-stride (in a doorway, on a ladder) first steps back to their spot in the room they are in.
+  // Someone caught mid-stride (in a doorway, on a lift) first steps back to their spot in the room they are in.
   member.goal = member.path.length ? member.room : null;
   member.path = member.path.length ? planPath(ship, member, member.room) ?? [] : [];
   member.task = member.path.length ? 'walking' : 'idle';

@@ -1,12 +1,12 @@
 // Draws a ship. Ours is seen side-on, as stacked decks (D-071): back walls,
-// pipes, deck plates, ladders under the hatches, the lift shaft, crawlway
+// pipes, deck plates, a deck lift under every hatch, the lift shaft, crawlway
 // hatches and the old company's stencils. The enemy is drawn as a sensor
 // return (D-073): room outlines in phosphor green, nothing else, and only the
 // rooms our sensors have resolved; the rest is static (D-074). A room of our
 // own that Margo cannot see into is drawn as she last saw it, behind static.
 // All art is
 // drawn in code. The parts that never change are drawn once to an offscreen
-// canvas; lighting, doors, hazards, the lift car and crew go on top every frame.
+// canvas; lighting, doors, hazards, the lift cars and crew go on top every frame.
 //
 // The renderer only reads sim state. It never changes it.
 
@@ -31,7 +31,8 @@ const C = {
   vent: '#9bd15a',
   hold: '#2a2e33',
   deck: '#46505c',
-  ladder: '#8a929e',
+  rail: '#8a929e',
+  hazard: '#c9a227',
   phosphor: '#7fe39a',
   shield: '#7fd4ff',
   doorLeaf: '#8d6a34',
@@ -40,6 +41,8 @@ const C = {
 };
 
 const DOOR_THICKNESS = 0.3;
+/** Half the width of a deck lift's platform, in tiles. */
+const LIFT_HALF = 0.36;
 /** How thick the deck plate under every room is drawn, in tiles. */
 const FLOOR = 0.16;
 
@@ -108,10 +111,21 @@ export function createShipRenderer(layout, { sensor = false } = {}) {
     const s = Math.floor(ticks / 20);
     return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
   };
-  /** Places along each room's floor where a crate can stand, clear of ladders, doorways and hatches: x offsets in tiles. */
+  /** The deck lifts (D-093): one under every hatch in a floor, from the hatch down to the floor of the room below. */
+  const deckLifts = layout.doors
+    .filter((door) => !door.vertical && !door.airlock)
+    .map((door) => {
+      const rooms = [door.a, door.b].map((id) => layout.room(id)).filter(Boolean);
+      const below = rooms.find((r) => Math.abs(r.y - door.y) < 1e-6);
+      const above = rooms.find((r) => Math.abs(r.y + r.h - door.y) < 1e-6);
+      return below ? { door: door.id, x: door.x, top: door.y, floor: below.y + below.h - FLOOR, below: below.id, above: above?.id ?? null } : null;
+    })
+    .filter(Boolean);
+  const liftPads = new Map(); // where each deck lift's platform was last drawn, in tiles
+  /** Places along each room's floor where a crate can stand, clear of deck lifts, doorways and hatches: x offsets in tiles. */
   const crateSpots = new Map(
     layout.rooms.map((room) => {
-      // What must stay clear on this floor: ladders (any hatch above or below), doorways at floor level, and the spot under a crawlway hatch.
+      // What must stay clear on this floor: deck lifts (any hatch above or below), doorways at floor level, and the spot under a crawlway hatch.
       const floor = room.y + room.h;
       const avoid = [];
       for (const door of layout.doors) if ((door.a === room.id || door.b === room.id) && (!door.vertical || Math.abs(door.y - floor) < 1)) avoid.push(door.x);
@@ -227,7 +241,7 @@ export function createShipRenderer(layout, { sensor = false } = {}) {
     for (const room of layout.rooms) {
       out.push({ id: room.id, kind: 'room', x: view.ox + room.x * view.scale, y: view.oy + room.y * view.scale, w: room.w * view.scale, h: room.h * view.scale, priority: 1 });
     }
-    // Crates sit on the floor clear of ladders and doorways, so they never hide a door; crew still win.
+    // Crates sit on the floor clear of deck lifts and doorways, so they never hide a door; crew still win.
     if (crates) {
       for (const box of crateBoxes({ crates })) out.push({ id: box.id, kind: 'crate', x: view.ox + box.x * view.scale, y: view.oy + box.y * view.scale, w: box.w * view.scale, h: box.h * view.scale, priority: 2 });
     }
@@ -420,14 +434,8 @@ export function createShipRenderer(layout, { sensor = false } = {}) {
       ctx.stroke();
     }
 
-    // Ladders under the hatches, in the room below.
-    for (const door of layout.doors) {
-      if (door.vertical || door.airlock) continue;
-      const below = [door.a, door.b].map((id) => layout.room(id)).find((r) => r && Math.abs(r.y - door.y) < 1e-6);
-      const above = [door.a, door.b].map((id) => layout.room(id)).find((r) => r && Math.abs(r.y + r.h - door.y) < 1e-6);
-      if (below) drawLadder(ctx, door.x, door.y, below.y + below.h - FLOOR, px);
-      if (above) drawLadder(ctx, door.x, door.y - 0.75, door.y, px, true);
-    }
+    // A deck lift under every hatch (D-093): a narrow shaft with guide rails down to a striped pad, and a hand crank.
+    for (const lift of deckLifts) drawLiftRails(ctx, lift, px);
 
     // Service crawlway hatches, and the narrow ducts only the creature fits.
     for (const way of layout.crawlways ?? []) {
@@ -587,22 +595,53 @@ export function createShipRenderer(layout, { sensor = false } = {}) {
     ctx.restore();
   }
 
-  function drawLadder(ctx, x, top, bottom, px, handles = false) {
-    ctx.strokeStyle = C.ladder;
-    ctx.lineWidth = 2.5 * px;
+  /** A deck lift's fixed parts, in tiles: two guide rails from the hatch to the floor, a striped pad, and the crank housing. */
+  function drawLiftRails(ctx, lift, px) {
+    const { x, top, floor } = lift;
+    // The shaft itself, darker than the wall behind it.
+    ctx.fillStyle = 'rgba(10, 13, 17, 0.72)';
+    ctx.fillRect(x - LIFT_HALF, top, LIFT_HALF * 2, floor - top);
+    ctx.strokeStyle = C.rail;
+    ctx.lineWidth = 3 * px;
     ctx.beginPath();
-    for (const rx of [x - 0.27, x + 0.27]) {
+    for (const rx of [x - LIFT_HALF, x + LIFT_HALF]) {
       ctx.moveTo(rx, top);
-      ctx.lineTo(rx, bottom);
-    }
-    if (!handles) {
-      for (let y = top + 0.3; y < bottom - 0.05; y += 0.34) {
-        ctx.moveTo(x - 0.27, y);
-        ctx.lineTo(x + 0.27, y);
-      }
+      ctx.lineTo(rx, floor);
     }
     ctx.stroke();
+    // Bolts up the rails.
+    ctx.fillStyle = '#5a636f';
+    for (let y = top + 0.4; y < floor - 0.2; y += 0.7) {
+      ctx.fillRect(x - LIFT_HALF - 0.04, y, 0.08, 0.08);
+      ctx.fillRect(x + LIFT_HALF - 0.04, y, 0.08, 0.08);
+    }
+    // The pad on the floor, in hazard stripes.
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(x - LIFT_HALF, floor - 0.08, LIFT_HALF * 2, 0.08);
+    ctx.clip();
+    ctx.fillStyle = '#1b1d20';
+    ctx.fillRect(x - LIFT_HALF, floor - 0.08, LIFT_HALF * 2, 0.08);
+    ctx.fillStyle = C.hazard;
+    for (let sx = x - LIFT_HALF - 0.1; sx < x + LIFT_HALF; sx += 0.2) {
+      ctx.beginPath();
+      ctx.moveTo(sx, floor);
+      ctx.lineTo(sx + 0.1, floor);
+      ctx.lineTo(sx + 0.18, floor - 0.08);
+      ctx.lineTo(sx + 0.08, floor - 0.08);
+      ctx.fill();
+    }
+    ctx.restore();
+    // The crank housing, on the right-hand rail about waist height.
+    ctx.fillStyle = '#2a3038';
+    ctx.strokeStyle = C.rail;
+    ctx.lineWidth = 1.5 * px;
+    const cy = floor - 0.75;
+    ctx.fillRect(x + LIFT_HALF, cy - 0.12, 0.12, 0.24);
+    ctx.strokeRect(x + LIFT_HALF, cy - 0.12, 0.12, 0.24);
   }
+
+
 
   function drawCrawlHatch(ctx, at, creatureOnly, px) {
     if (creatureOnly) {
@@ -857,6 +896,66 @@ export function createShipRenderer(layout, { sensor = false } = {}) {
     }
   }
 
+  /**
+   * Each deck lift's platform: under the feet of whoever is riding it, or parked
+   * where it last stopped. With door control dark, the rider turns the crank.
+   */
+  function drawDeckLifts(ctx, view, state, alpha, time) {
+    const s = view.scale;
+    const powered = (state.systems.doors?.power ?? 0) > 0;
+    const riders = Object.values(state.crew).filter((m) => m.alive);
+    for (const lift of deckLifts) {
+      let pad = liftPads.get(lift.door) ?? lift.floor;
+      let rider = null;
+      for (const m of riders) {
+        if (m.room !== lift.below && m.room !== lift.above) continue;
+        const at = crewAt(m, alpha);
+        if (Math.abs(at.x - lift.x) > 0.2) continue;
+        const feet = at.y + 0.5;
+        if (feet < lift.top - 0.05 || feet > lift.floor + 0.3) continue;
+        if (Math.abs(feet - lift.floor) < 0.12 && !(m.path?.length && Math.abs(m.path[0].y - m.y) > Math.abs(m.path[0].x - m.x))) continue; // just walking past the pad
+        rider = m;
+        pad = feet;
+        break;
+      }
+      pad = Math.max(lift.top, Math.min(lift.floor, pad));
+      liftPads.set(lift.door, pad);
+      const x = view.ox + (lift.x - LIFT_HALF) * s;
+      const w = LIFT_HALF * 2 * s;
+      const y = view.oy + pad * s;
+      // The platform, and the cage bars that come up round the rider's knees.
+      ctx.fillStyle = powered ? '#6b7480' : '#4a5059';
+      ctx.fillRect(x - 2, y - 3, w + 4, 4);
+      ctx.strokeStyle = powered ? C.amberDim : '#3d4552';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(x, y - 3);
+      ctx.lineTo(x, y - 0.45 * s);
+      ctx.lineTo(x + w, y - 0.45 * s);
+      ctx.lineTo(x + w, y - 3);
+      ctx.stroke();
+      // The call light on the rail: amber with power, dark without.
+      const lampY = view.oy + (lift.floor - 0.75) * s;
+      const lampX = x + w + 0.06 * s;
+      if (powered) {
+        ctx.fillStyle = rider ? C.amber : C.amberDim;
+        ctx.beginPath();
+        ctx.arc(lampX, lampY - 0.22 * s, Math.max(1.5, 0.05 * s), 0, Math.PI * 2);
+        ctx.fill();
+      } else {
+        // The crank handle: it turns while someone winds the platform up or down.
+        const turn = rider ? time * 6 : 0;
+        const r = 0.14 * s;
+        ctx.strokeStyle = C.paper;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(lampX, lampY);
+        ctx.lineTo(lampX + Math.cos(turn) * r, lampY + Math.sin(turn) * r);
+        ctx.stroke();
+      }
+    }
+  }
+
   /** The lift car: with whoever is riding it, or parked where it last stopped. Lit while door control has power. */
   function drawLift(ctx, view, state, alpha) {
     const s = view.scale;
@@ -897,7 +996,7 @@ export function createShipRenderer(layout, { sensor = false } = {}) {
         ctx.save();
         ctx.translate(x + w / 2, y + h / 2);
         ctx.rotate(-Math.PI / 2);
-        ctx.fillText('NO POWER', 0, 0);
+        ctx.fillText('HAND CRANK', 0, 0);
         ctx.restore();
         ctx.textAlign = 'start';
         ctx.textBaseline = 'alphabetic';
@@ -1236,6 +1335,7 @@ export function createShipRenderer(layout, { sensor = false } = {}) {
       }
     }
     drawLift(ctx, view, state, alpha);
+    if (!sensor) drawDeckLifts(ctx, view, state, alpha, time);
     // A sensor return does not show their doors until the rooms either side are made out.
     for (const door of layout.doors) {
       if (sensor && contact && [door.a, door.b].some((id) => id !== 'space' && (contact[id]?.resolve ?? 1) < 1)) continue;
