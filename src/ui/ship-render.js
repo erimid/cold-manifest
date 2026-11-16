@@ -897,6 +897,39 @@ export function createShipRenderer(layout, { sensor = false } = {}) {
   }
 
   /**
+   * A broken system (D-118): a red tag under the room name saying how many bars
+   * are out and what to do, and a progress bar while someone repairs it.
+   */
+  function drawSystemDamage(ctx, view, room, state) {
+    const system = state.systems[room.system];
+    if (!system || system.absent || system.lost || !system.damage || state.rooms[room.id]?.jettisoned) return;
+    const s = view.scale;
+    const fixing = Object.values(state.crew).some((m) => m.alive && m.owner === 'player' && m.room === room.id && m.task === 'repair');
+    const text = fixing ? `REPAIRING ${system.damage}/${system.level}` : `DAMAGED ${system.damage}/${system.level} · SEND CREW`;
+    const size = Math.max(9, Math.min(12, s * 0.32));
+    ctx.font = `700 ${size}px ${MONO}`;
+    const maxW = room.w * s - 14;
+    const w = Math.min(maxW, ctx.measureText(text).width + 12);
+    const h = size + 8;
+    const x = view.ox + room.x * s + 7;
+    const y = view.oy + room.y * s + 0.5 * s + size + 2;
+    ctx.fillStyle = 'rgba(20, 4, 4, 0.85)';
+    ctx.fillRect(x, y, w, h);
+    if (fixing) {
+      ctx.fillStyle = 'rgba(255, 179, 71, 0.35)';
+      ctx.fillRect(x, y, w * Math.min(1, system.repair ?? 0), h);
+    }
+    ctx.strokeStyle = fixing ? C.amber : C.alarm;
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
+    ctx.fillStyle = fixing ? C.amber : C.alarm;
+    ctx.textAlign = 'start';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, x + 6, y + h / 2 + 1, w - 12);
+    ctx.textBaseline = 'alphabetic';
+  }
+
+  /**
    * Each deck lift's platform: under the feet of whoever is riding it, or parked
    * where it last stopped. With door control dark, the rider turns the crank.
    */
@@ -1334,6 +1367,7 @@ export function createShipRenderer(layout, { sensor = false } = {}) {
         drawFog(ctx, view, room, known.age, time, reduceFlicker, sensor ? 'LAST SCAN' : 'NO EYES');
       }
     }
+    if (!sensor && state.systems) for (const room of layout.rooms) if (room.system) drawSystemDamage(ctx, view, room, state);
     drawLift(ctx, view, state, alpha);
     if (!sensor) drawDeckLifts(ctx, view, state, alpha, time);
     // A sensor return does not show their doors until the rooms either side are made out.
