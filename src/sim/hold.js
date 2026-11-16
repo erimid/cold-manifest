@@ -327,6 +327,8 @@ function stepJob(ship, member, seconds) {
     job.t = 0;
   }
   if (job.phase === 'lift') {
+    // Two hands can go for the same crate; whoever lifts it first has it (a bigger crew makes this happen).
+    if (crate.by && crate.by !== member.id) return giveUp(ship, member, 'taken');
     member.task = 'lifting';
     job.t += rate;
     if (job.t < LIFT_SECONDS) return;

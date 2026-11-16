@@ -827,8 +827,18 @@ function playCrossing(seed, index) {
         const system = sim.state.systems[id];
         if (system.power >= 1) continue;
         const room = sim.layout.rooms.find((item) => item.system === id)?.id;
-        const hand = hands.find((member) => member.room !== helm && member.goal === null && member.task === 'idle');
-        if (system.damage > 0 && room && hand && !bound(room)) give({ type: 'crew.move', crew: hand.id, room });
+        // Whoever is free, a different one every few seconds in case one refuses; suited if the air in there is thin.
+        const free = hands.filter((member) => member.room !== helm && member.goal === null && member.task === 'idle');
+        const hand = free.length ? free[Math.floor(sim.state.tick / (5 * TICK_RATE)) % free.length] : null;
+        if (system.damage > 0 && room && hand && !bound(room)) {
+          if (sim.state.rooms[room].oxygen < 0.5 && !hand.suit) give({ type: 'crew.suit', crew: hand.id, on: true });
+          give({ type: 'crew.move', crew: hand.id, room });
+        }
+        // Out of a fight the guns can give a bar back for the drive and the sensors.
+        if (/no spare power/.test(sim.whyNot({ type: 'power.add', system: id, delta: 1 }) ?? '')) {
+          const spare = ['weapons', 'shields', 'medbay'].find((other) => sim.state.systems[other].power > 0);
+          if (spare) give({ type: 'power.add', system: spare, delta: -1 });
+        }
         give({ type: 'power.add', system: id, delta: 1 });
       }
     }

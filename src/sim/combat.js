@@ -58,7 +58,7 @@
 import { FIRE_CATCH_O2, FIRE_START, harmCrew, killCrew } from './atmosphere.js';
 import { airlockRooms, everyone, moveAboard, sendAcross, stepBoarding, whyNotCross } from './boarding.js';
 import { addCrate } from './hold.js';
-import { CREW_COMMANDS, isHome } from './crew.js';
+import { CREW_COMMANDS, isHome, spotIn } from './crew.js';
 import { bestSkillAboard, bestSkillIn, skillFactor } from './roles.js';
 import { stepPower } from './power.js';
 import { FLARE, NOISE, bang, contactView, flare, missChance, newContact, stepContact } from './senses.js';
@@ -311,7 +311,8 @@ function settleBoarders(sim, outcome) {
   }
   for (const member of Object.values(sim.state.crew)) {
     if (member.owner === 'player') {
-      if (member.board) Object.assign(member, { board: null, crossEnds: null, task: 'idle', goal: null, path: [] });
+      // Called back on their way to the airlock: they step back to their spot in whatever room they are in, off any lift or doorway.
+      if (member.board) Object.assign(member, { board: null, crossEnds: null, task: 'idle', goal: null, path: [spotIn(sim.layout.room(member.room), member.index)] });
       continue;
     }
     if (TAKEN_BACK.has(outcome) && member.alive) {

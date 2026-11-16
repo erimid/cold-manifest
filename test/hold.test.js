@@ -223,3 +223,19 @@ test('a save in the middle of an ammo run loads and plays out the same', () => {
   assert.equal(hashState(loaded.snapshot()), hashState(sim.snapshot()));
   assert.equal(sim.state.weapons[1].rounds, SLUGS.ammo.magazine);
 });
+
+test('two hands sent for the same crate: whoever lifts it first has it, and the other gives up', () => {
+  const sim = newCrewedSim('same-crate');
+  const crate = Object.values(sim.state.crates).find((c) => c.room === 'hold');
+  // Vesna starts in the hold; Okoro is walked in beside her, and both are told to move the same crate.
+  const okoro = sim.state.crew.okoro;
+  const vesna = sim.state.crew.vesna;
+  Object.assign(okoro, { room: 'hold', x: vesna.x + 0.3, y: vesna.y, px: vesna.x + 0.3, py: vesna.y });
+  sim.enqueue({ type: 'crate.move', crew: 'vesna', crate: crate.id, room: 'quarters' });
+  sim.enqueue({ type: 'crate.move', crew: 'okoro', crate: crate.id, room: 'bridge' });
+  until(sim, () => crate.by !== null, 30);
+  seconds(sim, 2);
+  const holders = [okoro, vesna].filter((m) => m.carry === crate.id);
+  assert.equal(holders.length, 1, 'one of them has it');
+  assert.equal(crate.by, holders[0].id);
+});

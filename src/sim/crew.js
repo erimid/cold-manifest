@@ -505,8 +505,12 @@ export function stepCrew(sim, seconds) {
     if (!member.alive) continue;
     if (member.path.length) walk(sim, member, seconds);
     else if (!member.board) work(sim, member, seconds); // at the airlock, or in the tube: boarding.js has them
+    // Someone left standing in a doorway or on a deck lift when their way was cut short steps back into the room.
+    if (member.alive && !member.path.length && !member.board && !inside(sim.layout.room(member.room), member)) member.path = [spotIn(sim.layout.room(member.room), member.index)];
   }
 }
+
+const inside = (room, member) => member.x >= room.x && member.x <= room.x + room.w && member.y >= room.y && member.y <= room.y + room.h;
 
 /** A line for the UI about what someone is doing. */
 export function describeTask(sim, member) {
