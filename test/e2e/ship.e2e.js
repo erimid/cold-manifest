@@ -669,6 +669,8 @@ async function fightTests(browser) {
   const fight = () => game(page, () => window.coldManifest.sim.state.fight);
   const weapon = (slot) => game(page, (i) => ({ ...window.coldManifest.sim.state.weapons[i] }), slot);
   const foeRoom = async (id) => {
+    // The ships are refitted when a panel changes height; let that frame pass before reading where things are.
+    await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
     const t = await game(page, (rid) => window.coldManifest.shipView.debug.foeTargets().find((x) => x.id === rid), id);
     assert.ok(t, `no enemy room ${id}`);
     return t;
