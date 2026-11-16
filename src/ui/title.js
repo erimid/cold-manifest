@@ -19,7 +19,7 @@ function typeOut(node, text, msPerChar = 28) {
   return () => clearInterval(timer);
 }
 
-export function renderTitle(root, { greeting, seed, version, contentSummary, onNewRun, onHub }) {
+export function renderTitle(root, { greeting, seed, version, contentSummary, onNewRun, onHub, onTestBay }) {
   const line = el('p', { class: 'margo__line', 'aria-live': 'polite' });
 
   root.replaceChildren(
@@ -45,14 +45,15 @@ export function renderTitle(root, { greeting, seed, version, contentSummary, onN
         el(
           'nav',
           { class: 'title__menu' },
-          el('button', { class: 'btn', type: 'button', id: 'btn-new-run', onclick: onNewRun }, 'New run', el('small', {}, 'Take a contract into the Reach')),
-          el('button', { class: 'btn', type: 'button', id: 'btn-hub', onclick: onHub }, 'Records', el('small', {}, 'The Wall, unlocks, past runs')),
+          el('button', { class: 'btn', type: 'button', id: 'btn-new-run', press: onNewRun }, 'New run', el('small', {}, 'Take a contract into the Reach')),
+          el('button', { class: 'btn', type: 'button', id: 'btn-test-bay', press: onTestBay }, 'Test bay', el('small', {}, 'Try the clock, pause and touch controls')),
+          el('button', { class: 'btn', type: 'button', id: 'btn-hub', press: onHub }, 'Records', el('small', {}, 'The Wall, unlocks, past runs')),
         ),
       ),
       el(
         'footer',
         { class: 'title__foot' },
-        el('span', {}, `Build ${version} · Stage 1, session 1`),
+        el('span', {}, `Build ${version} · Stage 1, session 2`),
         el('span', {}, contentSummary),
         el('span', {}, `Seed ${seed}`),
       ),
@@ -70,7 +71,7 @@ export function renderStub(root, { heading, body, onBack }) {
       el('div', { class: 'stencil' }, 'Not built yet'),
       el('h2', {}, heading),
       el('p', {}, body),
-      el('button', { class: 'btn', type: 'button', id: 'btn-back', onclick: onBack }, 'Back'),
+      el('button', { class: 'btn', type: 'button', id: 'btn-back', press: onBack }, 'Back'),
     ),
   );
 }

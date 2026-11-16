@@ -39,12 +39,27 @@ body {
   touch-action: manipulation;
 }
 
-#backdrop {
+#backdrop,
+#view {
   position: fixed;
   inset: 0;
   width: 100%;
   height: 100%;
   display: block;
+}
+
+#backdrop {
+  pointer-events: none;
+}
+
+/* The game canvas. All gestures on it belong to the input module. */
+#view {
+  touch-action: none;
+  -webkit-touch-callout: none;
+}
+
+#view[hidden] {
+  display: none;
 }
 
 #screen {
@@ -53,6 +68,15 @@ body {
   padding: max(20px, env(safe-area-inset-top)) max(28px, env(safe-area-inset-right)) max(20px, env(safe-area-inset-bottom))
     max(28px, env(safe-area-inset-left));
   display: flex;
+  /* The screen layer sits over the canvas but lets presses fall through to it.
+     Only actual panels and controls catch them (brief §4: DOM first, canvas second). */
+  pointer-events: none;
+}
+
+.title,
+.stub,
+.bay > * {
+  pointer-events: auto;
 }
 
 /* ---------- shared pieces ---------- */
@@ -81,7 +105,7 @@ body {
   outline: none;
 }
 
-.btn:active {
+.btn.is-pressed {
   transform: translateY(2px);
   box-shadow: 0 1px 0 #05070b;
 }
@@ -226,11 +250,127 @@ body {
   color: #aab2bf;
 }
 
+.btn--small {
+  min-width: 0;
+  padding: 10px 18px;
+}
+
+/* ---------- test bay (S1.2, replaced by the ship view in S1.3) ---------- */
+
+.bay {
+  flex: 1;
+  position: relative;
+}
+
+.bay > * {
+  position: absolute;
+}
+
+.bay-readout {
+  top: 0;
+  left: 0;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 8px 14px;
+}
+
+.bay-readout__text {
+  margin: 0;
+  font: inherit;
+  font-size: 0.8em;
+  line-height: 1.35;
+  color: var(--amber);
+  column-count: 2;
+  column-gap: 22px;
+}
+
+.bay-back {
+  top: 0;
+  right: 0;
+}
+
+.bay-log {
+  left: 0;
+  bottom: 0;
+  width: min(56%, 640px);
+  height: 96px;
+  padding: 8px 14px;
+  overflow: hidden;
+}
+
+.bay-log__lines {
+  margin-top: 4px;
+  font-size: 0.78em;
+  line-height: 1.45;
+  color: #7d8593;
+  white-space: nowrap;
+}
+
+.bay-log__new {
+  color: var(--paper);
+}
+
+.bay-panel {
+  width: 190px;
+  padding: 10px 12px;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.bay-panel__tally {
+  margin: 0;
+  font: inherit;
+  font-size: 0.78em;
+  line-height: 1.4;
+  color: var(--paper);
+}
+
+.btn--pause {
+  right: 0;
+  bottom: 0;
+  min-width: 230px;
+  min-height: 96px;
+  font-size: 1.35em;
+  border-left-width: 12px;
+}
+
+.btn--pause.is-paused {
+  color: var(--space);
+  background: linear-gradient(180deg, var(--amber), var(--sodium));
+  border-color: var(--amber);
+}
+
+.btn--pause.is-paused small {
+  color: #3a2a12;
+}
+
+.bay-info {
+  max-width: 270px;
+  padding: 8px 12px;
+  font-size: 0.82em;
+  line-height: 1.4;
+  color: var(--space);
+  background: var(--paper);
+  border-radius: 3px;
+  box-shadow: 0 4px 0 #05070b;
+}
+
+.bay > .bay-info {
+  pointer-events: none;
+}
+
+.bay-info[hidden] {
+  display: none;
+}
+
 /* ---------- debug overlay (?debug=1) ---------- */
 
 .debug {
   position: fixed;
-  top: max(8px, env(safe-area-inset-top));
+  top: max(72px, env(safe-area-inset-top));
   right: max(8px, env(safe-area-inset-right));
   padding: 8px 10px;
   font-size: 12px;

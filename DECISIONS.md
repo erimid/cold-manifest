@@ -21,9 +21,11 @@ Items here are known shortcuts. Each names the stage that must clear it.
 | DF-04 | Faction and port names are provisional (see D-012). | Stage 7 (S7.4) | Open |
 | DF-05 | Vent graph is data only, not used by anything, until the creature exists. | Stage 6 (S6.1) | Open |
 | DF-06 | Pre-fight talk/bribe uses a placeholder negotiation value until crew skills exist. | Stage 4 (S4.1) | Open |
-| DF-07 | `src/sim/sim.js` is a stub (tick counter and `reactorDrift`); see D-018. | S1.2 (clock), S1.4 (remove `reactorDrift`) | Open |
-| DF-08 | GitHub Pages must be switched on once in the repo settings (source: `gh-pages` branch) before preview links work (D-014). | Stage 1 | Open |
-| DF-09 | No Playwright touch tests in CI yet. | S1.2 | Open |
+| DF-07 | The sim's only contents are test-bay probes and `reactorDrift` (D-018, D-021). The test bay screen is temporary. | S1.3 (ship replaces the bay), S1.4 (remove `reactorDrift`), S1.6 (crew replace probes) | Open |
+| ~~DF-08~~ | ~~GitHub Pages must be switched on once in the repo settings.~~ | Stage 1 | Done: Eric confirmed 2026-11-15 |
+| ~~DF-09~~ | ~~No Playwright touch tests in CI yet.~~ | S1.2 | Done in S1.2 |
+| DF-10 | Pinch-zoom and two-finger pan are not handled: the input module tracks one pointer at a time. | S1.3 if the ship view needs a camera, otherwise S11.5 | Open |
+| DF-11 | Auto-pause triggers and their settings (brief §7) are not wired; the clock supports a pause requested mid-tick. | S1.7 | Open |
 
 ---
 
@@ -107,6 +109,22 @@ Items here are known shortcuts. Each names the stage that must clear it.
 **What:** Node 22 or newer is required (`.node-version`), because `node --test` with a glob needs it. Menu buttons use ordinary DOM click events for now.
 **Why:** S1.2 builds the input module and decides how DOM UI and canvas taps are routed through it; nothing in S1.1 touches the canvas.
 
+### D-020 How pause works (S1.2)
+**What:** `src/engine/clock.js` is the only caller of `sim.step()`. While paused it calls nothing, so nothing simulated changes, and the render interpolation freezes too. Orders go through `sim.enqueue()` and are applied at the start of the next tick, so orders given while paused wait and start on resume; the queue is part of the save. A stall is capped at 5 ticks per frame (the game slows instead of racing). The clock only runs on live screens. A pause requested from inside a tick stops the clock before the next tick (for auto-pause).
+**Why:** Brief §7 asks for this to be defined once and never broken. Unit tests and the autoplay bot both assert that the state hash does not change across paused frames.
+
+### D-021 Test bay and probes are temporary (S1.2)
+**What:** The sim holds three "probes" that move around an empty bay, and a Test bay screen exercises the clock and input. Neither is part of the game.
+**Why:** The clock, command queue, interpolation and touch input needed something real to act on before the ship exists. S1.3 replaces the bay with the ship view and S1.6 replaces probes with crew; the browser tests are rewritten against the ship then.
+
+### D-022 Input rules (S1.2)
+**What:** `src/engine/input.js` is the only file that listens to pointer or keyboard events. DOM controls are registered with `input.press(element, fn)` (via `el(..., { press })`), not click listeners. A press that starts on DOM UI never reaches the canvas. Tap thresholds: 6 px mouse, 8 px pen, 12 px touch. Long-press: 450 ms. Hit padding: 2 px mouse, 6 px pen, 14 px touch; a point inside a target always beats a near miss. Right-click and long-press both produce the same `info` event. Space always pauses, even when a button has focus; Enter presses the focused control.
+**Why:** Brief §4. The numbers are starting values to tune on a real iPad.
+
+### D-023 Browser tests (S1.2)
+**What:** `npm run test:e2e` drives the built site with Playwright on an emulated iPad (touch) and a desktop (mouse, keyboard). Playwright is not in `package.json`; CI installs a pinned version in its own job, and local runs use a globally installed one.
+**Why:** Keeps `npm ci` small and avoids a second browser download on machines that already have Playwright. Emulation does not replace a real iPad (D-007).
+
 ---
 
 ## Stage notes
@@ -116,3 +134,4 @@ _None yet. Stage 1 note goes here when Stage 1 is done._
 ### Session log
 
 - **S1.1 (2026-11-15):** Vite scaffold, folder layout, seeded RNG with substreams, content registry with browser and Node loaders, content checker, autoplay skeleton, title screen with stub screens, debug overlay, CI. 30 unit tests. GitHub Pages deploy workflow with per-PR previews. Known gap: DF-08 (Pages must be switched on in repo settings).
+- **S1.2 (2026-11-15):** Fixed-timestep clock with pause, command queue, game event bus, input module (tap, drag, long-press, padded hit areas, keyboard), temporary test bay screen, autoplay bot that gives orders and pauses, 59 unit tests, 18 browser checks. DF-08 cleared: Eric switched Pages on and confirmed the preview works. DF-09 cleared.

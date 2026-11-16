@@ -24,13 +24,14 @@ URL flags: `?debug=1` shows the debug overlay, `?seed=ABCD-EFGH` fixes the seed,
 
 ## The green gate
 
-Every pull request must pass all four. CI runs them automatically.
+Every pull request must pass all of these. CI runs them automatically.
 
 ```
 npm test                        # unit tests
 npm run check                   # content validation and coverage report
 npm run autoplay -- --runs 100  # headless seeded runs: no crashes, exact replay
 npm run build                   # static site in dist/
+npm run test:e2e                # browser tests on an emulated iPad and desktop (needs Playwright)
 ```
 
 ## Layout
