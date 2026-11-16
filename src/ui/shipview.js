@@ -1,9 +1,9 @@
 // The ship view: the main gameplay screen (brief §18).
 //
 // Tap a room to see its status, tap a door to open or close it, long-press
-// (or right-click) anything for a description. The power panel along the
-// bottom routes the reactor's bars between systems (S1.4). Air, fire and crew
-// arrive in the next sessions and plug into this screen.
+// (or right-click) anything for a description. The switch panel along the
+// bottom holds the reactor's output, the lights by deck, the lift, every
+// station with who has it, and the watch bill (H.4).
 //
 // From S2.7 the screen shows what Margo knows, not what is so (senses.js): a
 // room of ours she cannot see into is drawn as last seen, behind static, and
@@ -29,7 +29,9 @@ import { describeTask } from '../sim/crew.js';
 import { BLUFFS, ENDINGS, bluffChance, findContact, scopeView, whyNoHail, whyNoPay } from '../sim/encounters.js';
 import { describeJob, magazineOf, pickHand, roundsInHold } from '../sim/hold.js';
 import { nerveWord, topMemory } from '../sim/memory.js';
-import { POWERED, aiCoreStatus, free, lightsDraw, litRooms, supply, usable } from '../sim/power.js';
+import { OUTPUT, OUTPUT_LEVELS, POWERED, aiCoreStatus, litRooms, outputLimit } from '../sim/power.js';
+import { POSTS, STATIONS, STATION_IDS, holderOf, rating, reactorLoad, roomOfStation, running, stationOfRoom } from '../sim/stations.js';
+import { onWatch, tiredWord, watchLeft, watchName } from '../sim/watches.js';
 import { roomView, sensorsUp, signature, unseen } from '../sim/senses.js';
 import { SPACE, SYSTEMS } from '../sim/systems.js';
 import { roleOf, skillWords } from '../sim/roles.js';
@@ -42,7 +44,6 @@ import { createShipRenderer } from './ship-render.js';
 import { bearingText, drawScope, rangeText, scopeDial, scopeHit, scopeMarks } from './scope.js';
 
 const percent = (value) => `${Math.round(value * 100)}%`;
-const POWER_KEYS = 'QWERTYUI';
 /** How long a crew member's intercom reply stays on the monitor, in real milliseconds. */
 const INTERCOM_MS = 4000;
 /** How long a crew member's reason for refusing stays in the status panel: long enough to read a whole sentence. */
@@ -132,7 +133,7 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
       const room = layout.room(target.id);
       if (room.system) return `${room.name}. ${SYSTEMS[room.system].blurb}`;
       if (room.kind === 'helm') return `${room.name}. Where the ship is flown from.`;
-      if (room.kind === 'lift') return `${room.name}. Runs on door control power. Without it, whoever rides it cranks it by hand, slowly.`;
+      if (room.kind === 'lift') return `${room.name}. Runs on the lift motor. With that switched off, whoever rides it cranks it by hand, slowly.`;
       if (room.kind === 'hold' || room.kind === 'cargo') return `${room.name}. Where the paying cargo goes, when there is any.`;
       return `${room.name}. Gets you from one problem to the next.`;
     }
@@ -400,60 +401,66 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
     );
   }
 
-  // ---------- the power panel ----------
-
-  function pips(count) {
-    return Array.from({ length: count }, () => el('i', { class: 'pip' }));
-  }
-
   function setPip(node, kind) {
     const name = `pip pip--${kind}`;
     if (node.className !== name) node.className = name;
   }
 
+  // ---------- the switch panel and the watch bill ----------
+
   /**
-   * The breaker board (S2.9, D-078, D-095): cheap company hardware with a breaker
-   * per system. It folds down to the reactor gauge and a Breakers handle so the
-   * bottom of the screen is free, and opens on demand (tap, or P) or by itself
-   * when a fight starts. The Q-row keys work whether it is open or not.
+   * The switch panel (H.4, D-185), where the breaker board was: the reactor's
+   * three outputs, the lights by deck, the lift motor, and every station with
+   * who has it and a switch to stand it down or to. Beside them the watch bill.
+   * It folds down to the reactor's load and who has the watch, and opens on
+   * demand (tap, or P). Bars are no longer routed, so the Q row does nothing.
    */
   function buildPower() {
-    const reactorPips = pips(sim.state.systems.reactor.level);
     const summary = el('div', { class: 'power__summary', id: 'power-summary' });
     const lights = el('div', { class: 'power__lights', id: 'power-lights' });
-    const tiles = POWERED.map((id, i) => {
-      const add = (delta) => () => order({ type: 'power.add', system: id, delta });
-      const minus = el('button', { class: 'btn power__btn', type: 'button', id: `btn-power-${id}-minus`, 'aria-label': `Less power to ${SYSTEMS[id].name}`, press: add(-1) }, '−');
-      const plus = el('button', { class: 'btn power__btn', type: 'button', id: `btn-power-${id}-plus`, 'aria-label': `More power to ${SYSTEMS[id].name}`, press: add(1) }, '+');
-      const bars = pips(sim.state.systems[id].level);
-      const node = el(
-        'div',
-        { class: 'power__tile', id: `power-${id}`, title: SYSTEMS[id].name },
-        el('div', { class: 'power__label' }, el('span', { class: 'power__code' }, SYSTEMS[id].code), el('span', { class: 'power__key' }, POWER_KEYS[i])),
-        el('div', { class: 'power__name' }, SYSTEMS[id].name),
-        el('div', { class: 'power__pips' }, bars),
-        el('div', { class: 'power__buttons' }, minus, plus),
-      );
-      // Folded, each breaker is just a lamp per bar under its code.
-      const lamps = pips(sim.state.systems[id].level);
-      const mini = el('div', { class: 'power__mini', id: `power-mini-${id}` }, el('span', {}, SYSTEMS[id].code), el('span', { class: 'power__minipips' }, lamps));
-      return { id, node, minus, plus, bars, mini, lamps };
+    const load = el('i', { class: 'power__loadfill' });
+    const outputs = OUTPUT_LEVELS.map((level) => ({ level, node: button(`btn-output-${level}`, OUTPUT[level].name, () => order({ type: 'power.output', level })) }));
+    const decks = layout.decks.map((deck) => ({ deck, node: button(`btn-deck-${deck.id}`, deck.name.replace(/ deck$/i, ''), () => order({ type: 'deck.lights', deck: deck.id, on: deckLit(deck) === 0 })) }));
+    const allLights = button('btn-lights-all', 'All', () => order({ type: 'lights.all', on: litRooms(sim) === 0 }));
+    const lift = button('btn-lift', 'Lift', () => order({ type: 'power.lift', on: !sim.state.power.lift }));
+    const tiles = STATION_IDS.filter((id) => roomOfStation(sim, id)).map((id) => {
+      const who = el('span', { class: 'station__who' });
+      const rate = el('span', { class: 'station__rating' });
+      const stand = el('button', { class: 'btn station__stand', type: 'button', id: `btn-stand-${id}`, 'aria-label': `Stand ${STATIONS[id].name} down or to`, press: () => order({ type: 'station.stand', station: id, down: !sim.state.stations[id].down }) }, 'On');
+      const node = el('div', { class: 'station', id: `station-${id}`, title: STATIONS[id].blurb }, el('div', { class: 'station__name' }, STATIONS[id].name), el('div', { class: 'station__line' }, who, rate), stand);
+      const lamp = el('i', { class: 'pip' });
+      const mini = el('div', { class: 'power__mini', id: `power-mini-${id}` }, el('span', {}, STATIONS[id].system ? SYSTEMS[STATIONS[id].system].code : 'HLM'), el('span', { class: 'power__minipips' }, lamp));
+      return { id, node, who, rate, stand, lamp, mini };
     });
-    const toggle = el('button', { class: 'btn btn--small power__toggle', type: 'button', id: 'btn-breakers', 'aria-expanded': 'false', press: () => openBoard(!power.open) }, el('span', { id: 'breakers-label' }, 'Breakers'), el('small', { class: 'power__key' }, 'P'));
-    const board = el('div', { class: 'power__tiles', id: 'breaker-board', hidden: true }, tiles.map((t) => t.node));
+    const watchNote = el('div', { class: 'power__watch', id: 'watch-note' });
+    const watches = [1, 2, 3].map((count) => ({ count, node: button(`btn-watches-${count}`, count === 1 ? 'All hands' : `${count} watches`, () => order({ type: 'roster.watches', count })) }));
+    const muster = button('btn-muster', 'To stations', () => order({ type: 'roster.muster' }));
+    const toggle = el('button', { class: 'btn btn--small power__toggle', type: 'button', id: 'btn-breakers', 'aria-expanded': 'false', press: () => openBoard(!power.open) }, el('span', { id: 'breakers-label' }, 'Switches'), el('small', { class: 'power__key' }, 'P'));
+    const board = el(
+      'div',
+      { class: 'power__board', id: 'breaker-board', hidden: true },
+      el(
+        'div',
+        { class: 'power__switches' },
+        el('div', { class: 'power__row', id: 'switch-output' }, el('span', { class: 'stencil power__rowname' }, 'Reactor'), outputs.map((o) => o.node)),
+        el('div', { class: 'power__row', id: 'switch-lights' }, el('span', { class: 'stencil power__rowname' }, 'Lights'), decks.map((d) => d.node), allLights, lift),
+        el('div', { class: 'power__row', id: 'switch-watch' }, el('span', { class: 'stencil power__rowname' }, 'Watch'), watches.map((w) => w.node), muster),
+      ),
+      el('div', { class: 'power__stations', id: 'stations' }, tiles.map((t) => t.node)),
+    );
     const folded = el('div', { class: 'power__folded', id: 'breakers-folded' }, tiles.map((t) => t.mini));
-    power = { reactorPips, summary, lights, tiles, toggle, board, folded, open: false, node: null };
+    power = { summary, lights, load, outputs, decks, allLights, lift, tiles, watchNote, watches, muster, toggle, board, folded, open: false, node: null };
     power.node = el(
       'div',
       { class: 'panel power breakers is-closed', id: 'power' },
-      el('div', { class: 'power__reactor' }, el('div', { class: 'stencil' }, 'Reactor'), el('div', { class: 'power__pips power__pips--reactor' }, reactorPips), summary, lights, toggle),
+      el('div', { class: 'power__reactor' }, el('div', { class: 'stencil' }, 'Reactor'), el('div', { class: 'power__load', title: 'Reactor load: what a scope reads as our heat' }, load), summary, lights, watchNote, toggle),
       board,
       folded,
     );
     return power.node;
   }
 
-  /** Open or fold the breaker board. */
+  /** Open or fold the switch panel. */
   function openBoard(open) {
     if (power.open === open) return;
     power.open = open;
@@ -461,29 +468,67 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
     power.folded.hidden = open;
     power.node.classList.toggle('is-closed', !open);
     power.toggle.setAttribute('aria-expanded', String(open));
-    setText(power.toggle.firstChild, open ? 'Fold' : 'Breakers');
+    setText(power.toggle.firstChild, open ? 'Fold' : 'Switches');
+  }
+
+  /** Who has a station, in a word or two. */
+  function holderText(id) {
+    const by = holderOf(sim, id);
+    if (by === null) return sim.state.stations[id].down ? 'Stood down' : 'Dark';
+    if (id === 'ai_core') return 'Margo';
+    return by === 'margo' ? 'Margo' : (sim.state.crew[by]?.name ?? by);
   }
 
   function updatePower() {
-    const made = supply(sim);
-    const spare = free(sim);
-    const inUse = made - spare;
-    power.reactorPips.forEach((node, i) => setPip(node, i >= made ? 'broken' : i < inUse ? 'on' : 'off'));
-    setText(power.summary, `${spare} of ${made} spare`);
-    power.summary.classList.toggle('is-alarm', made < sim.state.systems.reactor.level);
-    setText(power.lights, `Lights ${lightsDraw(sim)} · ${litRooms(sim)} rooms`);
+    const limit = outputLimit(sim);
+    const loaded = reactorLoad(sim);
+    const output = sim.state.power.output;
+    setText(power.summary, limit === null ? 'Reactor dead' : `${OUTPUT[output].name} · load ${percent(loaded)}`);
+    power.summary.classList.toggle('is-alarm', limit !== 'hard');
+    const width = `${Math.round(loaded * 100)}%`;
+    if (power.load.style.width !== width) power.load.style.width = width;
+    setText(power.lights, `Lights · ${litRooms(sim)} rooms`);
+    const { roster } = sim.state;
+    const left = watchLeft(sim);
+    setText(power.watchNote, roster.watches > 1 ? `${watchName(roster.on)} watch · ${Math.floor(left / 60)}:${String(Math.floor(left % 60)).padStart(2, '0')}` : roster.watches === 1 ? 'All hands' : 'No watch bill');
+    for (const { level, node } of power.outputs) {
+      node.classList.toggle('is-on', output === level && limit !== null);
+      node.setAttribute('aria-pressed', String(output === level));
+      const why = level === output ? null : sim.whyNot({ type: 'power.output', level });
+      node.title = why ? sentence(why) : level === 'low' ? 'Everything works slower, and she runs cool.' : level === 'hard' ? 'Everything works faster, and she glows. Needs a hand on the reactor.' : 'The book figure.';
+      node.classList.toggle('is-blocked', Boolean(why));
+    }
+    for (const { deck, node } of power.decks) {
+      const lit = deckLit(deck);
+      node.classList.toggle('is-on', lit > 0);
+      node.setAttribute('aria-pressed', String(lit > 0));
+    }
+    power.allLights.classList.toggle('is-on', litRooms(sim) > 0);
+    power.lift.classList.toggle('is-on', sim.state.power.lift);
+    power.lift.setAttribute('aria-pressed', String(sim.state.power.lift));
+    power.lift.title = sim.state.power.lift ? 'The lift motor is running.' : 'The lift motor is off: the lifts are cranked by hand.';
     for (const tile of power.tiles) {
-      const system = sim.state.systems[tile.id];
-      const works = usable(sim, tile.id);
-      const look = (i) => (i >= works ? 'broken' : i < system.power ? 'on' : 'off');
-      tile.bars.forEach((node, i) => setPip(node, look(i)));
-      tile.lamps.forEach((node, i) => setPip(node, look(i)));
-      tile.node.classList.toggle('is-dead', system.power === 0);
-      tile.node.classList.toggle('is-damaged', system.damage > 0);
-      tile.mini.classList.toggle('is-dead', system.power === 0);
-      tile.mini.classList.toggle('is-damaged', system.damage > 0);
-      tile.minus.disabled = system.power === 0;
-      tile.plus.disabled = system.power >= works || spare < 1;
+      const station = STATIONS[tile.id];
+      const system = station.system ? sim.state.systems[station.system] : null;
+      const down = sim.state.stations[tile.id].down;
+      const run = rating(sim, tile.id);
+      const by = holderOf(sim, tile.id);
+      setText(tile.who, holderText(tile.id));
+      setText(tile.rate, run > 0 ? run.toFixed(1) : '');
+      setText(tile.stand, down ? 'Off' : 'On');
+      tile.stand.classList.toggle('is-on', !down);
+      tile.stand.setAttribute('aria-pressed', String(!down));
+      tile.stand.disabled = Boolean(system?.lost);
+      tile.node.classList.toggle('is-dead', run === 0);
+      tile.node.classList.toggle('is-crew', by !== null && by !== 'margo');
+      tile.node.classList.toggle('is-damaged', Boolean(system && system.damage > 0));
+      setPip(tile.lamp, system && system.damage >= system.level ? 'broken' : run > 0 ? 'on' : 'off');
+      tile.mini.classList.toggle('is-dead', run === 0);
+      tile.mini.classList.toggle('is-damaged', Boolean(system && system.damage > 0));
+    }
+    for (const { count, node } of power.watches) {
+      node.classList.toggle('is-on', roster.watches === count);
+      node.setAttribute('aria-pressed', String(roster.watches === count));
     }
   }
 
@@ -597,13 +642,13 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
     updateToll();
   }
 
-  /** The deterrent gun in a few words: power, rounds, charge, and what it is laid on. */
+  /** The deterrent gun in a few words: stood to or not, rounds, charge, and what it is laid on. */
   function gunText() {
     const slot = gun();
     if (slot < 0) return 'No gun fitted';
     const state = sim.state.weapons[slot];
     const weapon = weaponOf(slot);
-    if (!state.powered) return `No power: needs ${weapon.power}`;
+    if (!state.powered) return 'Guns stood down';
     if (state.rounds !== null && state.rounds < 1) return roundsInHold(sim) ? 'Out of rounds · fetch more' : 'Out of rounds';
     const rounds = state.rounds === null ? '' : ` · ${state.rounds} rds`;
     const on = state.target === null ? null : `C${state.target}`;
@@ -616,7 +661,7 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
     const slot = pdSlot(sim);
     if (slot < 0) return 'None fitted';
     const state = sim.state.weapons[slot];
-    if (!state.powered) return `No power: needs ${weaponOf(slot).power}`;
+    if (!state.powered) return 'Guns stood down';
     const { drones, pods } = sim.state.scope;
     const threats = drones.length + pods.length;
     return threats ? `Firing · ${drones.length ? `${drones.length} drone${drones.length === 1 ? '' : 's'}` : ''}${drones.length && pods.length ? ', ' : ''}${pods.length ? `${pods.length} pod${pods.length === 1 ? '' : 's'}` : ''}` : 'On watch';
@@ -887,7 +932,9 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
       }
       const { member, ship } = found;
       const away = ship !== sim && member.alive;
-      setText(chip.task, member.alive ? `${away ? 'Aboard: ' : ''}${CHIP_TASKS[member.task] ?? 'Standing by'}` : 'Dead');
+      setText(chip.task, member.alive ? `${away ? 'Aboard: ' : ''}${member.asleep ? 'Asleep' : member.task === 'idle' && member.post && stationOfRoom(sim, member.room) === member.post ? `On ${STATIONS[member.post].name.toLowerCase()}` : (CHIP_TASKS[member.task] ?? 'Standing by')}` : 'Dead');
+      chip.node.classList.toggle('is-asleep', Boolean(member.alive && member.asleep));
+      chip.node.classList.toggle('is-tired', Boolean(member.alive && member.fatigue > 0.6));
       chip.node.classList.toggle('is-away', away);
       const width = `${Math.round(member.health * 100)}%`;
       if (chip.health.style.width !== width) chip.health.style.width = width;
@@ -901,13 +948,29 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
     panel = null;
     if (selectedCrew) {
       const { member } = findCrew(sim, selectedCrew);
-      const stats = { health: stat('Health'), where: stat('In'), doing: stat('Doing'), skills: stat('Good at'), suit: stat('Suit'), nerve: stat('Nerve') };
+      const stats = { health: stat('Health'), where: stat('In'), doing: stat('Doing'), skills: stat('Good at'), post: stat('Post'), watch: stat('Watch'), rest: stat('Rest'), suit: stat('Suit'), nerve: stat('Nerve') };
       setText(stats.skills.value, skillWords(member) || 'Nothing special');
       const memory = el('span', { class: 'status__hint status__hint--inline', id: 'crew-memory' });
       const suit = button('btn-suit', 'Suit up', () => order({ type: 'crew.suit', crew: member.id, on: !findCrew(sim, member.id).member.suit }));
       // Hide where they stand (H.2): a locker, or a crawlway for an engineer.
       const hide = button('btn-hide', 'Hide', () => order({ type: 'crew.hide', crew: member.id, on: !findCrew(sim, member.id).member.hidden }));
       const note = el('span', { class: 'status__note' });
+      // Their post (H.4): a station to stand, or none. Posting them sends them there.
+      const posts = [...POSTS.filter((id) => roomOfStation(sim, id)), null].map((station) => ({
+        station,
+        node: button(`btn-post-${station ?? 'none'}`, station ? STATIONS[station].name : 'No post', () => order({ type: 'crew.post', crew: member.id, station }), 'btn--small'),
+      }));
+      const shift = button('btn-watch', 'Change watch', () => {
+        const count = Math.max(1, sim.state.roster.watches);
+        order({ type: 'crew.watch', crew: member.id, watch: (findCrew(sim, member.id).member.watch + 1) % count });
+      }, 'btn--small');
+      // The stations fold away under one button, so the panel stays short and the ship stays big.
+      const postRow = el('div', { class: 'status__controls status__posts', id: 'crew-posts', hidden: true }, posts.map((p) => p.node));
+      const choose = button('btn-posts', 'Post', () => {
+        postRow.hidden = !postRow.hidden;
+        choose.setAttribute('aria-expanded', String(!postRow.hidden));
+      }, 'btn--small');
+      choose.setAttribute('aria-expanded', 'false');
       nodes.status.replaceChildren(
         el('div', { class: 'status__head' }, el('div', { class: 'status__title', id: 'status-title' }, member.name), el('div', { class: 'stencil', id: 'crew-role' }, `${roleOf(member)?.name ?? 'Crew'} · ${member.index + 1}`), note),
         el('div', { class: 'status__stats' }, Object.values(stats).map((s) => s.node)),
@@ -916,12 +979,15 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
           { class: 'status__controls' },
           suit,
           hide,
+          choose,
+          shift,
           debug && button('btn-dbg-hurt', 'Hurt', () => order({ type: 'debug.crew', crew: member.id, health: Math.max(0.05, findCrew(sim, member.id).member.health - 0.3) }), 'btn--debug'),
           el('span', { class: 'status__hint status__hint--inline', id: 'crew-hint' }, 'Tap a room to send them there.'),
           memory,
         ),
+        postRow,
       );
-      panel = { kind: 'crew', id: member.id, stats, suit, hide, note, memory };
+      panel = { kind: 'crew', id: member.id, stats, suit, hide, note, memory, posts, shift };
       updatePanel();
       return;
     }
@@ -1013,7 +1079,8 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
       const room = layout.room(selected.id);
       const stats = { oxygen: stat('Oxygen'), temperature: stat('Temp'), light: stat('Light'), noise: stat('Noise'), hull: stat('Hull'), fire: stat('Fire'), breach: stat('Breach') };
       const sys = room.system ?? null;
-      if (sys) stats.system = stat(sys === 'reactor' ? 'Output' : POWERED.includes(sys) ? 'Power' : 'System');
+      if (sys) stats.system = stat(sys === 'reactor' ? 'Output' : POWERED.includes(sys) ? 'Station' : 'System');
+      else if (stationOfRoom(sim, room.id)) stats.system = stat('Station');
       const lights = button('btn-lights', 'Lights off', () => order({ type: 'room.lights', room: room.id, on: !sim.state.rooms[room.id].lightsOn }));
       const note = el('span', { class: 'status__note' });
       // A whole deck's lamps at once, and the room's emergency vent (H.2). The deck is the one its floor is on.
@@ -1163,7 +1230,7 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
       setText(panel.stats.gun.value, gunText());
       setText(panel.stats.pd.value, pdText());
       const braceProblem = whyNoBrace(sim);
-      setText(panel.braceNote, braced(sim) ? `Up ${seconds(sim.state.shield.until - sim.state.tick)}` : capacity(sim) ? percent(capacitorOf(sim)) : 'No power');
+      setText(panel.braceNote, braced(sim) ? `Up ${seconds(sim.state.shield.until - sim.state.tick)}` : capacity(sim) ? percent(capacitorOf(sim)) : 'Shields dark');
       panel.brace.classList.toggle('is-ready', !braceProblem);
       panel.brace.classList.toggle('is-active', braced(sim));
       if (panel.fetch) {
@@ -1230,6 +1297,17 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
       panel.stats.where.node.classList.toggle('is-alarm', ship !== sim);
       setText(panel.stats.doing.value, (ship === sim && describeJob(sim, member)) || describeTask(ship, member));
       setText(panel.stats.suit.value, member.suit ? 'on (slower)' : 'off');
+      setText(panel.stats.post.value, member.post ? STATIONS[member.post].name : 'none');
+      const { roster } = sim.state;
+      setText(panel.stats.watch.value, roster.watches > 1 ? `${watchName(member.watch)}${onWatch(sim, member) ? ' · on' : ' · below'}` : roster.watches === 1 ? 'all hands' : 'none kept');
+      setText(panel.stats.rest.value, member.alive ? `${tiredWord(member)}${member.asleep ? ' · asleep' : ''}` : 'none');
+      panel.stats.rest.node.classList.toggle('is-alarm', member.alive && member.fatigue >= 0.9);
+      for (const { station, node } of panel.posts) {
+        node.classList.toggle('is-on', member.post === station);
+        node.setAttribute('aria-pressed', String(member.post === station));
+        node.disabled = !member.alive || ship !== sim;
+      }
+      panel.shift.disabled = !member.alive || roster.watches < 2;
       setText(panel.suit, member.suit ? 'Suit off' : 'Suit up');
       panel.suit.disabled = !member.alive;
       setText(panel.hide, member.hidden ? 'Come out' : 'Hide');
@@ -1259,11 +1337,20 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
       if (panel.sys) {
         const system = sim.state.systems[panel.sys];
         const works = system.level - system.damage;
-        let text = panel.sys === 'reactor' ? `${works} of ${system.level} bars` : POWERED.includes(panel.sys) ? `${system.power} of ${works}` : system.damage ? 'damaged' : 'working';
-        if (system.damage && POWERED.includes(panel.sys)) text += ` (${system.damage} damaged)`;
+        let text = system.damage ? 'damaged' : 'working';
+        if (panel.sys === 'reactor') text = `${OUTPUT[sim.state.power.output].name.toLowerCase()} · ${works} of ${system.level} bars`;
+        else if (STATIONS[panel.sys]) {
+          const run = rating(sim, panel.sys);
+          text = run > 0 ? `${holderText(panel.sys)} · ${run.toFixed(1)}` : holderText(panel.sys).toLowerCase();
+          if (system.damage) text += ` (${system.damage} of ${system.level} damaged)`;
+        }
         if (panel.sys === 'ai_core') text += ` · ${aiCoreStatus(sim).state}`;
         setText(panel.stats.system.value, text);
         panel.stats.system.node.classList.toggle('is-alarm', system.damage > 0);
+      } else if (panel.stats.system) {
+        const id = stationOfRoom(sim, panel.id);
+        const run = rating(sim, id);
+        setText(panel.stats.system.value, run > 0 ? `${holderText(id)} · ${run.toFixed(1)}` : holderText(id).toLowerCase());
       }
       setText(panel.lights, r.lightsOn ? 'Lights off' : 'Lights on');
       panel.lights.disabled = r.jettisoned;
@@ -1314,12 +1401,12 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
       }
       // Buttons stay pressable when door control is dark, so a press can say why nothing moved.
       for (const [state, node] of Object.entries(panel.buttons)) node.disabled = jammed || d.state === state;
-      const dark = sim.state.systems.doors.power === 0;
+      const dark = !running(sim, 'doors');
       panel.stats.state.node.classList.toggle('is-alarm', jammed);
       if (panel.jam) setText(panel.jam, jammed ? 'Free' : 'Jam');
       setText(
         panel.note,
-        queuedFor('door', panel.id) ? 'Order queued' : jammed ? 'Jammed. It will not move until it is repaired.' : refusalText() || (dark ? 'Door control has no power. Doors are worked by hand.' : ''),
+        queuedFor('door', panel.id) ? 'Order queued' : jammed ? 'Jammed. It will not move until it is repaired.' : refusalText() || (dark ? 'Door control is dark. Doors are worked by hand.' : ''),
       );
     }
   }
@@ -1377,9 +1464,8 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
   }
 
   function onKey({ action, shift }) {
-    if (action.startsWith('power-')) {
-      const system = POWERED[Number(action.slice(6)) - 1];
-      if (system) order({ type: 'power.add', system, delta: shift ? -1 : 1 });
+    if (action === 'muster') {
+      order({ type: 'roster.muster' });
       return;
     }
     if (action === 'gun') {

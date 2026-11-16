@@ -209,6 +209,15 @@
     {"id": "ph.drone_attached.003", "category": "combat_progress", "placeholder": true, "conditions": {"trigger": "drone.attached"}, "text": "Something on the plating, working at the seams."},
     {"id": "ph.contact_spent.001", "category": "combat_end", "placeholder": true, "conditions": {"trigger": "contact.spent"}, "text": "That carrier's out of drones and out of reasons. It's going."},
     {"id": "ph.contact_spent.002", "category": "combat_end", "placeholder": true, "conditions": {"trigger": "contact.spent"}, "text": "No more drones. They're leaving, and so is the noise."},
-    {"id": "ph.contact_spent.003", "category": "combat_end", "placeholder": true, "conditions": {"trigger": "contact.spent"}, "text": "Their bay is empty. That's the end of that."}
+    {"id": "ph.contact_spent.003", "category": "combat_end", "placeholder": true, "conditions": {"trigger": "contact.spent"}, "text": "Their bay is empty. That's the end of that."},
+    {"id": "ph.station_taken.001", "category": "order_confirm", "placeholder": true, "conditions": {"trigger": "station.taken"}, "text": "{crew_name} has left {room}. I have it. I'll run it by the book, which is all I'm licensed for."},
+    {"id": "ph.station_taken.002", "category": "order_confirm", "placeholder": true, "conditions": {"trigger": "station.taken"}, "text": "I've picked up {room} from {crew_name}. It will be done correctly. It will not be done well."},
+    {"id": "ph.station_taken.003", "category": "order_confirm", "placeholder": true, "conditions": {"trigger": "station.taken"}, "text": "{room} is mine until {crew_name} comes back. The company rates me adequate at it."},
+    {"id": "ph.watch_changed.001", "category": "idle", "placeholder": true, "conditions": {"trigger": "watch.changed"}, "text": "Change of the watch. Those going below, go below. I'll note who doesn't."},
+    {"id": "ph.watch_changed.002", "category": "idle", "placeholder": true, "conditions": {"trigger": "watch.changed"}, "text": "Watch below to their bunks, watch on deck to their posts. I never get a turn."},
+    {"id": "ph.watch_changed.003", "category": "idle", "placeholder": true, "conditions": {"trigger": "watch.changed"}, "text": "The watch has turned over. Nothing was handed on that I'd call a report."},
+    {"id": "ph.output_unmanned.001", "category": "order_confirm", "placeholder": true, "conditions": {"trigger": "power.output"}, "text": "Nobody is on the reactor, so it's back to steady. I don't run it hard. That's in writing."},
+    {"id": "ph.output_unmanned.002", "category": "order_confirm", "placeholder": true, "conditions": {"trigger": "power.output"}, "text": "Reactor's unattended. I've brought it down to the book figure. Send me an engineer if you want more."},
+    {"id": "ph.output_unmanned.003", "category": "order_confirm", "placeholder": true, "conditions": {"trigger": "power.output"}, "text": "I've eased the reactor back to steady. Hard is a thing people do, with their hands on it."}
   ]
 }

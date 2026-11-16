@@ -44,6 +44,11 @@ export const TRIGGERS = Object.freeze({
   idle: { category: 'idle', priority: 0, ttl: 6 },
   'crew.ordered': { category: 'order_confirm', priority: 1, ttl: 4, cooldown: 20, chance: 0.15, slots: crewName }, // rarer since the crew answer for themselves (D-094)
   'power.brownout': { category: 'hazard', priority: 3, ttl: 10, cooldown: 30 },
+  // Stations and the watch (H.4): she says when she picks up a station someone has left, when the watch turns
+  // over, and when the reactor drops back from hard because nobody is on it.
+  'station.taken': { category: 'order_confirm', priority: 1, ttl: 6, cooldown: 45, chance: 0.6, slots: crewAndRoom },
+  'watch.changed': { category: 'idle', priority: 1, ttl: 10 },
+  'power.output': { category: 'order_confirm', priority: 2, ttl: 8, cooldown: 20, when: (event) => event.reason === 'unmanned' },
   'crew.hurt': { category: 'crew_injury', priority: 3, ttl: 12, cooldown: 15, slots: crewName },
   // A fire or a hole in a room she cannot see into is not news until someone looks (senses.js): then it is "found".
   'fire.started': { category: 'hazard', priority: 4, ttl: 12, cooldown: 20, seen: true },

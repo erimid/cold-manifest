@@ -14,7 +14,7 @@ const require = createRequire(import.meta.url);
 const { chromium, devices } = require('playwright');
 
 const PORT = 4179;
-const URL = `http://localhost:${PORT}/?seed=E2E-TEST&autopause=0`;
+const URL = `http://localhost:${PORT}/?seed=E2E-TEST&watches=0&autopause=0`;
 
 const results = [];
 async function check(name, fn) {
@@ -65,8 +65,9 @@ const room = (page, id) => game(page, (rid) => ({ ...window.coldManifest.sim.sta
 const counts = (page) => game(page, () => ({ ...window.coldManifest.shipView.debug.counts }));
 const selected = (page) => game(page, () => window.coldManifest.shipView.debug.selected);
 const queued = (page) => game(page, () => window.coldManifest.sim.state.commands.length);
-const power = (page, id) => game(page, (sid) => window.coldManifest.sim.state.systems[sid].power, id);
-const powerIs = (page, id, bars) => page.waitForFunction(([sid, n]) => window.coldManifest.sim.state.systems[sid].power === n, [id, bars], { timeout: 2000 });
+/** Is a station stood down? */
+const down = (page, id) => game(page, (sid) => window.coldManifest.sim.state.stations[sid].down, id);
+const downIs = (page, id, value) => page.waitForFunction(([sid, v]) => window.coldManifest.sim.state.stations[sid].down === v, [id, value], { timeout: 2000 });
 const selectedCrew = (page) => game(page, () => window.coldManifest.shipView.debug.selectedCrew);
 const crewTarget = async (page, id) => {
   const t = await game(page, (cid) => window.coldManifest.shipView.debug.targets().find((x) => x.kind === 'crew' && x.id === cid), id);
@@ -264,57 +265,80 @@ async function touchTests(browser) {
     assert.equal(await game(page, () => JSON.stringify(window.coldManifest.sim.state.doors)), hash);
   });
 
-  await check('the breaker board starts folded to a strip of lamps, and Breakers opens it (S2.9)', async () => {
+  await check('the switch panel starts folded to a strip of lamps, and Switches opens it (H.4)', async () => {
     assert.equal(await page.isVisible('#breaker-board'), false);
     assert.equal(await page.isVisible('#breakers-folded'), true);
     assert.equal(await page.locator('#power-mini-engines .pip--on').count(), 1);
+    assert.equal(await page.locator('#power-mini-weapons .pip--on').count(), 0, 'the guns start stood down');
     await page.tap('#btn-breakers');
     await page.waitForSelector('#breaker-board', { state: 'visible', timeout: 2000 });
     assert.equal(await page.isVisible('#breakers-folded'), false);
-    assert.match(await page.textContent('#power-life_support'), /Life support/, 'each breaker names its system');
-    if (process.env.E2E_SHOTS) await page.screenshot({ path: `${process.env.E2E_SHOTS}/s2-9-breakers-ipad.png` });
+    assert.match(await page.textContent('#station-life_support'), /Air plant/, 'each station is named');
+    assert.match(await page.textContent('#station-sensors'), /Margo\s*1\.0/, 'and says who has it and how well');
+    assert.equal(await page.locator('#breaker-board .pip, #btn-power-shields-plus').count(), 0, 'no bars to route');
+    for (const id of await page.$$eval('#breaker-board .btn', (list) => list.map((b) => b.id))) {
+      const box = await page.locator(`#${id}`).boundingBox();
+      assert.ok(box.width >= 44 && box.height >= 44, `${id} is ${box.width} by ${box.height}`);
+    }
+    if (process.env.E2E_SHOTS) await page.screenshot({ path: `${process.env.E2E_SHOTS}/h4-switches-ipad.png` });
   });
 
-  await check('power: minus frees a bar, plus spends it, and the panel keeps count', async () => {
-    assert.match(await page.textContent('#power-summary'), /0 of 8 spare/);
-    assert.equal(await page.isDisabled('#btn-power-shields-plus'), true, 'nothing spare, so plus is off');
-    await page.tap('#btn-power-sensors-minus');
-    await powerIs(page, 'sensors', 0);
-    await page.waitForFunction(() => document.querySelector('#power-summary').textContent.startsWith('1 of 8'));
-    assert.equal(await page.isDisabled('#btn-power-sensors-minus'), true);
-    await page.tap('#btn-power-shields-plus');
-    await powerIs(page, 'shields', 1);
-    assert.equal(await page.locator('#power-shields .pip--on').count(), 1);
-    assert.equal(await page.locator('#power-shields .pip--off').count(), 1);
-    await page.tap('#btn-power-shields-minus');
-    await powerIs(page, 'shields', 0);
-    await page.tap('#btn-power-sensors-plus');
-    await powerIs(page, 'sensors', 1);
+  await check('stations: a tap stands one to or down, and the reactor load follows', async () => {
+    const load = () => game(page, () => Number(document.querySelector('#power-summary').textContent.match(/load (\d+)%/)[1]));
+    assert.match(await page.textContent('#power-summary'), /Steady · load \d+%/);
+    const before = await load();
+    await page.tap('#btn-stand-sensors');
+    await downIs(page, 'sensors', true);
+    await page.waitForFunction(() => /Stood down/.test(document.querySelector('#station-sensors').textContent));
+    assert.ok((await load()) < before, 'a station stood down is load off the reactor');
+    await page.tap('#btn-stand-sensors');
+    await downIs(page, 'sensors', false);
+    await page.tap('#btn-stand-shields');
+    await downIs(page, 'shields', false);
+    await page.tap('#btn-stand-shields');
+    await downIs(page, 'shields', true);
   });
 
-  await check('power: routing while paused waits for resume', async () => {
+  await check('the big switches: reactor output, lights by deck and the lift', async () => {
+    await page.tap('#btn-output-low');
+    await page.waitForFunction(() => window.coldManifest.sim.state.power.output === 'low', null, { timeout: 2000 });
+    assert.match(await page.textContent('#power-summary'), /^Low/);
+    await page.tap('#btn-output-steady');
+    await page.waitForFunction(() => window.coldManifest.sim.state.power.output === 'steady', null, { timeout: 2000 });
+    await page.tap('#btn-deck-hold');
+    await page.waitForFunction(() => !window.coldManifest.sim.state.rooms.hold.lightsOn, null, { timeout: 2000 });
+    assert.equal((await room(page, 'reactor')).lightsOn, true, 'only that deck');
+    await page.tap('#btn-deck-hold');
+    await page.waitForFunction(() => window.coldManifest.sim.state.rooms.hold.lightsOn, null, { timeout: 2000 });
+    await page.tap('#btn-lift');
+    await page.waitForFunction(() => window.coldManifest.sim.state.power.lift === false, null, { timeout: 2000 });
+    await page.tap('#btn-lift');
+    await page.waitForFunction(() => window.coldManifest.sim.state.power.lift === true, null, { timeout: 2000 });
+  });
+
+  await check('switches thrown while paused wait for resume', async () => {
     await page.tap('#btn-pause');
-    await page.tap('#btn-power-engines-minus');
+    await page.tap('#btn-stand-engines');
     await sleep(200);
-    assert.equal(await power(page, 'engines'), 1);
+    assert.equal(await down(page, 'engines'), false);
     assert.equal(await queued(page), 1);
     await page.tap('#btn-pause');
-    await powerIs(page, 'engines', 0);
-    await page.tap('#btn-power-engines-plus');
-    await powerIs(page, 'engines', 1);
+    await downIs(page, 'engines', true);
+    await page.tap('#btn-stand-engines');
+    await downIs(page, 'engines', false);
   });
 
-  await check('doors: with door control unpowered a tap does nothing and the panel says why', async () => {
-    await page.tap('#btn-power-doors-minus');
-    await powerIs(page, 'doors', 0);
+  await check('doors: with door control stood down a tap does nothing and the panel says why', async () => {
+    await page.tap('#btn-stand-doors');
+    await downIs(page, 'doors', true);
     const before = await door(page, 'd_ai_core');
     const t = await target(page, 'd_ai_core');
     await page.touchscreen.tap(t.mx, t.my);
     await sleep(300);
     assert.deepEqual(await door(page, 'd_ai_core'), before);
     assert.match(await page.textContent('#status'), /by hand/);
-    await page.tap('#btn-power-doors-plus');
-    await powerIs(page, 'doors', 1);
+    await page.tap('#btn-stand-doors');
+    await downIs(page, 'doors', false);
     await page.touchscreen.tap(t.mx, t.my);
     await page.waitForFunction(([id, was]) => window.coldManifest.sim.state.doors[id].state !== was, ['d_ai_core', before.state], { timeout: 2000 });
     await page.touchscreen.tap(t.mx, t.my);
@@ -520,36 +544,34 @@ async function desktopTests(browser) {
     assert.equal(await game(page, () => window.coldManifest.machine.state), 'ship', 'escape let go of the crew member, it did not leave the screen');
   });
 
-  await check('power keys: a Q-row key adds a bar, Shift with it takes one back, with the board folded', async () => {
+  await check('keys: the Q row no longer routes power, P opens the switch panel and G calls everyone to stations', async () => {
     assert.equal(await page.isVisible('#breaker-board'), false);
+    const before = await game(page, () => JSON.stringify(window.coldManifest.sim.state.stations));
+    await page.keyboard.press('KeyQ');
     await page.keyboard.press('Shift+KeyY');
-    await powerIs(page, 'sensors', 0);
-    await page.keyboard.press('KeyQ');
-    await powerIs(page, 'shields', 1);
-    await page.keyboard.press('KeyQ');
     await sleep(200);
-    assert.equal(await power(page, 'shields'), 1, 'no spare power, so the second press is refused');
-    await page.keyboard.press('Shift+KeyQ');
-    await powerIs(page, 'shields', 0);
-    await page.keyboard.press('KeyY');
-    await powerIs(page, 'sensors', 1);
+    assert.equal(await game(page, () => JSON.stringify(window.coldManifest.sim.state.stations)), before);
+    assert.equal(await queued(page), 0);
+    const mustered = page.evaluate(() => new Promise((resolve, reject) => {
+      window.coldManifest.sim.events.on('roster.mustered', resolve);
+      setTimeout(() => reject(new Error('no muster in 2s')), 2000);
+    }));
+    await page.keyboard.press('KeyG');
+    await mustered;
   });
 
-  await check('debug: reactor damage browns the ship out and the panel shows it', async () => {
+  await check('debug: reactor damage takes her outputs away and the panel shows it; mended, she holds what she was set to', async () => {
     const t = await target(page, 'reactor');
     await page.mouse.click(t.mx, t.my);
     await page.click('#btn-dbg-damage');
-    await powerIs(page, 'sensors', 0);
-    await page.waitForFunction(() => /of 7 spare/.test(document.querySelector('#power-summary').textContent));
-    assert.equal(await page.locator('.power__pips--reactor .pip--broken').count(), 1);
-    assert.match(await page.textContent('#status'), /Output\s*7 of 8 bars/);
-    await page.click('#btn-dbg-repair');
-    await page.waitForFunction(() => /of 8 spare/.test(document.querySelector('#power-summary').textContent));
-    assert.equal(await power(page, 'sensors'), 0, 'power does not come back by itself');
+    await page.waitForFunction(() => window.coldManifest.sim.state.systems.reactor.damage === 1, null, { timeout: 2000 });
+    assert.match(await page.textContent('#status'), /Output\s*steady · 7 of 8 bars/);
     await page.keyboard.press('KeyP');
     await page.waitForSelector('#breaker-board', { state: 'visible', timeout: 2000 });
-    await page.click('#btn-power-sensors-plus');
-    await powerIs(page, 'sensors', 1);
+    assert.match(await page.getAttribute('#btn-output-hard', 'title'), /damage/);
+    await page.click('#btn-dbg-repair');
+    await page.waitForFunction(() => window.coldManifest.sim.state.systems.reactor.damage === 0, null, { timeout: 2000 });
+    assert.equal(await game(page, () => window.coldManifest.sim.state.power.output), 'steady');
   });
 
   await check('a damaged system says how to repair it, and Send to repair sends someone (D-118)', async () => {
@@ -630,7 +652,7 @@ async function voiceTests(browser) {
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
   // No ?autopause here: a touch device gets auto-pause by default.
-  await page.goto(`http://localhost:${PORT}/?seed=E2E-VOICE`);
+  await page.goto(`http://localhost:${PORT}/?seed=E2E-VOICE&watches=0`);
   await page.waitForFunction(() => window.coldManifest?.machine.state === 'title');
 
   await check('sound is locked until the first tap, then the ship hum starts', async () => {
@@ -726,7 +748,7 @@ async function hitTests(browser) {
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
   // No ?autopause: a touch device pauses by itself when a ship fires on us.
-  await page.goto(`http://localhost:${PORT}/?seed=E2E-HITS&debug=1`);
+  await page.goto(`http://localhost:${PORT}/?seed=E2E-HITS&watches=0&debug=1`);
   await page.waitForFunction(() => window.coldManifest?.machine.state === 'title');
   await page.tap('#btn-ship');
   await page.waitForFunction(() => window.coldManifest.machine.state === 'ship');
@@ -809,7 +831,7 @@ async function darkTests(browser) {
   const page = await context.newPage();
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
-  await page.goto(`http://localhost:${PORT}/?seed=E2E-DARK&autopause=0&debug=1`);
+  await page.goto(`http://localhost:${PORT}/?seed=E2E-DARK&watches=0&autopause=0&debug=1`);
   await page.waitForFunction(() => window.coldManifest?.machine.state === 'title');
   await page.tap('#btn-ship');
   await page.waitForFunction(() => window.coldManifest.machine.state === 'ship');
@@ -838,8 +860,8 @@ async function darkTests(browser) {
 
   await check('sensors off as well: an empty dark room goes to static, and a breach in it stays unknown', async () => {
     if (!(await page.isVisible('#breaker-board'))) await page.tap('#btn-breakers');
-    for (let i = await power(page, 'sensors'); i > 0; i--) await page.tap('#btn-power-sensors-minus');
-    await powerIs(page, 'sensors', 0);
+    if (!(await down(page, 'sensors'))) await page.tap('#btn-stand-sensors');
+    await downIs(page, 'sensors', true);
     await page.waitForFunction(() => window.coldManifest.sim.state.seen.brig.live === false, null, { timeout: 3000 });
     await game(page, () => window.coldManifest.sim.enqueue({ type: 'debug.room', room: 'brig', set: { breach: 0.6 } }));
     await page.waitForFunction(() => window.coldManifest.sim.state.rooms.brig.breach > 0, null, { timeout: 2000 });
@@ -860,7 +882,7 @@ async function darkTests(browser) {
       setTimeout(() => reject(new Error('no breach.found in 4s')), 4000);
     }));
     found.catch(() => {});
-    await page.tap('#btn-power-sensors-plus');
+    await page.tap('#btn-stand-sensors');
     assert.equal((await found).room, 'brig');
     await page.waitForFunction(() => window.coldManifest.sim.state.seen.brig.live === true, null, { timeout: 2000 });
     await page.waitForFunction(() => !/No eyes in here/.test(document.querySelector('#status').textContent), null, { timeout: 2000 });
@@ -890,7 +912,7 @@ async function holdTests(browser) {
   const page = await context.newPage();
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
-  await page.goto(`http://localhost:${PORT}/?seed=E2E-HOLD&autopause=0&debug=1`);
+  await page.goto(`http://localhost:${PORT}/?seed=E2E-HOLD&watches=0&autopause=0&debug=1`);
   await page.waitForFunction(() => window.coldManifest?.machine.state === 'title');
   await page.tap('#btn-ship');
   await page.waitForFunction(() => window.coldManifest.machine.state === 'ship');
@@ -953,12 +975,10 @@ async function holdTests(browser) {
   await check('the Brace button counts the capacitor and braces whenever it is full, no fight needed (H.3)', async () => {
     await page.touchscreen.tap(40, 200); // open space: the ship's own panel
     await page.waitForSelector('#btn-brace', { state: 'visible', timeout: 2000 });
-    assert.equal(await page.textContent('#brace-note'), 'No power');
+    assert.equal(await page.textContent('#brace-note'), 'Shields dark');
     if (!(await page.isVisible('#breaker-board'))) await page.tap('#btn-breakers');
-    await page.tap('#btn-power-doors-minus');
-    await powerIs(page, 'doors', 0);
-    await page.tap('#btn-power-shields-plus');
-    await powerIs(page, 'shields', 1);
+    await page.tap('#btn-stand-shields');
+    await downIs(page, 'shields', false);
     await page.waitForFunction(() => /^\d+%$/.test(document.querySelector('#brace-note').textContent), null, { timeout: 2000 });
     await page.waitForFunction(() => window.coldManifest.sim.state.shield.charge >= 1, null, { timeout: 12000 });
     await page.tap('#btn-brace');
@@ -991,7 +1011,7 @@ async function margoTests(browser) {
   const page = await context.newPage();
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
-  await page.goto(`http://localhost:${PORT}/?seed=E2E-MARGO&autopause=0&debug=1`);
+  await page.goto(`http://localhost:${PORT}/?seed=E2E-MARGO&watches=0&autopause=0&debug=1`);
   await page.waitForFunction(() => window.coldManifest?.machine.state === 'title');
   await page.tap('#btn-ship');
   await page.waitForFunction(() => window.coldManifest.machine.state === 'ship');
@@ -1137,7 +1157,7 @@ async function margoTests(browser) {
   // Auto-pause on by default on touch: the clock stops when she holds an order, and the pause button says why.
   const second = await browser.newContext({ ...devices['iPad (gen 7) landscape'] });
   const paged = await second.newPage();
-  await paged.goto(`http://localhost:${PORT}/?seed=E2E-MARGO-PAUSE&sound=0`);
+  await paged.goto(`http://localhost:${PORT}/?seed=E2E-MARGO-PAUSE&watches=0&sound=0`);
   await paged.waitForFunction(() => window.coldManifest?.machine.state === 'title');
   await paged.tap('#btn-ship');
   await paged.waitForFunction(() => window.coldManifest.machine.state === 'ship');
@@ -1156,7 +1176,7 @@ async function chartTests(browser) {
   const page = await context.newPage();
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
-  await page.goto(`http://localhost:${PORT}/?seed=E2E-CHART&autopause=0&debug=1`);
+  await page.goto(`http://localhost:${PORT}/?seed=E2E-CHART&watches=0&autopause=0&debug=1`);
   await page.waitForFunction(() => window.coldManifest?.machine.state === 'title');
   const shots = process.env.E2E_SHOTS;
   const run = () => game(page, () => JSON.parse(JSON.stringify(window.coldManifest.sim.state.run)));
@@ -1247,7 +1267,7 @@ async function chartTests(browser) {
   const pd = await desk.newPage();
   const deskErrors = [];
   pd.on('pageerror', (e) => deskErrors.push(e.message));
-  await pd.goto(`http://localhost:${PORT}/?seed=E2E-CHART-DESK&autopause=0`);
+  await pd.goto(`http://localhost:${PORT}/?seed=E2E-CHART-DESK&watches=0&autopause=0`);
   await pd.waitForFunction(() => window.coldManifest?.machine.state === 'title');
   await pd.click('#btn-ship');
   await pd.waitForFunction(() => window.coldManifest.machine.state === 'ship');
@@ -1279,7 +1299,7 @@ async function loopTests(browser) {
   const page = await context.newPage();
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
-  await page.goto(`http://localhost:${PORT}/?seed=E2E-LOOP&autopause=0`);
+  await page.goto(`http://localhost:${PORT}/?seed=E2E-LOOP&watches=0&autopause=0`);
   await page.waitForFunction(() => window.coldManifest?.machine.state === 'title');
   const shots = process.env.E2E_SHOTS;
   const state = () => game(page, () => window.coldManifest.machine.state);
@@ -1424,8 +1444,8 @@ async function loopTests(browser) {
     // Put the hazard event on the table with the sensors dark: one choice is met by Ilse, one is locked.
     await game(page, () => {
       const { sim } = window.coldManifest;
-      while (sim.state.systems.sensors.power > 0) {
-        sim.enqueue({ type: 'power.add', system: 'sensors', delta: -1 });
+      if (!sim.state.stations.sensors.down) {
+        sim.enqueue({ type: 'station.stand', station: 'sensors', down: true });
         sim.step();
       }
       sim.enqueue({ type: 'debug.event', event: 'hazard.loud-lane' });
@@ -1433,7 +1453,7 @@ async function loopTests(browser) {
     await page.waitForFunction(() => window.coldManifest.machine.state === 'event', null, { timeout: 3000 });
     assert.match(await page.textContent('#choice-thread'), /^\[Ilse, Piloting\] /);
     assert.equal(await page.isDisabled('#choice-thread'), false);
-    assert.match(await page.textContent('#choice-sweep'), /^\[Needs Sensors powered\] /);
+    assert.match(await page.textContent('#choice-sweep'), /^\[Needs Sensors running\] /);
     assert.equal(await page.isDisabled('#choice-sweep'), true);
     assert.equal(await page.textContent('#choice-press-on'), 'Hold the course and take what comes');
     await shot('s3-3-event-tags-ipad');
@@ -1621,7 +1641,7 @@ async function boardedTests(browser) {
   const page = await context.newPage();
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
-  await page.goto(`http://localhost:${PORT}/?seed=E2E-BOARDED&autopause=0&debug=1`);
+  await page.goto(`http://localhost:${PORT}/?seed=E2E-BOARDED&watches=0&autopause=0&debug=1`);
   await page.waitForFunction(() => window.coldManifest?.machine.state === 'title');
   await page.tap('#btn-ship');
   await page.waitForFunction(() => window.coldManifest.machine.state === 'ship');
@@ -1682,7 +1702,7 @@ async function gunTests(browser) {
   const page = await context.newPage();
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
-  await page.goto(`http://localhost:${PORT}/?seed=E2E-GUNS&autopause=0&debug=1`);
+  await page.goto(`http://localhost:${PORT}/?seed=E2E-GUNS&watches=0&autopause=0&debug=1`);
   await page.waitForFunction(() => window.coldManifest?.machine.state === 'title');
   await page.tap('#btn-ship');
   await page.waitForFunction(() => window.coldManifest.machine.state === 'ship');
@@ -1696,11 +1716,10 @@ async function gunTests(browser) {
   await page.waitForFunction(() => Object.values(window.coldManifest.sim.state.rooms).every((r) => !r.lightsOn), null, { timeout: 2000 });
   await sim(() => {
     const s = window.coldManifest.sim;
-    s.enqueue({ type: 'power.add', system: 'weapons', delta: 1 });
-    s.enqueue({ type: 'power.add', system: 'weapons', delta: 1 });
-    s.enqueue({ type: 'power.add', system: 'shields', delta: 1 });
+    s.enqueue({ type: 'station.stand', station: 'weapons', down: false });
+    s.enqueue({ type: 'station.stand', station: 'shields', down: false });
   });
-  await page.waitForFunction(() => window.coldManifest.sim.state.systems.weapons.power === 2, null, { timeout: 2000 });
+  await page.waitForFunction(() => window.coldManifest.sim.state.stations.weapons.down === false, null, { timeout: 2000 });
 
   await check('the ship panel names both mounts: point defence on watch, the gun not laid', async () => {
     await page.waitForFunction(() => /Point def\.\s*On watch/.test(document.querySelector('#status').textContent), null, { timeout: 4000 }).catch(async () => assert.fail(await page.textContent('#status')));
@@ -1764,9 +1783,68 @@ async function gunTests(browser) {
   await context.close();
 }
 
+async function watchTests(browser) {
+  console.log('iPad: the watch bill as the game deals it (H.4)');
+  const context = await browser.newContext({ ...devices['iPad (gen 7) landscape'] });
+  const page = await context.newPage();
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  await page.goto(`http://localhost:${PORT}/?seed=E2E-WATCH&autopause=0`);
+  await page.waitForFunction(() => window.coldManifest?.machine.state === 'title');
+  await page.tap('#btn-ship');
+  await page.waitForFunction(() => window.coldManifest.machine.state === 'ship');
+
+  await check('a new run keeps two watches: the watch on deck walks to its posts and the watch below turns in', async () => {
+    assert.equal(await game(page, () => window.coldManifest.sim.state.roster.watches), 2);
+    await page.tap('#btn-breakers');
+    assert.match(await page.textContent('#watch-note'), /First watch · \d:\d\d/);
+    await page.waitForFunction(() => {
+      const s = window.coldManifest.sim.state;
+      const crew = Object.values(s.crew).filter((m) => m.owner === 'player');
+      return crew.some((m) => m.watch !== s.roster.on && m.asleep) && crew.some((m) => m.watch === s.roster.on && m.post && !m.path.length && m.task === 'idle');
+    }, null, { timeout: 45000 });
+    await page.waitForFunction(() => /Asleep/.test(document.querySelector('.ship').textContent), null, { timeout: 4000 });
+  });
+
+  await check('the watch bill: three watches, all hands, and To stations', async () => {
+    await page.tap('#btn-watches-3');
+    await page.waitForFunction(() => window.coldManifest.sim.state.roster.watches === 3, null, { timeout: 2000 });
+    await page.tap('#btn-watches-1');
+    await page.waitForFunction(() => window.coldManifest.sim.state.roster.watches === 1, null, { timeout: 2000 });
+    assert.equal(await page.textContent('#watch-note'), 'All hands');
+    await page.tap('#btn-muster');
+    // Everyone with a post walks to it: the gunner ends up on the guns' station, though they are stood down.
+    await page.waitForFunction(() => window.coldManifest.sim.state.crew.pruitt.room === 'weapons' && window.coldManifest.sim.state.crew.halloran.room === 'door_control', null, { timeout: 45000 });
+    await page.waitForFunction(() => /Halloran/.test(document.querySelector('#station-doors').textContent), null, { timeout: 4000 });
+    if (process.env.E2E_SHOTS) await page.screenshot({ path: `${process.env.E2E_SHOTS}/h4-switches-ipad.png` });
+  });
+
+  await check('the crew panel: Post unfolds the stations, a tap posts them there and they walk to it; Change watch moves them', async () => {
+    await page.tap('#btn-watches-2');
+    await page.waitForFunction(() => window.coldManifest.sim.state.roster.watches === 2, null, { timeout: 2000 });
+    await page.tap('#crew-vesna');
+    assert.equal(await page.isVisible('#crew-posts'), false, 'the stations start folded');
+    await page.tap('#btn-posts');
+    await page.waitForSelector('#btn-post-sensors', { state: 'visible', timeout: 2000 });
+    const small = await page.$$eval('#status .btn', (nodes) => nodes.map((n) => ({ id: n.id, r: n.getBoundingClientRect() })).filter((n) => n.r.width > 0 && (n.r.width < 44 || n.r.height < 44)).map((n) => n.id));
+    assert.deepEqual(small, []);
+    await page.tap('#btn-post-sensors');
+    await page.waitForFunction(() => window.coldManifest.sim.state.crew.vesna.post === 'sensors', null, { timeout: 2000 });
+    assert.match(await page.textContent('#status'), /Post\s*Sensors/);
+    await page.waitForFunction(() => window.coldManifest.sim.state.crew.vesna.room === 'sensors' && !window.coldManifest.sim.state.crew.vesna.path.length, null, { timeout: 45000 });
+    await page.waitForFunction(() => /Vesna/.test(document.querySelector('#station-sensors').textContent), null, { timeout: 4000 });
+    const was = await game(page, () => window.coldManifest.sim.state.crew.vesna.watch);
+    await page.tap('#btn-watch');
+    await page.waitForFunction((w) => window.coldManifest.sim.state.crew.vesna.watch !== w, was, { timeout: 2000 });
+  });
+
+  await check('no page errors', async () => assert.deepEqual(errors, []));
+  await context.close();
+}
+
 // E2E_ONLY=boarding (or a comma list of suite names) runs just those suites, for chasing one failure.
 const only = process.env.E2E_ONLY?.split(',');
-const suites = { touch: touchTests, desktop: desktopTests, voice: voiceTests, hit: hitTests, dark: darkTests, hold: holdTests, guns: gunTests, margo: margoTests, chart: chartTests, loop: loopTests, scope: scopeTests, boarded: boardedTests };
+const suites = { touch: touchTests, desktop: desktopTests, voice: voiceTests, hit: hitTests, dark: darkTests, hold: holdTests, guns: gunTests, watch: watchTests, margo: margoTests, chart: chartTests, loop: loopTests, scope: scopeTests, boarded: boardedTests };
 try {
   for (const [name, run] of Object.entries(suites)) if (!only || only.includes(name)) await run(browser);
 } finally {

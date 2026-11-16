@@ -1,9 +1,8 @@
 // Keyboard shortcuts (brief §18), as data: physical key code -> action name.
 // The input module turns key presses into { type: 'key', action } events.
-// Number keys pick crew (S1.6). The Q row routes power: the key adds a bar to
-// that slot of the power panel, Shift with the key takes one back.
+// Number keys pick crew (S1.6). The Q row no longer routes power: bars went with H.4 (D-153).
 // A lays the gun on the contact selected on the scope, or holds fire (H.3). B braces the shields (S2.8). P opens
-// or folds the breaker board (S2.9). O overrides an order Margo is holding,
+// or folds the switch panel (S2.9, H.4), and G calls everyone to their stations. O overrides an order Margo is holding,
 // and Escape stands down from it (S2.10). M puts the route chart up or takes it
 // down, and J jumps down the plotted course (S3.1).
 // V lights the drive or cuts it, and X puts out a flare (H.1).
@@ -19,17 +18,10 @@ export const KEYMAP = Object.freeze({
   Digit6: 'select-6',
   Digit7: 'select-7',
   Digit8: 'select-8',
-  KeyQ: 'power-1',
-  KeyW: 'power-2',
-  KeyE: 'power-3',
-  KeyR: 'power-4',
-  KeyT: 'power-5',
-  KeyY: 'power-6',
-  KeyU: 'power-7',
-  KeyI: 'power-8',
   KeyA: 'gun',
   KeyB: 'brace',
   KeyP: 'breakers',
+  KeyG: 'muster',
   KeyO: 'override',
   KeyM: 'chart',
   KeyJ: 'jump',

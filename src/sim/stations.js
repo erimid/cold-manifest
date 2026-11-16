@@ -234,7 +234,10 @@ export function stepStations(sim) {
     if (by === entry.by) continue;
     const from = entry.by;
     entry.by = by;
-    if (sim.state.tick > 1) sim.events.emit('station.changed', { station: id, from, to: by, tick: sim.state.tick });
+    if (sim.state.tick <= 1) continue;
+    sim.events.emit('station.changed', { station: id, from, to: by, tick: sim.state.tick });
+    // Someone has left their station and Margo has picked it up: she says so (voice.js).
+    if (by === 'margo' && from && from !== 'margo') sim.events.emit('station.taken', { station: id, crew: from, room: roomOfStation(sim, id)?.id, tick: sim.state.tick });
   }
 }
 

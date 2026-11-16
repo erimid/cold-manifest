@@ -87,7 +87,7 @@ export const HELM = Object.freeze({ turn: 15, accel: 0.06, speed: 1, flares: 2 }
  * up to `bearingError` degrees and the range by up to `rangeError` of itself at quality 0, down to the
  * floors at quality 1. Someone in the sensors room reads it `station` times better.
  */
-export const SCOPE = Object.freeze({ range: 120, reach: 150, clear: 0.45, show: 0.1, fade: 0.04, intent: 0.35, identify: 0.55, gain: 0.25, loss: 0.1, bearingError: 35, rangeError: 0.45, floorBearing: 1.5, floorRange: 0.02, station: 1.25, jitterSeconds: 3, wander: 0.6, ghostSeconds: 30 });
+export const SCOPE = Object.freeze({ range: 120, reach: 150, clear: 0.45, show: 0.1, fade: 0.04, intent: 0.35, identify: 0.55, gain: 0.25, loss: 0.1, bearingError: 35, rangeError: 0.45, floorBearing: 1.5, floorRange: 0.02, jitterSeconds: 3, wander: 0.6, ghostSeconds: 30 });
 
 /**
  * A contact's awareness of us, 0 to 1: it settles toward how far our signature, through its sensors and
