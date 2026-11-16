@@ -36,11 +36,13 @@ import { roomView, sensorsUp, signature, unseen } from '../sim/senses.js';
 import { SPACE, SYSTEMS } from '../sim/systems.js';
 import { roleOf, skillWords } from '../sim/roles.js';
 import { TICK_SECONDS } from '../sim/sim.js';
+import { nearestHand, situationViews } from '../narrative/events.js';
 import { createChart } from './chart.js';
 import { el } from './dom.js';
 import { createIntercom } from './intercom.js';
 import { AUTO_PAUSE } from './settings.js';
 import { createShipRenderer } from './ship-render.js';
+import { createSituationCards } from './situations.js';
 import { bearingText, drawScope, rangeText, scopeDial, scopeHit, scopeMarks } from './scope.js';
 
 const percent = (value) => `${Math.round(value * 100)}%`;
@@ -112,6 +114,7 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
   let sheet = null; // which pop-up sheet is open: 'log' | 'settings' | null
   let chart = null; // Margo's route chart (chart.js), while there is a run
   let chartOpen = false; // the chart is up on the monitor, over the schematic
+  let situations = null; // the cards at the rooms where something wants dealing with (H.7)
   let logShown = -1; // the last line number the open log has drawn
   const counts = { canvasTaps: 0, infos: 0 };
 
@@ -812,9 +815,34 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
     ctx.textBaseline = 'bottom';
     ctx.textAlign = 'right';
     ctx.fillText('M.A.R.G.O. SCHEMATIC · COMPANY ISSUE', x + w - (scopeBox ? scopeBox.w + 28 : 18), y + h - 6);
-    if (scopeBox) drawScope(ctx, scopeBox, scopeView(sim), { selected: selected?.kind === 'contact' ? selected.id : null, time: (sim.state.tick + clock.alpha) * TICK_SECONDS, active: sensorsUp(sim), reduce: reduceMotion() });
+    if (scopeBox) drawScope(ctx, scopeBox, scopeView(sim), { selected: selected?.kind === 'contact' ? selected.id : null, time: (sim.state.tick + clock.alpha) * TICK_SECONDS, active: sensorsUp(sim), reduce: reduceMotion(), marks: situationMarks() });
     ctx.textAlign = 'start';
     ctx.textBaseline = 'alphabetic';
+  }
+
+  /**
+   * What the situations aboard put on the scope (H.7): a hull we are standing by is close alongside, anything
+   * else some way off. The bearing is the situation's own, so it holds still while it waits.
+   */
+  function situationMarks() {
+    return situationViews(sim)
+      .filter((item) => item.mark && !item.result)
+      .map((item) => ({ label: item.mark, bearing: (item.n * 137 + 40) % 360, range: item.hold ? 0.09 : 0.55 }));
+  }
+
+  /** An amber frame round every room where something is waiting to be dealt with, so the room itself says so. */
+  function drawSituationRooms() {
+    const time = (sim.state.tick + clock.alpha) * TICK_SECONDS;
+    for (const item of situationViews(sim)) {
+      if (item.result) continue;
+      const box = roomBox(layout, view, item.room);
+      const beat = reduceMotion() ? 1 : 0.6 + 0.4 * Math.abs(Math.sin(time * 2.2));
+      ctx.strokeStyle = `rgba(255, 179, 71, ${item.state === 'attended' ? 0.55 : beat})`;
+      ctx.lineWidth = 3;
+      ctx.setLineDash(item.state === 'attended' ? [] : [8, 5]);
+      ctx.strokeRect(box.x + 3, box.y + 3, box.w - 6, box.h - 6);
+      ctx.setLineDash([]);
+    }
   }
 
   /** Faint scanlines and a vignette over the screen. Off in settings for anyone who finds them tiring. */
@@ -1628,7 +1656,9 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
     );
     nodes.bottom = el('div', { class: 'shipdock' }, nodes.sheet, nodes.ai, buildCalls(), el('div', { class: 'shipdock__row' }, nodes.status, nodes.pause), buildPower());
     chart = sim.state.run ? createChart({ sim, order, onClose: () => openChart(false) }) : null;
-    root.replaceChildren(el('section', { class: 'ship' }, nodes.top, nodes.bottom, nodes.info, nodes.intercom, chart?.node));
+    const hand = (member) => (member ? { id: member.id, name: member.name } : null);
+    situations = createSituationCards({ sim, order, nearest: (room) => hand(nearestHand(sim, room)), selected: () => hand(selectedCrew ? sim.state.crew[selectedCrew] : null) });
+    root.replaceChildren(el('section', { class: 'ship' }, nodes.top, nodes.bottom, situations.node, nodes.info, nodes.intercom, chart?.node));
     if (chart) chart.node.hidden = !chartOpen;
     buildPanel();
   }
@@ -1735,9 +1765,11 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
         rooms: Object.fromEntries(layout.rooms.map((room) => [room.id, roomView(sim, room.id)])),
         reduceFlicker: reduceMotion(),
       });
+      drawSituationRooms();
       drawShots(clock.alpha);
       drawImpacts(clock.alpha);
       ctx.restore();
+      situations.update({ boxOf: (room) => roomBox(layout, view, room), bounds: { x: monitor.x, y: monitor.y, w: monitor.w - (scopeBox ? scopeBox.w + 20 : 0), h: monitor.h }, hidden: chartOpen });
       drawScanlines();
       updateClock();
       updatePanel();
@@ -1777,6 +1809,10 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
       },
       get chartOpen() {
         return chartOpen;
+      },
+      /** The number of the situation card that is open (H.7), or null. */
+      get situationOpen() {
+        return situations?.open ?? null;
       },
       get chartSelected() {
         return chart?.selected ?? null;

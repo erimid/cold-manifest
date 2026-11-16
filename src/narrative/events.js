@@ -57,6 +57,7 @@
 // one at a time on the table, `run.events.open`, in the event view with the ship hove to, until
 // it is answered and put away. Jumping into a port leaves every event behind.
 
+import { findRoute } from '../sim/crew.js';
 import { NODE_KINDS, nodeOf } from '../sim/sector.js';
 import { checkCrewSpec, crewMatching, fillText, match, requirement, validateCondition, validateText, vars } from './conditions.js';
 import { applyEffects, validateEffects } from './effects.js';
@@ -152,6 +153,20 @@ function attendants(sim, room) {
     .sort((a, b) => a.index - b.index);
 }
 
+/**
+ * The hand who would get to a room soonest: one of ours, awake, in plain sight, with nothing in their arms and
+ * not already walking somewhere, by the fewest doors on the way (the first aboard among equals). Null if nobody can.
+ */
+export function nearestHand(sim, room) {
+  let best = null;
+  for (const member of Object.values(sim.state.crew).sort((a, b) => a.index - b.index)) {
+    if (member.owner !== 'player' || !member.alive || member.asleep || member.hidden || member.job || member.carry || member.task === 'walking' || !sim.state.rooms[member.room]) continue;
+    const route = findRoute(sim, member.room, room, member);
+    if (route && (!best || route.length < best.steps)) best = { member, steps: route.length };
+  }
+  return best?.member ?? null;
+}
+
 /** The situations aboard, in the order they came. */
 export const aboard = (sim) => sim.state.run?.events?.aboard ?? [];
 const findAboard = (sim, n) => aboard(sim).find((one) => one.n === n) ?? null;
@@ -208,6 +223,7 @@ export function openEvent(sim, id, { force = false, node } = {}) {
   if (!state.met.includes(id)) state.met.push(id);
   const where = isAboard(event) ? { situation: open.n, room: open.room, sign: fillText(event.sign ?? event.title, ctx), mark: open.mark, hold: open.hold } : {};
   sim.events.emit('event.opened', { event: id, node: at, title, ...where, tick: sim.state.tick });
+  if (isAboard(event)) sim.events.emit('situation.placed', { situation: open.n, event: id, room: open.room, title, tick: sim.state.tick });
   return true;
 }
 

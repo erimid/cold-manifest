@@ -74,7 +74,7 @@ function wedge(ctx, dial, view, contact) {
  * Draw the scope. `view` is scopeView(sim); `selected` a contact id or null; `time` game seconds (for the
  * sweep, which stops with the clock); `active` whether the sensors have power; `reduce` stills the sweep.
  */
-export function drawScope(ctx, box, view, { selected = null, time = 0, active = true, reduce = false } = {}) {
+export function drawScope(ctx, box, view, { selected = null, time = 0, active = true, reduce = false, marks = [] } = {}) {
   const dial = scopeDial(box);
   const { cx, cy, r } = dial;
   ctx.save();
@@ -201,6 +201,14 @@ export function drawScope(ctx, box, view, { selected = null, time = 0, active = 
     }
   }
 
+  // Things that are not ships (H.7): a beacon, a dead hull alongside. A hollow square, where a ship is a diamond or a ring.
+  for (const mark of marks) {
+    const p = at(dial, view, mark.bearing, mark.range * view.range);
+    ctx.strokeStyle = AMBER;
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(p.x - 4, p.y - 4, 8, 8);
+  }
+
   // Us: the hull, the way the bow points, and where we are actually going.
   const bow = view.heading * RAD;
   if (view.speed > 0.01) {
@@ -261,6 +269,14 @@ export function drawScope(ctx, box, view, { selected = null, time = 0, active = 
     ctx.textAlign = left ? 'right' : 'left';
     ctx.fillStyle = contact.stale ? 'rgba(127, 227, 154, 0.6)' : contact.state === 'closing' || contact.state === 'alongside' ? RED : GREEN;
     ctx.fillText(`${contact.label}${contact.stale ? '?' : ''}`, p.x + (left ? -9 : 9), p.y - 8);
+  }
+
+  for (const mark of marks) {
+    const p = at(dial, view, mark.bearing, mark.range * view.range);
+    const left = p.x > cx + r * 0.45;
+    ctx.textAlign = left ? 'right' : 'left';
+    ctx.fillStyle = AMBER;
+    ctx.fillText(mark.label.toUpperCase(), p.x + (left ? -9 : 9), p.y + 9);
   }
 
   // The helm, in words, under the dial.

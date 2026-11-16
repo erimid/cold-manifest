@@ -107,6 +107,7 @@ const AUTO_PAUSE_TEXT = {
   breach: (event) => `Breach in ${sim.layout.room(event.room).name}`,
   death: (event) => `${findCrew(sim, event.crew)?.member.name ?? 'Someone'} is dead`,
   objection: (event) => (event.kind === 'refuse' ? 'Margo refuses' : 'Margo objects'),
+  situation: (event) => `${event.title}: ${sim.layout.room(event.room)?.name ?? 'aboard'}`,
   refusal: (event) => `${findCrew(sim, event.crew)?.member.name ?? 'Someone'} refuses`,
 };
 
@@ -365,7 +366,7 @@ function frame(now) {
         `fires  ${Object.values(sim.state.rooms).filter((r) => r.fire > 0).length}`,
         `scope  ${sim.state.scope.contacts.length} contacts, ${sim.state.scope.drones.length} drones, ${sim.state.shots.length} shots, hull ${sim.state.hull.points}`,
         `margo  ${sim.state.ai.said} said, ${sim.state.ai.queue.length} waiting`,
-        `event  ${sim.state.run?.events.open ? `${sim.state.run.events.open.id}${sim.state.run.events.open.result ? ' (answered)' : ''}` : 'none'}, ${sim.state.run?.events.count ?? 0} met`,
+        `event  ${sim.state.run?.events.open ? `${sim.state.run.events.open.id}${sim.state.run.events.open.result ? ' (answered)' : ''}` : 'none'}, ${sim.state.run?.events.aboard.length ?? 0} aboard, ${sim.state.run?.events.count ?? 0} met`,
         `chart  ${sim.state.run ? `${sim.state.run.at}${sim.state.run.crossing ? `>${sim.state.run.crossing.path[sim.state.run.crossing.leg + 1]} ${sim.state.run.crossing.phase}` : ''} fuel ${sim.state.run.fuel} hours ${Math.floor(sim.state.run.hours)}/${sim.state.run.deadline}${sim.state.run.pursuit ? ` chase ${sim.state.run.pursuit.done ? 'done' : sim.state.run.pursuit.contact ?? Math.ceil(sim.state.run.pursuit.wait) + 'h'}` : ''}` : 'none'}`,
         `trust  ${Math.round(sim.state.ai.trust)}, refused ${sim.state.ai.refusals}${sim.state.ai.objection ? `, holding ${sim.state.ai.objection.command.type}` : ''}`,
         `sound  ${audio.muted ? 'off' : audio.unlocked ? 'on' : 'locked'}`,
