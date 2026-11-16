@@ -26,10 +26,14 @@ Items here are known shortcuts. Each names the stage that must clear it.
 | ~~DF-09~~ | ~~No Playwright touch tests in CI yet.~~ | S1.2 | Done in S1.2 |
 | DF-10 | Pinch-zoom and two-finger pan are not handled: the input module tracks one pointer at a time. | S1.3 if the ship view needs a camera, otherwise S11.5 | Open |
 | DF-11 | Auto-pause triggers and their settings (brief §7) are not wired; the clock supports a pause requested mid-tick. | S1.7 | Open |
-| DF-12 | Room values (oxygen, temperature, noise, hull, fire, breach) are stored and drawn but nothing changes them except the debug command. | S1.4 (power, lights as a draw), S1.5 (air, fire, breaches) | Open |
+| DF-12 | Room values: light follows power and oxygen follows life support (S1.4). Temperature, noise, hull, fire and breach are still stored and drawn but only the debug command changes them. | S1.5 (air flow, fire, breaches), Stage 6 (noise) | Open |
 | DF-13 | Hull damage and temperature have no visual of their own yet; they only show in the status panel. | S1.5 (frost/heat), S11.1 (look pass) | Open |
-| DF-14 | Doors open by remote from anywhere with no power or crew needed. | S1.4 (door control system, manual doors without power) | Open |
+| ~~DF-14~~ | ~~Doors open by remote from anywhere with no power or crew needed.~~ | S1.4 | Done in S1.4: doors need door control power or hands at the door (D-031) |
 | DF-15 | Autoplay takes about 35 s for 100 runs because invariants and stuck checks run every tick. Fine for now; sample them if it grows. | Stage 3 | Open |
+| DF-16 | "Hands at the door" reads `state.crew`, which is empty until crew exist, so an unpowered door cannot be moved at all in play yet. | S1.6 (crew; working a door by hand becomes a crew task) | Open |
+| DF-17 | Life support is a flat rate on every room (refill with power, slow loss without). No flow between rooms, no crew breathing. | S1.5 | Open |
+| DF-18 | Shields, engines, weapons, sensors and medbay take power but do nothing with it yet. AI core power and damage only feed `aiCoreStatus()`. Damage comes only from the debug command, and nothing repairs it in play. | Stage 2 (combat systems), S1.6 (repairs), Stage 5 (AI degradation) | Open |
+| DF-19 | Power panel tiles show system codes (SHD, ENG...) with no on-screen legend on touch; the codes match the stencils on the room floors. | S11.4 (tutorial), S11.5 (touch polish) | Open |
 
 ---
 
@@ -149,6 +153,26 @@ Items here are known shortcuts. Each names the stage that must clear it.
 **What:** `src/ui/ship-render.js` draws hull, floors, walls and stencils once to an offscreen canvas, and lighting, doors, fire, frost and alarms on top each frame. Animation runs on game time, so flames and alarm pulses freeze on pause. Alarms pair colour with a shape and letter (triangle F, diamond B, circle O); locked doors carry a pip and jammed doors hazard stripes.
 **Why:** Performance on iPad, the pause rule, and the brief's colourblind requirement (§17).
 
+### D-029 Power model (S1.4)
+**What:** Every system has a `level` (bars it can take), `damage` (bars broken) and `power` (bars routed), all whole numbers. The reactor's level is its output; its damage cuts supply. Eight systems take power (shields, engines, weapons, life support, doors, sensors, medbay, AI core); cargo, quarters and brig do not. Orders move one bar at a time (`power.add` with delta 1 or -1) so two quick presses can never overdraw. Starting levels and routing are ship content (`power` block in `content/ships/`); the *Margin of Error* makes 8 bars and starts with all 8 in use.
+**Why:** Brief §6. Whole bars keep the choice legible on a small screen and make "power never exceeds supply" an exact check.
+
+### D-030 Lights and brownouts (S1.4)
+**What:** Lights draw from the same pool: one bar per 5 lit rooms, rounded up (`lightsPerBar` in ship data). A room cannot be lit if that needs a bar that is spent. When supply falls below use, the ship sheds one bar at a time in a fixed order: weapons, shields, sensors, medbay, engines, lights (rooms go dark from the end of the room list), doors, AI core, life support last. Power never returns by itself after a repair; the player routes it back.
+**Why:** Brief §6 ("lights draw power too"). A fixed order is deterministic and lets the player learn what a reactor hit will cost.
+
+### D-031 Doors without power (S1.4)
+**What:** With no bar on door control, a door moves only if a living crew member is in a room on either side of it, and it moves slowly (1.2 s instead of 0.35 s). Locks are electric: no locking or unlocking without power, so locked doors stay locked. A door order given with power is dropped if the power is gone when it starts.
+**Why:** Brief §6 ("without power, doors must be opened by hand"). Locks holding through a power cut gives the brig and the creature stage something to lean on. See DF-16.
+
+### D-032 Power keys are the Q row, not number keys (S1.4; departs from PLAN S1.4)
+**What:** Q W E R T Y U I add a bar to the eight power tiles in panel order; Shift with the key takes one back. The key hints hide on touch-only devices. On touch each tile has its own minus and plus buttons, 44 px or larger.
+**Why:** The plan said number keys, but brief §18 gives number keys to crew selection (S1.6). One tap per bar with separate minus and plus avoids any long-press or right-click on the most-used control in a fight.
+
+### D-033 Refusals are shown, not swallowed (S1.4)
+**What:** When the ship refuses an order (no spare power, door control dark), the status panel shows the sim's own reason for a couple of seconds. Disabled buttons cover the cases that are obvious from the panel; door buttons stay pressable when door control is dark so a press can explain itself.
+**Why:** A tap that does nothing reads as a broken touch screen.
+
 ---
 
 ## Stage notes
@@ -160,3 +184,4 @@ _None yet. Stage 1 note goes here when Stage 1 is done._
 - **S1.1 (2026-11-15):** Vite scaffold, folder layout, seeded RNG with substreams, content registry with browser and Node loaders, content checker, autoplay skeleton, title screen with stub screens, debug overlay, CI. 30 unit tests. GitHub Pages deploy workflow with per-PR previews. Known gap: DF-08 (Pages must be switched on in repo settings).
 - **S1.2 (2026-11-15):** Fixed-timestep clock with pause, command queue, game event bus, input module (tap, drag, long-press, padded hit areas, keyboard), temporary test bay screen, autoplay bot that gives orders and pauses, 59 unit tests, 18 browser checks. DF-08 cleared: Eric switched Pages on and confirmed the preview works. DF-09 cleared. Eric tested on his iPad: looks, responds and feels good.
 - **S1.3 (2026-11-15):** Ship layout format and validation, the *Margin of Error* (15 rooms, 21 doors, 9 vents), room and door state in the sim, door and light orders, debug room/door commands, cutaway renderer with per-room lighting, fire, frost and alarms, ship view with status panel. Test bay and probes removed. 76 unit tests, 25 browser checks.
+- **S1.4 (2026-11-15):** Reactor power pool, system levels and damage, one-bar routing orders, lights as a power draw, brownout shedding, door control (remote with power, by hand without, electric locks), flat-rate life support, AI core status stub, power panel with touch buttons and Q-row keys, refusal messages. 91 unit tests, 30 browser checks. DF-14 cleared.

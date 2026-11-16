@@ -46,7 +46,7 @@ export function renderTitle(root, { greeting, seed, version, contentSummary, onN
           'nav',
           { class: 'title__menu' },
           el('button', { class: 'btn', type: 'button', id: 'btn-new-run', press: onNewRun }, 'New run', el('small', {}, 'Take a contract into the Reach')),
-          el('button', { class: 'btn', type: 'button', id: 'btn-ship', press: onShip }, 'Walk the ship', el('small', {}, 'Rooms, doors and lights, no crew yet')),
+          el('button', { class: 'btn', type: 'button', id: 'btn-ship', press: onShip }, 'Walk the ship', el('small', {}, 'Power, doors and lights, no crew yet')),
           el('button', { class: 'btn', type: 'button', id: 'btn-hub', press: onHub }, 'Records', el('small', {}, 'The Wall, unlocks, past runs')),
         ),
       ),
