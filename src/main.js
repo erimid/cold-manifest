@@ -25,7 +25,7 @@ import { createShipView } from './ui/shipview.js';
 import { renderContracts, renderEvent, renderHub, renderPort, renderScene, renderSummary } from './ui/screens.js';
 import { renderTitle } from './ui/title.js';
 
-const VERSION = '0.21.1';
+const VERSION = '0.22.0';
 
 const params = new URLSearchParams(window.location.search);
 const flags = {
@@ -62,7 +62,7 @@ setPressBinder(input.press);
 // and everything that listens to a sim is wired there. The first is the sandbox the title's "Walk the ship"
 // opens; it has no contract, so arriving somewhere does not open a screen.
 // Placeholder crew until Stage 4 generates them (DECISIONS DF-03, DF-23).
-const crew = content.all('crew').map(({ id, name, engineer, skills, traits }) => ({ id, name, engineer, skills, traits }));
+const crew = content.all('crew').map(({ id, name, role, engineer, skills, traits }) => ({ id, name, role, engineer, skills, traits }));
 // What the crew remember and refuse and what Margo objects to are content too (S3.3).
 const rules = { memories: content.all('memories'), refusals: content.all('refusals'), risks: content.all('risks') };
 // Contracts, the clients they are for, and what ports charge (S3.4).

@@ -223,16 +223,16 @@ test('an effect can be aimed at the cast, or at whoever a requirement found', ()
   event.choices.push({ id: 'no', label: 'No', outcomes: [{ text: 'No.' }] });
   assert.deepEqual(checkEvent(event, REFS), []);
   const sim = runSim([event]);
-  sim.state.crew.dace.skills.medicine = 3; // Okoro is the fighter and cannot treat himself: the best medic who is not him
+  sim.state.crew.dace.skills.medicine = 4; // the best medic who is not the victim, ahead of Okoro
   give(sim, { type: 'debug.event', event: 'test.one' });
   assert.equal(eventView(sim).choices[0].tag, '[Dace, Medicine]');
   give(sim, { type: 'event.choose', choice: 'go' });
-  assert.equal(eventView(sim).result.text, 'Dace treats Okoro; Ilse watches.');
-  assert.ok(Math.abs(sim.state.crew.okoro.health - 0.85) < 1e-9);
-  assert.equal(recall(sim, sim.state.crew.ilse, 'wound').who, 'Okoro');
+  assert.equal(eventView(sim).result.text, 'Dace treats Halloran; Ilse watches.', 'Halloran is the best fighter, so the victim');
+  assert.ok(Math.abs(sim.state.crew.halloran.health - 0.85) < 1e-9);
+  assert.equal(recall(sim, sim.state.crew.ilse, 'wound').who, 'Halloran');
   // With nobody to cast, the event cannot be met at all.
   const empty = runSim([event]);
-  empty.state.crew.okoro.alive = false;
+  for (const id of ['okoro', 'pruitt', 'halloran']) empty.state.crew[id].alive = false; // everyone who can fight
   const uncast = heard(empty, 'event.uncast');
   give(empty, { type: 'debug.event', event: 'test.one' });
   assert.equal(eventView(empty), null);

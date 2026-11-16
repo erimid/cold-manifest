@@ -18,9 +18,9 @@ export const CATALOG = { weapons: content.all('weapons'), ships: content.all('sh
 export const EVENTS = content.all('events');
 
 /** The placeholder starting crew. */
-export const CREW = content.all('crew').map(({ id, name, engineer, skills, traits }) => ({ id, name, engineer, skills, traits }));
+export const CREW = content.all('crew').map(({ id, name, role, engineer, skills, traits }) => ({ id, name, role, engineer, skills, traits }));
 
-/** A fresh sim on the starting ship with its three crew aboard. */
+/** A fresh sim on the starting ship with its six crew aboard. */
 export const newCrewedSim = (seed = 'test') => createSim({ seed, ship: SHIP, crew: CREW, ...CATALOG });
 
 /** The AI line library. */

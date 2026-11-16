@@ -1,10 +1,12 @@
 {
+  "note": "The starting crew: six, one per role (D-130). Each role names the skill they excel at (src/sim/roles.js). Placeholder names and lines until S4.1's crew generation.",
   "items": [
     {
       "id": "ilse",
       "name": "Ilse",
       "placeholder": true,
-      "skills": { "piloting": 2, "negotiation": 1 },
+      "role": "pilot",
+      "skills": { "piloting": 3, "negotiation": 1 },
       "replies": {
         "move": ["Copy. {room}.", "On my way to {room}.", "Moving.", "{room}. Got it."],
         "open": ["I'll crack it.", "Breaking the seal.", "Opening it up."],
@@ -19,8 +21,9 @@
       "id": "dace",
       "name": "Dace",
       "placeholder": true,
+      "role": "engineer",
       "engineer": true,
-      "skills": { "engineering": 2, "weapons": 1 },
+      "skills": { "engineering": 3, "weapons": 1 },
       "replies": {
         "move": ["Yeah, yeah. {room}.", "Going. Don't touch anything.", "{room}? Fine.", "On it."],
         "open": ["Somebody sealed this for a reason.", "Cutting the seal.", "Fine. Let's see."],
@@ -35,7 +38,8 @@
       "id": "okoro",
       "name": "Okoro",
       "placeholder": true,
-      "skills": { "medicine": 2, "combat": 1 },
+      "role": "medic",
+      "skills": { "medicine": 3, "combat": 1 },
       "replies": {
         "move": ["Heading to {room}.", "Understood. {room}.", "On my way.", "I'm going."],
         "open": ["I'll have a look inside.", "Opening it.", "Let's see what we're carrying."],
@@ -44,6 +48,54 @@
         "load": ["Bringing rounds.", "Ammo run. Going.", "I'll load it."],
         "refuse": ["I can't do that, Captain.", "Not that room. Not yet.", "I'm sorry. No."],
         "lamp": ["I've put the light on. I had to.", "Lamp on. I'll take it off when I can.", "I need the light for a minute."]
+      }
+    },
+    {
+      "id": "pruitt",
+      "name": "Pruitt",
+      "placeholder": true,
+      "role": "gunner",
+      "skills": { "weapons": 3, "combat": 1 },
+      "replies": {
+        "move": ["{room}. Keep the guns warm.", "Moving to {room}.", "On my way.", "Copy, {room}."],
+        "open": ["Let's see what's in it.", "Popping the lid.", "Opening. Stand back."],
+        "carry": ["Hauling it to {room}.", "Got it. {room}.", "Heavy. Going."],
+        "jettison": ["Out it goes.", "Spacing it.", "Cycling the lock."],
+        "load": ["Rounds coming up.", "I'll feed her myself.", "Loading. Give me a minute."],
+        "refuse": ["No, Captain. Not that one.", "Find another way.", "I'm not going in there."],
+        "lamp": ["Lamp's on. I need to see.", "Light on. Sorry.", "I'm not doing this blind."]
+      }
+    },
+    {
+      "id": "halloran",
+      "name": "Halloran",
+      "placeholder": true,
+      "role": "security",
+      "skills": { "combat": 3, "engineering": 1 },
+      "replies": {
+        "move": ["{room}. Clearing it.", "Moving.", "Heading to {room}.", "Understood."],
+        "open": ["Opening it. Slowly.", "If something's in there, I'm first.", "Cracking it."],
+        "carry": ["Taking it to {room}.", "Got it.", "Carrying."],
+        "jettison": ["It goes out the lock.", "Spacing it now.", "Done in a minute."],
+        "load": ["Fetching rounds.", "Ammo run.", "I'll bring them up."],
+        "refuse": ["No. That's a bad order.", "Not in there, Captain.", "You'll have to make it an order on paper."],
+        "lamp": ["Lamp on. Habit.", "I want the light.", "Light's staying on for now."]
+      }
+    },
+    {
+      "id": "vesna",
+      "name": "Vesna",
+      "placeholder": true,
+      "role": "quartermaster",
+      "skills": { "negotiation": 3, "piloting": 1 },
+      "replies": {
+        "move": ["{room}. Fine.", "On my way to {room}.", "Going.", "{room}, then."],
+        "open": ["Manifest says don't. Opening it.", "Breaking the seal. Note that.", "Let's see what we signed for."],
+        "carry": ["Moving it to {room}. Logged.", "Got it. {room}.", "Shifting it."],
+        "jettison": ["That's money out the lock.", "Spacing it. I'm writing it down.", "Gone. Somebody pays for that."],
+        "load": ["Rounds. Coming.", "I'll fetch a crate.", "Bringing ammo."],
+        "refuse": ["No. I'm not paid enough for that.", "Not that room.", "Ask me again and I'll still say no."],
+        "lamp": ["Lamp on. Bill me.", "I need light to read the manifest.", "Light. Just for a while."]
       }
     }
   ]

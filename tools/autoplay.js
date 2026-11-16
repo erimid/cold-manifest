@@ -73,7 +73,7 @@ const ticks = Math.round(minutes * 60 * TICK_RATE);
 const content = createContent(readContentFiles());
 const shipId = String(option('ship', 'margin-of-error'));
 const ship = content.require('ships', shipId);
-const roster = content.all('crew').map(({ id, name, engineer, skills, traits }) => ({ id, name, engineer, skills, traits }));
+const roster = content.all('crew').map(({ id, name, role, engineer, skills, traits }) => ({ id, name, role, engineer, skills, traits }));
 const ruleSet = { memories: content.all('memories'), refusals: content.all('refusals'), risks: content.all('risks') };
 const transitEvents = content.all('events');
 const lines = content.all('ai-lines');
@@ -827,8 +827,18 @@ function playCrossing(seed, index) {
         const system = sim.state.systems[id];
         if (system.power >= 1) continue;
         const room = sim.layout.rooms.find((item) => item.system === id)?.id;
-        const hand = hands.find((member) => member.room !== helm && member.goal === null && member.task === 'idle');
-        if (system.damage > 0 && room && hand && !bound(room)) give({ type: 'crew.move', crew: hand.id, room });
+        // Whoever is free, a different one every few seconds in case one refuses; suited if the air in there is thin.
+        const free = hands.filter((member) => member.room !== helm && member.goal === null && member.task === 'idle');
+        const hand = free.length ? free[Math.floor(sim.state.tick / (5 * TICK_RATE)) % free.length] : null;
+        if (system.damage > 0 && room && hand && !bound(room)) {
+          if (sim.state.rooms[room].oxygen < 0.5 && !hand.suit) give({ type: 'crew.suit', crew: hand.id, on: true });
+          give({ type: 'crew.move', crew: hand.id, room });
+        }
+        // Out of a fight the guns can give a bar back for the drive and the sensors.
+        if (/no spare power/.test(sim.whyNot({ type: 'power.add', system: id, delta: 1 }) ?? '')) {
+          const spare = ['weapons', 'shields', 'medbay'].find((other) => sim.state.systems[other].power > 0);
+          if (spare) give({ type: 'power.add', system: spare, delta: -1 });
+        }
         give({ type: 'power.add', system: id, delta: 1 });
       }
     }

@@ -58,7 +58,8 @@
 import { FIRE_CATCH_O2, FIRE_START, harmCrew, killCrew } from './atmosphere.js';
 import { airlockRooms, everyone, moveAboard, sendAcross, stepBoarding, whyNotCross } from './boarding.js';
 import { addCrate } from './hold.js';
-import { CREW_COMMANDS, isHome } from './crew.js';
+import { CREW_COMMANDS, isHome, spotIn } from './crew.js';
+import { bestSkillAboard, bestSkillIn, skillFactor } from './roles.js';
 import { stepPower } from './power.js';
 import { FLARE, NOISE, bang, contactView, flare, missChance, newContact, stepContact } from './senses.js';
 import { THINK_SECONDS, braceAgainst, droneTarget, planOf, think } from './tactics.js';
@@ -104,8 +105,10 @@ export const STALEMATE_SECONDS = 90;
  * A hit on the ship knocks `hit` off the fix and each gun it fires `shot`; with the sensors dark or the helm empty it drains away.
  */
 export const FIX = Object.freeze({ seconds: 25, hit: 0.25, shot: 0.1, drain: 0.05 });
-/** Stand-in for the crew's negotiating skill and our reputation until crew skills (S4.1) and factions (Stage 7) exist (DF-06). */
+/** Stand-in for our reputation until factions (Stage 7) exist (DF-06): talk is judged at this, moved by the best talker aboard (D-131). */
 export const NEGOTIATION_PLACEHOLDER = 0.5;
+/** Each level of negotiation in our best talker adds this to the chance that talking works. */
+export const NEGOTIATION_STEP = 0.05;
 /** Money aboard at the start, until runs and contracts set it (Stage 3). */
 export const START_MONEY = 120;
 
@@ -192,7 +195,9 @@ export const ourCrew = (sim) => everyone(sim, enemyOf(sim), 'player');
 export function talkChance(sim) {
   const hail = sim.state.fight ? planOf(enemyOf(sim).layout).hail : null;
   if (!hail) return 0;
-  return Math.max(0, Math.min(1, hail.talk + (NEGOTIATION_PLACEHOLDER - 0.5) * 0.6));
+  const talker = bestSkillAboard(ourCrew(sim).map(({ member }) => member), 'negotiation');
+  const skill = talker * NEGOTIATION_STEP;
+  return Math.max(0, Math.min(1, hail.talk + (NEGOTIATION_PLACEHOLDER - 0.5) * 0.6 + skill));
 }
 
 /** What the enemy wants to be paid to leave, or null if it is not asking. */
@@ -306,7 +311,8 @@ function settleBoarders(sim, outcome) {
   }
   for (const member of Object.values(sim.state.crew)) {
     if (member.owner === 'player') {
-      if (member.board) Object.assign(member, { board: null, crossEnds: null, task: 'idle', goal: null, path: [] });
+      // Called back on their way to the airlock: they step back to their spot in whatever room they are in, off any lift or doorway.
+      if (member.board) Object.assign(member, { board: null, crossEnds: null, task: 'idle', goal: null, path: [spotIn(sim.layout.room(member.room), member.index)] });
       continue;
     }
     if (TAKEN_BACK.has(outcome) && member.alive) {
@@ -681,7 +687,9 @@ function stepShield(ship, dt) {
 function stepWeapons(sim, ship, side, dt) {
   const fight = sim.state.fight;
   const powered = weaponsPowered(ship);
-  const pace = stationPace(ship, ship.layout.roomOfSystem('weapons'));
+  const gunRoom = ship.layout.roomOfSystem('weapons');
+  // A gunner in the weapons room charges the guns faster (D-131).
+  const pace = stationPace(ship, gunRoom) * (gunRoom ? skillFactor(bestSkillIn(ship, gunRoom.id, 'weapons')) : 1);
   ship.state.weapons.forEach((slot, index) => {
     const weapon = ship.catalog.weapon(slot.id);
     const wasReady = slot.charge >= weapon.charge - EPS;
@@ -811,7 +819,9 @@ function land(sim, shot, { force = false } = {}) {
  */
 export function stepFix(ship, dt, { ready = 'fix.ready', lost = 'fix.lost' } = {}) {
   const before = ship.state.fix;
-  ship.state.fix = canFix(ship) ? Math.min(1, before + (dt * stationPace(ship, helmOf(ship)) * fixBars(ship)) / FIX.seconds) : Math.max(0, before - FIX.drain * dt);
+  const helm = helmOf(ship);
+  const pilot = helm ? skillFactor(bestSkillIn(ship, helm.id, 'piloting')) : 1; // a pilot at the helm takes the fix faster (D-131)
+  ship.state.fix = canFix(ship) ? Math.min(1, before + (dt * stationPace(ship, helm) * pilot * fixBars(ship)) / FIX.seconds) : Math.max(0, before - FIX.drain * dt);
   if (before < 1 && ship.state.fix >= 1) ship.events.emit(ready, { tick: ship.state.tick });
   if (before >= 1 && ship.state.fix < 1) ship.events.emit(lost, { tick: ship.state.tick });
 }
