@@ -37,9 +37,9 @@ test('routes follow the door graph and respect locked and jammed doors', () => {
   assert.deepEqual(doors(findRoute(sim, 'reactor', 'cargo')), ['d_engines_reactor', 'd_engines_cargo']);
   assert.deepEqual(doors(findRoute(sim, 'bridge', 'weapons')), ['d_bridge', 'd_weapons']);
 
-  // Lock the direct way from the reactor: the route bends round, down the ladder to the corridor.
+  // Lock the direct way from the reactor: the route bends round, down the deck lifts through the corridor.
   give(sim, { type: 'door.set', door: 'd_engines_reactor', state: 'locked' });
-  assert.deepEqual(doors(findRoute(sim, 'reactor', 'cargo')), ['d_reactor', 'd_engines_corridor', 'd_engines_cargo']);
+  assert.deepEqual(doors(findRoute(sim, 'reactor', 'cargo')), ['d_reactor', 'd_cargo']);
   give(sim, { type: 'debug.door', door: 'd_reactor', jammed: true });
   assert.equal(findRoute(sim, 'reactor', 'cargo'), null, 'locked one way, jammed shut the other');
   assert.match(sim.whyNot({ type: 'crew.move', crew: 'nobody', room: 'cargo' }), /no crew member/);
@@ -50,7 +50,7 @@ test('routes follow the door graph and respect locked and jammed doors', () => {
   seconds(sim, 1);
   give(sim, { type: 'debug.door', door: 'd_reactor', jammed: true });
   assert.ok(sim.state.doors.d_reactor.openness >= WALKABLE);
-  assert.deepEqual(doors(findRoute(sim, 'reactor', 'cargo')), ['d_reactor', 'd_engines_corridor', 'd_engines_cargo']);
+  assert.deepEqual(doors(findRoute(sim, 'reactor', 'cargo')), ['d_reactor', 'd_cargo']);
 });
 
 test('a move order walks someone there, opening doors and shutting them behind', () => {
@@ -161,7 +161,7 @@ test('a suit slows the walk', () => {
   assert.ok(Number.isFinite(slow) && slow > quick + 2 * TICK_RATE, `unsuited ${quick} ticks, suited ${slow}`);
 });
 
-test('ladders are slow, the lift is quick while door control has power, and dead without it', () => {
+test('the lifts are quick while door control has power, and cranked slowly by hand without it', () => {
   const sim = newSim();
   // Bridge to the main hold: by the lift, two decks down.
   assert.deepEqual(doors(findRoute(sim, 'bridge', 'hold')), ['d_lift_bridge', 'd_lift_hold']);
@@ -169,23 +169,29 @@ test('ladders are slow, the lift is quick while door control has power, and dead
     const s = newCrewedSim();
     if (dark) give(s, { type: 'power.add', system: 'doors', delta: -s.state.systems.doors.power });
     give(s, { type: 'crew.move', crew: 'ilse', room: 'hold' });
+    let cranked = false;
     for (let i = 0; i < 90 * TICK_RATE; i++) {
       s.step();
-      if (s.state.crew.ilse.room === 'hold' && !s.state.crew.ilse.path.length) return { tick: s.state.tick };
+      if (/Cranking the lift/.test(describeTask(s, s.state.crew.ilse))) cranked = true;
+      if (s.state.crew.ilse.room === 'hold' && !s.state.crew.ilse.path.length) return { tick: s.state.tick, cranked };
     }
-    return { tick: Infinity };
+    return { tick: Infinity, cranked };
   };
   const lit = timeTo(false);
   const dark = timeTo(true);
   assert.ok(Number.isFinite(lit.tick) && Number.isFinite(dark.tick), `lit ${lit.tick}, dark ${dark.tick}`);
   assert.ok(dark.tick > lit.tick + 2 * TICK_RATE, `the dark way round is slower: lit ${lit.tick}, dark ${dark.tick}`);
+  assert.deepEqual([lit.cranked, dark.cranked], [false, true], 'only a dark lift is cranked by hand');
 });
 
 test('engineers take the service crawlways; nobody else can', () => {
   const sim = newSim();
   const engineer = { engineer: true };
-  // Cargo to the brig: round by the corridor on foot, one crawl for an engineer.
-  assert.ok(doors(findRoute(sim, 'cargo', 'brig')).every(Boolean));
+  // Cargo to the brig: up and down the deck lifts on foot. With door control dark the
+  // lifts are cranked by hand, and an engineer goes through the wall instead.
+  assert.deepEqual(doors(findRoute(sim, 'cargo', 'brig', engineer)), ['d_cargo', 'd_brig']);
+  give(sim, { type: 'power.add', system: 'doors', delta: -sim.state.systems.doors.power });
+  assert.ok(doors(findRoute(sim, 'cargo', 'brig')).every(Boolean), 'nobody else can crawl');
   assert.deepEqual(findRoute(sim, 'cargo', 'brig', engineer).map((s) => s.crawlway ?? s.door), ['c_cargo_brig']);
   // The creature's ducts are never theirs.
   assert.ok(!(findRoute(sim, 'brig', 'hold', engineer) ?? []).some((s) => s.crawlway === 'c_brig_hold'));

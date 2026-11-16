@@ -11,11 +11,12 @@
 //   rooms   rectangles { id, name, x, y, w, h, kind?, system?, jettison? } in whole
 //           tiles. `jettison: true` marks a section that can be cut loose.
 //           `kind: "lift"` is a lift shaft: crew ride it fast while door control
-//           has power, and cannot use it at all while it has none.
+//           has power, and crank it slowly by hand while it has none (D-093).
 //   doors   { id, a, b, x, y, vertical } where (x, y) is the middle of the
 //           doorway on the wall the two rooms share, and `vertical` says the
 //           wall runs up and down. `b` may be "space" for an airlock. A door
-//           in a floor or ceiling (vertical: false) is a hatch with a ladder.
+//           in a floor or ceiling (vertical: false) is a hatch with a deck lift
+//           under it (D-093).
 //   crawlways  { id, a, b, creature? } (D-072): service crawlways between two
 //           rooms that share a wall. Only engineers use them (slowly), and
 //           `creature: true` marks a duct too narrow for anyone but the creature.
