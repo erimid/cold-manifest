@@ -87,7 +87,7 @@ export const EFFECTS = Object.freeze({
     args: { add: whole },
     run(sim, a) {
       const run = sim.state.run;
-      if (run) run.deadline = Math.max(run.jumps, run.deadline + a.add);
+      if (run) run.deadline = Math.max(Math.ceil(run.hours), run.deadline + a.add); // hours since H.6
     },
   },
   // The hull as a whole. An event never sinks the ship outright: it stops at one point.
@@ -266,7 +266,7 @@ export const EFFECTS = Object.freeze({
       if (run) run.events.next = a.event;
     },
   },
-  // Somebody starts following us from the origin (sector.js), or gives up (on); or whoever follows loses `delay` jumps.
+  // Somebody starts following us (sector.js), or gives up (on); or whoever follows loses `delay` hours (H.6).
   pursuit: {
     args: { on: typed('boolean'), delay: count },
     optional: ['on', 'delay'],
@@ -275,7 +275,7 @@ export const EFFECTS = Object.freeze({
       const run = sim.state.run;
       if (!run) return;
       if (a.on === false) run.pursuit = null;
-      else if (a.on === true && (!run.pursuit || run.pursuit.done)) run.pursuit = newPursuit(run.rule, run.map.start);
+      else if (a.on === true && (!run.pursuit || run.pursuit.done)) run.pursuit = newPursuit(run.rule);
       if (a.delay && run.pursuit && !run.pursuit.done) run.pursuit.wait += a.delay;
     },
   },

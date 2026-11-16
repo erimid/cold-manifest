@@ -104,7 +104,10 @@ export const TRIGGERS = Object.freeze({
   // The crew saying no, and the crew putting the lamps back on (memory.js).
   'crew.refused': { category: 'crew_conflict', priority: 3, ttl: 10, cooldown: 25, chance: 0.7, own: true, slots: crewAndRoom },
   'crew.lit': { category: 'crew_conflict', priority: 2, ttl: 10, cooldown: 40, chance: 0.7, own: true, slots: crewAndRoom },
-  // The chart (S3.1): a plotted course, the jump, fuel, the pursuer and the deadline.
+  // The chart (S3.1; crossings since H.6): casting off, points passed, off the port, the fix and the run in, fuel, the follower and the deadline.
+  'route.sailed': { category: 'jump', priority: 2, ttl: 10, chance: 0.6, own: true },
+  'route.passed': { category: 'jump', priority: 1, ttl: 8, cooldown: 30, chance: 0.35, own: true },
+  'route.offport': { category: 'port_arrival', priority: 3, ttl: 12, own: true },
   'course.ready': { category: 'jump', priority: 2, ttl: 10, cooldown: 20, chance: 0.4, own: true },
   'sector.jumped': { category: 'jump', priority: 2, ttl: 10, chance: 0.5, own: true },
   'fuel.out': { category: 'jump', priority: 4, ttl: 20, own: true },

@@ -49,7 +49,7 @@ test('a run is lost when every crew member is dead, and not before', () => {
   assert.equal(lostEnding(sim), 'crew-dead');
 });
 
-test('the summary names the ending, the contract and what became of it, the money, standing, jumps and who died', () => {
+test('the summary names the ending, the contract and what became of it, the money, standing, hours and who died', () => {
   const sim = contractSim('courier-cold-chain');
   Object.values(sim.state.crew)[0].alive = false;
   sim.enqueue({ type: 'contract.abandon' });
@@ -62,7 +62,8 @@ test('the summary names the ending, the contract and what became of it, the mone
   assert.equal(rows.Paid, '150 advance');
   assert.equal(rows.Standing, 'Reach Medical Cooperative -2');
   assert.equal(rows.Money, String(120 + 150 - 60));
-  assert.match(rows.Jumps, /^0 of \d+ allowed$/);
+  assert.match(rows['Hours under way'], /^0 of \d+ allowed$/);
+  assert.equal(rows['Lanes flown'], '0');
   assert.equal(rows.Crew, '5 of 6 alive');
   assert.equal(summary.dead.length, 1);
   for (const kind of Object.keys(ENDINGS)) assert.ok(summarize(runSim(), kind).headline, kind);

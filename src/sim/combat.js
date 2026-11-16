@@ -437,6 +437,17 @@ function landOnUs(sim, shot, { force = false } = {}) {
   if (result === 'hit' && sim.state.hull.points === 0) sim.events.emit('ship.wrecked', { tick: sim.state.tick });
 }
 
+/**
+ * Something strikes the hull out of a hazard lane (H.6): `weapon` (a content weapon such as "debris") lands now
+ * on a room picked at random. A brace stops it like a round; nobody aimed it, so it never misses.
+ */
+export function strike(sim, weapon) {
+  const standing = sim.layout.rooms.filter((room) => !sim.state.rooms[room.id].jettisoned);
+  if (!standing.length || !sim.catalog.hasWeapon(weapon)) return;
+  const room = sim.rng.stream('combat').pick(standing).id;
+  landOnUs(sim, { id: sim.state.nextShot++, at: 'us', contact: null, weapon, room, born: sim.state.tick, lands: sim.state.tick, chance: 1, warn: false, drone: null });
+}
+
 /** Our round lands near a contact: a hit, or a warning shot across its bow. Either way it is a message. */
 function landOnContact(sim, shot) {
   const contact = findContact(sim, shot.contact);
@@ -447,7 +458,7 @@ function landOnContact(sim, shot) {
 
 /**
  * The sensors work on a fix while they have power and someone is at the helm; otherwise it slips away.
- * The fix plots a course on the sector chart (sector.js), which names its own events.
+ * The fix is the run into port at the end of a crossing (sector.js), which names its own events.
  */
 export function stepFix(ship, dt, { ready = 'fix.ready', lost = 'fix.lost' } = {}) {
   const before = ship.state.fix;

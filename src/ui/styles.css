@@ -1634,16 +1634,6 @@ body {
   inset: 0;
 }
 
-.chart__fuel {
-  position: absolute;
-  transform: translate(-50%, -50%);
-  padding: 0 3px;
-  font-size: 0.66em;
-  color: var(--amber-dim);
-  background: #0a0d12;
-  pointer-events: none;
-}
-
 /* A point: a 44 px button round a glyph whose shape, letter and colour all say what it is. */
 .chartnode {
   position: absolute;
@@ -1792,40 +1782,8 @@ body {
   background: var(--paper);
 }
 
-/* The pursuer: where Margo last had it. Solid while she can see it, pulsing and dashed once she cannot. */
-.chart__contact {
-  position: absolute;
-  transform: translate(-50%, 70%);
-  padding: 1px 5px;
-  font-size: 0.6em;
-  font-weight: 700;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: var(--alarm);
-  border: 1px dashed var(--alarm);
-  background: rgba(10, 13, 18, 0.9);
-  pointer-events: none;
-  animation: chart-pulse 1.6s ease-in-out infinite;
-}
-
-.chart__contact::before {
-  content: '◆ ';
-}
-
-.chart__contact.is-seen {
-  border-style: solid;
-  animation: none;
-}
-
-@keyframes chart-pulse {
-  50% {
-    opacity: 0.45;
-  }
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .chart__lane.is-plotted,
-  .chart__contact {
+  .chart__lane.is-plotted {
     animation: none;
   }
 }
@@ -1891,4 +1849,150 @@ body {
 
 .btn.power__toggle {
   flex-shrink: 0;
+}
+
+/* ---------- the route planner (H.6, D-197): lanes by risk, Union space, the ship on her lane ---------- */
+
+/* Each risk has a stroke pattern as well as a colour, and a letter on its tag (brief §17). */
+.chart__lane--patrol {
+  stroke: #6a5a8c;
+  stroke-dasharray: 12 3 2 3;
+}
+
+.chart__lane--wreck {
+  stroke: #7b6a52;
+  stroke-dasharray: 2 4;
+}
+
+.chart__lane--hazard {
+  stroke: #8c4b3c;
+  stroke-dasharray: 8 3;
+}
+
+.chart__lane--beacon {
+  stroke: #5c7f5c;
+}
+
+.chart__lane--union {
+  stroke: #4f6f86;
+  stroke-dasharray: 4 2;
+}
+
+.chart__lane.is-here {
+  stroke: var(--paper);
+  stroke-width: 4;
+}
+
+.chart__union {
+  fill: rgba(79, 111, 134, 0.12);
+  stroke: rgba(79, 111, 134, 0.45);
+  stroke-dasharray: 3 3;
+}
+
+.chart__hours {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  padding: 0 3px;
+  font-size: 0.6em;
+  color: var(--amber-dim);
+  background: #0a0d12;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.chart__hours.is-plotted {
+  color: var(--sodium);
+}
+
+.chartnode__tag--beacon {
+  background: #5c7f5c;
+  color: var(--paper);
+}
+
+/* The ship, on her lane. */
+.chart__ship {
+  position: absolute;
+  transform: translate(-50%, -140%);
+  padding: 1px 5px;
+  font-size: 0.6em;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #0a0d12;
+  background: var(--sodium);
+  pointer-events: none;
+  z-index: 1;
+}
+
+.chart__ship[hidden] {
+  display: none;
+}
+
+.chart__buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: auto;
+}
+
+.chart__buttons .btn {
+  margin-top: 0;
+}
+
+.chart__legend {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px 8px;
+  font-size: 0.8em;
+  color: var(--amber-dim);
+}
+
+.chart__key {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chart__swatch {
+  width: 18px;
+  height: 0;
+  border-top: 3px solid #4b4130;
+}
+
+.chart__key--patrol .chart__swatch {
+  border-top: 3px dashed #6a5a8c;
+}
+
+.chart__key--wreck .chart__swatch {
+  border-top: 3px dotted #7b6a52;
+}
+
+.chart__key--hazard .chart__swatch {
+  border-top: 3px dashed #8c4b3c;
+}
+
+.chart__key--beacon .chart__swatch {
+  border-top-color: #5c7f5c;
+}
+
+.chart__key--union .chart__swatch {
+  border-top: 3px dashed #4f6f86;
+}
+
+/* The card scrolls rather than spilling off the monitor when a point has all its route buttons (H.6). */
+.chart__card {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.chart__buttons {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+
+.chart__buttons .btn {
+  min-height: var(--tap);
+  padding: 4px 8px;
+  font-size: 0.78em;
+  letter-spacing: 0.08em;
 }

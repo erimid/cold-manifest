@@ -25,7 +25,7 @@ import { createShipView } from './ui/shipview.js';
 import { renderContracts, renderEvent, renderHub, renderPort, renderScene, renderSummary } from './ui/screens.js';
 import { renderTitle } from './ui/title.js';
 
-const VERSION = '0.27.0';
+const VERSION = '0.28.0';
 
 const params = new URLSearchParams(window.location.search);
 const flags = {
@@ -64,7 +64,7 @@ setPressBinder(input.press);
 
 // The simulation and the one clock that drives it. A run is one sim: a new run builds a new one (newGame),
 // and everything that listens to a sim is wired there. The first is the sandbox the title's "Walk the ship"
-// opens; it has no contract, so arriving somewhere does not open a screen.
+// opens; it has no contract, so arriving in port does not open a screen.
 // Placeholder crew until Stage 4 generates them (DECISIONS DF-03, DF-23).
 const crew = content.all('crew').map(({ id, name, role, engineer, skills, traits }) => ({ id, name, role, engineer, skills, traits }));
 // What the crew remember and refuse and what Margo objects to are content too (S3.3).
@@ -148,15 +148,11 @@ function newGame(seed, { contract = null, pursuit } = {}) {
     sim.events.on(item.event, (event) => !(item.found && unseen(mine, event)) && trip(event));
     if (item.found) sim.events.on(item.found, trip);
   }
-  // Arriving somewhere opens its screen, once the jump settles.
+  // The jump into port at the end of a crossing opens the port, every time (H.6: nowhere else is arrived at).
   sim.events.on('sector.arrived', (event) => {
-    if (!mineInfo.contract || mineInfo.seen.has(event.node)) return;
+    if (!mineInfo.contract) return;
     mineInfo.seen.add(event.node);
     mineInfo.pending = screenForArrival(event.kind) ? { screen: screenForArrival(event.kind), node: event.node } : null;
-  });
-  // Ports are visited every time, not just the first.
-  sim.events.on('sector.jumped', (event) => {
-    if (mineInfo.contract && event.kind === 'port' && mineInfo.seen.has(event.to)) mineInfo.pending = { screen: 'port', node: event.to };
   });
   sim.events.on('ship.wrecked', () => {
     mineInfo.doom = 'destroyed';
@@ -370,7 +366,7 @@ function frame(now) {
         `scope  ${sim.state.scope.contacts.length} contacts, ${sim.state.scope.drones.length} drones, ${sim.state.shots.length} shots, hull ${sim.state.hull.points}`,
         `margo  ${sim.state.ai.said} said, ${sim.state.ai.queue.length} waiting`,
         `event  ${sim.state.run?.events.open ? `${sim.state.run.events.open.id}${sim.state.run.events.open.result ? ' (answered)' : ''}` : 'none'}, ${sim.state.run?.events.count ?? 0} met`,
-        `chart  ${sim.state.run ? `${sim.state.run.at} fuel ${sim.state.run.fuel} jump ${sim.state.run.jumps}/${sim.state.run.deadline}${sim.state.run.pursuit ? ` chase@${sim.state.run.pursuit.at}` : ''}` : 'none'}`,
+        `chart  ${sim.state.run ? `${sim.state.run.at}${sim.state.run.crossing ? `>${sim.state.run.crossing.path[sim.state.run.crossing.leg + 1]} ${sim.state.run.crossing.phase}` : ''} fuel ${sim.state.run.fuel} hours ${Math.floor(sim.state.run.hours)}/${sim.state.run.deadline}${sim.state.run.pursuit ? ` chase ${sim.state.run.pursuit.done ? 'done' : sim.state.run.pursuit.contact ?? Math.ceil(sim.state.run.pursuit.wait) + 'h'}` : ''}` : 'none'}`,
         `trust  ${Math.round(sim.state.ai.trust)}, refused ${sim.state.ai.refusals}${sim.state.ai.objection ? `, holding ${sim.state.ai.objection.command.type}` : ''}`,
         `sound  ${audio.muted ? 'off' : audio.unlocked ? 'on' : 'locked'}`,
       ].join('\n');

@@ -35,7 +35,7 @@ function powerShields(sim) {
 
 test('weapons are content: a hauler mounts point defence and one deterrent gun; the rest are what other ships fire', () => {
   assert.deepEqual(content.all('weapons').filter((w) => w.mount !== false).map((w) => [w.id, w.role]), [['point-defence', 'pd'], ['slug-thrower', 'gun']]);
-  assert.deepEqual(content.all('weapons').filter((w) => w.mount === false).map((w) => w.id), ['pulse-laser', 'breaching-lance', 'drone-zap']);
+  assert.deepEqual(content.all('weapons').filter((w) => w.mount === false).map((w) => w.id), ['pulse-laser', 'breaching-lance', 'drone-zap', 'debris']);
   assert.equal(SLUGS.range > 0, true, 'a gun says how far it reaches');
   const broken = { ...LASER, id: 'broken', power: 0, charge: -1, effects: { fire: 2 }, role: 'cannon' };
   const { errors } = validateContent([{ path: 'weapons/x.json', data: { items: [broken] } }]);

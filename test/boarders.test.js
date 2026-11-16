@@ -12,7 +12,7 @@ import { FORCE_SECONDS, STUN_FLOOR } from '../src/sim/crew.js';
 import { validateEncounter } from '../src/sim/encounters.js';
 import { validateLayout } from '../src/sim/ship.js';
 import { TICK_RATE, checkInvariants, createSim } from '../src/sim/sim.js';
-import { CATALOG, CREW, SHIP, content, shipCopy } from './helpers.js';
+import { CATALOG, CREW, SHIP, content, offPort, shipCopy } from './helpers.js';
 
 const ENCOUNTERS = content.all('encounters');
 /** The kinds of ship that come aboard (H.2); the rest keep their distance (H.3). */
@@ -98,8 +98,9 @@ test('every ship that boards sends a party aboard, the rest send none, and the c
 
 // ---------- at the lock ----------
 
-test('a party waits at the lock while the captain decides, then comes through; a party at the lock blocks a jump', () => {
-  const sim = newSim('lock', { sector: { ...SECTOR, contacts: {} }, run: { pursuit: false } });
+test('a party waits at the lock while the captain decides, then comes through; a party at the lock blocks the run into port', () => {
+  const sim = newSim('lock', { sector: SECTOR, run: { pursuit: false } });
+  offPort(sim); // off a port, ready for the run in, when they clamp on
   const demands = [];
   sim.events.on('boarding.demand', (event) => demands.push(event));
   board(sim, 'raider-skiff', { at: 'quarters' });
@@ -107,11 +108,8 @@ test('a party waits at the lock while the captain decides, then comes through; a
   assert.equal(demands[0].room, 'quarters');
   assert.match(demands[0].text, /crates/);
   assert.equal(party(sim).length, 0, 'nobody aboard yet');
-  const { run } = sim.state;
-  const next = run.map.lanes.find((lane) => lane.a === run.at || lane.b === run.at);
-  go(sim, { type: 'course.plot', to: next.a === run.at ? next.b : next.a });
   go(sim, { type: 'debug.run', fix: true });
-  assert.match(sim.whyNot({ type: 'course.jump' }), /clamped to our airlock/);
+  assert.match(sim.whyNot({ type: 'route.jump' }), /clamped to our airlock/);
   seconds(sim, BOARD.demand);
   assert.equal(sim.state.boarding.phase, 'aboard');
   assert.equal(party(sim).length, 3);

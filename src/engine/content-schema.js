@@ -9,7 +9,7 @@ import { checkEvent, followUps } from '../narrative/events.js';
 import { checkRule } from '../narrative/rules.js';
 import { COMMAND_TYPES } from '../sim/sim.js';
 import { SYSTEM_IDS } from '../sim/systems.js';
-import { NODE_KINDS, checkSector, generateSector } from '../sim/sector.js';
+import { NODE_KINDS, RISK_WHERE, checkSector, generateSector } from '../sim/sector.js';
 import { CONTRACT_TYPES } from '../sim/contracts.js';
 import { SERVICES } from '../sim/port.js';
 import { CRATE_KINDS } from '../sim/hold.js';
@@ -167,26 +167,43 @@ function checkSectorDef(item) {
   if (!Array.isArray(item.designations) || item.designations.length < 2 || !item.designations.every(isNonEmptyString)) problems.push('designations must be a list of at least 2 codes');
   for (const key of ['longLane', 'crossLanes', 'sideLanes']) if (!share(item[key])) problems.push(`${key} must be between 0 and 1`);
   if (!(Number.isInteger(item.fuel?.start) && Number.isInteger(item.fuel?.max) && item.fuel.start >= 1 && item.fuel.start <= item.fuel.max)) problems.push('fuel must be { start, max }, whole numbers, start at least 1 and no more than max');
-  if (!range(item.slack, 0)) problems.push('slack must be [fewest, most] spare jumps on the deadline');
+  const shares = (v) => Array.isArray(v) && v.length === 2 && v.every((n) => typeof n === 'number' && n >= 0 && n <= 3) && v[0] <= v[1];
+  if (!shares(item.slack)) problems.push('slack must be [least, most] spare time on the deadline, a share of the cheapest way across in hours (0 to 3)');
+  if (!(typeof item.hour === 'number' && item.hour > 0)) problems.push('hour must be the seconds of ship time to an hour, above 0');
+  const h = item.hours;
+  if (!h || !['base', 'column', 'climb', 'min', 'max'].every((key) => typeof h[key] === 'number' && h[key] >= 0) || !(h.min >= 1 && h.min <= h.max)) problems.push('hours must be { base, column, climb, min, max }, numbers, min at least 1 and no more than max');
+  if (!(typeof item.union === 'number' && item.union >= 0 && item.union < 0.5)) problems.push('union must be the depth of the Union band, from 0 to under 0.5');
   if (item.events !== undefined) {
-    if (!item.events || typeof item.events !== 'object' || Array.isArray(item.events)) problems.push('events must be an object of kind of point: chance of an event on arriving');
+    if (!item.events || typeof item.events !== 'object' || Array.isArray(item.events)) problems.push('events must be an object of kind of point: chance of an event on the lane to it');
     else
       for (const [kind, chance] of Object.entries(item.events)) {
         if (!NODE_KINDS[kind]) problems.push(`events: unknown kind "${kind}" (${Object.keys(NODE_KINDS).join(', ')})`);
         if (!share(chance)) problems.push(`events.${kind} must be between 0 and 1`);
       }
   }
-  if (item.contacts !== undefined) {
-    if (!item.contacts || typeof item.contacts !== 'object' || Array.isArray(item.contacts)) problems.push('contacts must be an object of kind of point: chance of a contact on arriving');
-    else
-      for (const [kind, chance] of Object.entries(item.contacts)) {
-        if (!NODE_KINDS[kind]) problems.push(`contacts: unknown kind "${kind}" (${Object.keys(NODE_KINDS).join(', ')})`);
-        else if (kind === 'port') problems.push('contacts: a contact cannot turn up at a port');
-        if (!share(chance)) problems.push(`contacts.${kind} must be between 0 and 1`);
-      }
+  if (item.contacts !== undefined) problems.push('contacts: since H.6 a lane\'s risk says what turns up (risks[].contacts)');
+  if (!Array.isArray(item.risks) || !item.risks.length) problems.push('risks must be a list of lane risks');
+  else {
+    const ids = new Set();
+    item.risks.forEach((risk, i) => {
+      const at = `risks[${i}]${isNonEmptyString(risk?.id) ? ` (${risk.id})` : ''}`;
+      if (!isNonEmptyString(risk?.id)) problems.push(`${at}: missing id`);
+      else if (ids.has(risk.id)) problems.push(`${at}: the id is used twice`);
+      else ids.add(risk.id);
+      for (const key of ['name', 'label', 'text']) if (!isNonEmptyString(risk?.[key])) problems.push(`${at}: missing ${key}`);
+      const where = risk?.where;
+      const keys = where && typeof where === 'object' ? Object.keys(where) : [];
+      if (keys.length !== 1 || !RISK_WHERE.includes(keys[0])) problems.push(`${at}: where must be one of { touches: kind }, { beacon: true }, { union: true }, { default: true }`);
+      else if (keys[0] === 'touches' ? !NODE_KINDS[where.touches] || where.touches === 'port' : where[keys[0]] !== true) problems.push(`${at}: where.${keys[0]} is "${where[keys[0]]}"`);
+      if (!share(risk?.contacts) || risk?.contacts === undefined) problems.push(`${at}: contacts must be a chance an hour, 0 to 1`);
+      if (!risk?.encounters || typeof risk.encounters !== 'object' || Array.isArray(risk.encounters) || !Object.values(risk.encounters).every((w) => typeof w === 'number' && w >= 0)) problems.push(`${at}: encounters must be an object of encounter id: weight`);
+      if (risk?.length !== undefined && !(typeof risk.length === 'number' && risk.length > 0 && risk.length <= 2)) problems.push(`${at}: length must be a number above 0, at most 2`);
+      if (risk?.strikes !== undefined && !(share(risk.strikes.perHour) && isNonEmptyString(risk.strikes.weapon))) problems.push(`${at}: strikes must be { perHour, weapon }`);
+    });
+    if (!item.risks.some((risk) => risk?.where?.default === true)) problems.push('risks: one risk needs where: { default: true }, so every lane has one');
   }
   const chase = item.pursuit;
-  if (!chase || !share(chase.chance) || !isNonEmptyString(chase.encounter) || !Number.isInteger(chase.lead) || chase.lead < 0 || !Number.isInteger(chase.sight) || chase.sight < 0) problems.push('pursuit must be { chance, encounter, lead, sight }');
+  if (!chase || !share(chase.chance) || !isNonEmptyString(chase.encounter) || !(typeof chase.lead === 'number' && chase.lead >= 0) || !(typeof chase.rate === 'number' && chase.rate > 0 && chase.rate <= 1)) problems.push('pursuit must be { chance, encounter, lead (hours), rate (a chance an hour) }');
   if (problems.length) return problems;
   const kindsNeeded = Object.values(item.kinds).reduce((n, rule) => n + (rule.minimum ?? 0), 0);
   if (kindsNeeded > item.nodes[0] - 2) return [`the kinds' minimums need ${kindsNeeded} points between the ends, and a chart may have only ${item.nodes[0] - 2}`];
@@ -214,7 +231,7 @@ function checkContract(item, refs = {}) {
   if (!whole(item.value)) problems.push('value must be a whole number of credits: what a port pays for one crate of it');
   if (item.latePay !== undefined && !share(item.latePay)) problems.push('latePay must be between 0 and 1');
   if (item.followed !== undefined && !share(item.followed)) problems.push('followed must be a chance between 0 and 1');
-  if (item.slack !== undefined && !(Array.isArray(item.slack) && item.slack.length === 2 && item.slack.every(whole) && item.slack[0] <= item.slack[1])) problems.push('slack must be [fewest, most] spare jumps');
+  if (item.slack !== undefined && !(Array.isArray(item.slack) && item.slack.length === 2 && item.slack.every((n) => typeof n === 'number' && n >= 0 && n <= 3) && item.slack[0] <= item.slack[1])) problems.push('slack must be [least, most] spare time, a share of the cheapest way across in hours');
   const rep = item.reputation;
   if (!rep || typeof rep !== 'object' || !Number.isInteger(rep.deliver) || !Number.isInteger(rep.fail) || rep.fail > 0) problems.push('reputation must be { deliver, fail }, whole numbers, fail 0 or below');
   if (!Array.isArray(item.cargo) || !item.cargo.length) problems.push('cargo must be a list of crate lines');
@@ -316,6 +333,8 @@ export function validateContent(files) {
   const fittedWeapons = []; // [label, weapon id] for every weapon a ship mounts
   const unmountable = new Set(); // weapons marked mount: false, such as a drone's zap
   const pursuers = []; // [label, encounter id] for every sector's pursuer
+  const laneContacts = []; // [label, encounter id] for every encounter a lane risk can bring (H.6)
+  const strikeWeapons = []; // [label, weapon id] for what strikes the hull in a hazard lane (H.6)
   const refs = gatherRefs(files);
   const followed = new Set(); // events another event leads on to
   const unplaced = []; // [label, id] for events with no `at`
@@ -367,6 +386,12 @@ export function validateContent(files) {
       if (type === 'weapons' && item.mount === false) unmountable.add(item.id);
       if (type === 'ships' && Array.isArray(item.weapons)) for (const id of item.weapons) fittedWeapons.push([label, id]);
       if (type === 'sectors' && isNonEmptyString(item.pursuit?.encounter)) pursuers.push([label, item.pursuit.encounter]);
+      if (type === 'sectors' && Array.isArray(item.risks)) {
+        for (const risk of item.risks) {
+          for (const id of Object.keys(risk?.encounters ?? {})) laneContacts.push([`${label} risk ${risk.id}`, id]);
+          if (isNonEmptyString(risk?.strikes?.weapon)) strikeWeapons.push([`${label} risk ${risk.id}`, risk.strikes.weapon]);
+        }
+      }
 
       if (type === 'ai-lines' && isNonEmptyString(item.text)) {
         const key = normalizeLine(item.text);
@@ -385,6 +410,8 @@ export function validateContent(files) {
   }
 
   for (const [label, id] of pursuers) if (!refs.encounters.has(id)) errors.push(`${label}: is followed by "${id}", which is not an encounter`);
+  for (const [label, id] of laneContacts) if (!refs.encounters.has(id)) errors.push(`${label}: can bring "${id}", which is not an encounter`);
+  for (const [label, id] of strikeWeapons) if (!seenIds.get('weapons').has(id)) errors.push(`${label}: strikes with "${id}", which is not a weapon`);
 
   for (const [label, id] of unplaced) if (!followed.has(id)) errors.push(`${label}: has no "at" and no other event leads on to it, so it can never be met`);
 

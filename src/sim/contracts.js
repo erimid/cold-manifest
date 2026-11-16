@@ -11,7 +11,7 @@
 //     "advance": 200,                       paid when it is taken, and taken off the fee at the drop
 //     "latePay": 0.5,                       the share of the fee still paid when late; 0 fails it the moment it is late
 //     "followed": 0.75,                     the chance somebody follows it (the pursuit hook, sector.js)
-//     "slack": [1, 2],                      spare jumps on the deadline, instead of the sector's
+//     "slack": [0.55, 0.7],                 spare time on the deadline, a share of the cheapest way's hours, instead of the sector's (H.6)
 //     "value": 160,                         what a port pays for one of its crates if you sell the cargo instead
 //     "cargo": [ { "count": 4, "kind": "cargo", "label": "...", "contents": "...", "contraband": true } ],
 //                                           the crates it puts in the hold: sealed manifest crates by
@@ -19,7 +19,7 @@
 //                                           inspection looks for
 //     "claim": { "at": "derelict", "event": "claim.aphelion" },
 //                                           a salvage claim: the cargo is not aboard at the start. A point
-//                                           of that kind is picked on the chart, and standing there opens
+//                                           of that kind is picked on the chart, and passing it opens
 //                                           the event until the claim is worked (the "contract.load" effect)
 //     "reputation": { "deliver": 2, "fail": -3 },
 //     "penalty": 100                        what the client takes back when it fails
@@ -96,11 +96,11 @@ function pickClaim(sim, kind) {
   const cost = (node) => {
     const there = cheapestRoute(map, map.start, node.id);
     const on = cheapestRoute(map, node.id, map.delivery);
-    return { fuel: there.fuel + on.fuel, jumps: there.jumps + on.jumps };
+    return { fuel: there.fuel + on.fuel, hours: there.hours + on.hours };
   };
   const scored = (pool.length ? pool : inner).map((node) => ({ node, ...cost(node) }));
-  const best = Math.min(...scored.map((one) => one.fuel * 100 + one.jumps));
-  return sim.rng.stream('map').pick(scored.filter((one) => one.fuel * 100 + one.jumps === best));
+  const best = Math.min(...scored.map((one) => one.fuel * 1000 + one.hours));
+  return sim.rng.stream('map').pick(scored.filter((one) => one.fuel * 1000 + one.hours === best));
 }
 
 /** Rooms contract crates are stowed in: wherever the ship file keeps its manifest crates, else the first room. */
@@ -159,8 +159,8 @@ export function setUpContract(sim, template) {
     const pick = pickClaim(sim, template.claim.at);
     run.contract.claim = { node: pick.node.id, event: template.claim.event, done: false };
     // The deadline allows for the way round by the claim.
-    const direct = cheapestRoute(run.map, run.map.start, run.map.delivery).jumps;
-    run.deadline += Math.max(0, pick.jumps - direct);
+    const direct = cheapestRoute(run.map, run.map.start, run.map.delivery).hours;
+    run.deadline += Math.round(Math.max(0, pick.hours - direct) * (1 + run.slack));
   } else loadCargo(sim);
   addMoney(sim, run.contract.advance, 'advance');
 }

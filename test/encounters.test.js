@@ -11,7 +11,7 @@ import { THRUST, signature } from '../src/sim/senses.js';
 import { operatorOf } from '../src/sim/stations.js';
 import { TICK_RATE, checkInvariants, createSim } from '../src/sim/sim.js';
 import { readContentFiles } from '../tools/lib/load-content.js';
-import { CATALOG, CREW, SHIP, content } from './helpers.js';
+import { CATALOG, CREW, SHIP, content, offPort } from './helpers.js';
 
 const ENCOUNTERS = content.all('encounters');
 const SECTOR = content.require('sectors', 'the-reach');
@@ -83,14 +83,18 @@ test('every encounter in content/encounters is sound, and the checker says what 
   assert.match(bad({ wants: 'scan', scan: { range: 10, seconds: 5, calls: 'nobody' } }), /no encounter "nobody"/);
   assert.match(bad({ colour: 'red' }), /unknown key "colour"/);
 
-  // The whole content folder still checks clean, and a sector may only name real kinds of point for its contacts.
+  // The whole content folder still checks clean, and a sector's lanes may only bring real encounters (H.6).
   const files = readContentFiles();
   assert.deepEqual(validateContent(files).errors, []);
   const broken = structuredClone(files);
-  broken.find((file) => file.path.startsWith('sectors/')).data.items[0].contacts = { port: 0.5, nowhere: 2 };
+  const sector = broken.find((file) => file.path.startsWith('sectors/')).data.items[0];
+  sector.risks[0].encounters = { nowhere: 2 };
+  sector.risks[1].where = { touches: 'port' };
+  sector.contacts = { empty: 0.5 };
   const errors = validateContent(broken).errors.join('\n');
-  assert.match(errors, /contacts: a contact cannot turn up at a port/);
-  assert.match(errors, /contacts: unknown kind "nowhere"/);
+  assert.match(errors, /can bring "nowhere", which is not an encounter/);
+  assert.match(errors, /where.touches is "port"/);
+  assert.match(errors, /contacts: since H.6/);
 });
 
 // ---------- the helm ----------
@@ -238,19 +242,18 @@ test('a ship that docks puts its party at our lock (H.2), and a second one waits
   assert.equal(sim.state.boarding?.encounter, 'raider-skiff', 'and docks once the clamp is free');
 });
 
-test('no jump with a ship alongside, and a jump leaves every contact behind', () => {
-  const sim = quietSim('jump', { sector: { ...SECTOR, contacts: {} } });
+test('no run into port with a ship alongside, and the jump in leaves every contact behind', () => {
+  const sim = quietSim('jump', { sector: SECTOR, run: { pursuit: false } });
   seconds(sim, 1);
-  const { run } = sim.state;
-  const next = run.map.lanes.find((lane) => lane.a === run.at || lane.b === run.at);
-  go(sim, { type: 'course.plot', to: next.a === run.at ? next.b : next.a });
+  offPort(sim);
+  go(sim, { type: 'debug.contact', clear: true });
   go(sim, { type: 'debug.run', fix: true });
-  assert.equal(sim.whyNot({ type: 'course.jump' }), null);
+  assert.equal(sim.whyNot({ type: 'route.jump' }), null);
 
   spawn(sim, 'raider-skiff', { range: ALONGSIDE, bearing: 0, state: 'closing' });
   seconds(sim, 2);
   assert.equal(first(sim).state, 'alongside');
-  assert.match(sim.whyNot({ type: 'course.jump' }), /a ship is alongside/);
+  assert.match(sim.whyNot({ type: 'route.jump' }), /a ship is alongside/);
 
   go(sim, { type: 'debug.contact', clear: true });
   spawn(sim, 'raider-skiff', { range: 60, bearing: 0, state: 'closing' });
@@ -258,46 +261,17 @@ test('no jump with a ship alongside, and a jump leaves every contact behind', ()
   go(sim, { type: 'debug.run', fix: true });
   const ended = [];
   sim.events.on('encounter.ended', (event) => ended.push(event.outcome));
-  go(sim, { type: 'course.jump' });
+  go(sim, { type: 'route.jump' });
   assert.deepEqual(ended, ['jumped']);
   assert.equal(sim.state.scope.contacts.length, 0);
   assert.equal(speedOf(sim), 0, 'and we arrive at rest, drive cold');
   assert.equal(sim.state.helm.burn, false);
 });
 
-test('arriving at a point can bring a contact, by the sector\'s chances and each encounter\'s `at`', () => {
-  const always = { empty: 1, hazard: 1, derelict: 1, checkpoint: 1 };
-  const sim = quietSim('arrivals', { sector: { ...SECTOR, contacts: always }, run: { pursuit: false } });
-  const { run } = sim.state;
-  const spawned = [];
-  sim.events.on('contact.spawned', (event) => spawned.push(event.encounter));
-  let kind = null;
-  sim.events.on('sector.arrived', (event) => (kind = event.kind));
-  for (let jumps = 0; jumps < 6 && !run.delivered; jumps++) {
-    const lane = run.map.lanes.find((l) => l.a === run.at && !run.visited.includes(l.b));
-    if (!lane) break;
-    go(sim, { type: 'debug.run', fuel: run.fuelMax });
-    go(sim, { type: 'course.plot', to: lane.b });
-    go(sim, { type: 'debug.run', fix: true });
-    const before = spawned.length;
-    go(sim, { type: 'course.jump' });
-    if (kind === 'port') assert.equal(spawned.length, before, 'nobody lies in wait at a port');
-    else {
-      assert.equal(spawned.length, before + 1, `a contact at a ${kind}`);
-      const def = ENCOUNTERS.find((item) => item.id === spawned.at(-1));
-      assert.ok(!def.at || def.at.includes(kind), `${def.id} at a ${kind}`);
-      assert.equal(sim.state.scope.contacts.length, 1, 'the one before was left behind by the jump');
-    }
-  }
-  assert.ok(spawned.length >= 2);
-
-  // With no chances set, nothing turns up.
-  const none = quietSim('arrivals', { sector: { ...SECTOR, contacts: {} }, run: { pursuit: false } });
-  none.events.on('contact.spawned', () => assert.fail('a contact with no chance of one'));
-  const lane = none.state.run.map.lanes.find((l) => l.a === none.state.run.at);
-  go(none, { type: 'course.plot', to: lane.b });
-  go(none, { type: 'debug.run', fix: true });
-  go(none, { type: 'course.jump' });
+test('in port nobody turns up: ships come on the lanes, while under way (H.6)', () => {
+  const sim = quietSim('in-port', { sector: SECTOR, run: { pursuit: false } });
+  sim.events.on('contact.spawned', () => assert.fail('a contact in port'));
+  seconds(sim, 120);
 });
 
 // ---------- the four ways to slip a contact (the session's "done when") ----------

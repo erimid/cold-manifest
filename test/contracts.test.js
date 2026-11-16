@@ -1,5 +1,5 @@
 // Contracts (S3.4, D-113, D-115): the cargo, the advance, delivery, failure, standing, the inspection and the claim.
-// A full contract of each type is completed, and failed, by flying the chart.
+// A full contract of each type is completed, and failed, by flying crossings over the chart (H.6).
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
@@ -10,10 +10,10 @@ import { validateCondition, match } from '../src/narrative/conditions.js';
 import { applyEffects, validateEffects } from '../src/narrative/effects.js';
 import { eventView } from '../src/narrative/events.js';
 import { OPENED_SHARE, cargoCount, contractCrates, settlement, whyNoDeliver } from '../src/sim/contracts.js';
-import { cheapestRoute, neighbours, nodeOf } from '../src/sim/sector.js';
+import { cheapestRoute, nodeOf } from '../src/sim/sector.js';
 import { checkInvariants, createSim } from '../src/sim/sim.js';
 import { readContentFiles } from '../tools/lib/load-content.js';
-import { CATALOG, CREW, EVENTS, SHIP, content } from './helpers.js';
+import { CATALOG, CREW, EVENTS, SHIP, castOff, content, mendForRunIn, routeVia } from './helpers.js';
 
 const REACH = content.require('sectors', 'the-reach');
 const PORTS = content.all('ports');
@@ -26,25 +26,34 @@ const SALVAGE = 'salvage-aphelion';
 const contractSim = (id, { seed = 'contract', events = false } = {}) =>
   createSim({ seed, ship: SHIP, crew: CREW, ...CATALOG, sector: REACH, run: { pursuit: false }, contract: template(id), ports: PORTS, events: events ? EVENTS : [] });
 
-/** Plot a course one lane to `to`, take the fix at once (debug), and jump. */
-function fly(sim, to) {
-  sim.enqueue({ type: 'course.plot', to });
-  sim.step();
-  sim.enqueue({ type: 'debug.run', fix: true, fuel: sim.state.run.fuelMax });
-  sim.step();
-  assert.equal(sim.whyNot({ type: 'course.jump' }), null, `jump to ${to}`);
-  sim.enqueue({ type: 'course.jump' });
-  sim.step();
-  assert.equal(sim.state.run.at, to);
+/** Fly on until `stop()` says so or the crossing is over, skipping along each lane and answering nothing. */
+function flyUntil(sim, stop) {
+  const run = sim.state.run;
+  for (let i = 0; i < 20000 && run.crossing && !stop(); i++) {
+    if (run.events.open) answer(sim, eventView(sim).choices.find((choice) => choice.available).id);
+    else if (run.crossing.phase === 'under way') sim.enqueue({ type: 'debug.run', skip: true });
+    else if (!sim.whyNot({ type: 'route.jump' })) sim.enqueue({ type: 'route.jump' });
+    else mendForRunIn(sim);
+    sim.step();
+  }
 }
 
-/** Fly the cheapest way from here to `to`. */
-const flyTo = (sim, to) => {
-  for (const next of cheapestRoute(sim.state.run.map, sim.state.run.at, to).path.slice(1)) {
-    if (sim.state.run.events.open) answer(sim, eventView(sim).choices.find((choice) => choice.available).id);
-    fly(sim, next);
+/**
+ * Fly the cheapest way to `to`, port to port, with the tanks topped up, until we are at it (a port) or an event
+ * about it is on the table, or we have passed it (any other point). Returns once we are there.
+ */
+function flyTo(sim, to) {
+  const run = sim.state.run;
+  const there = () => run.at === to || run.events.open?.node === to;
+  for (let i = 0; i < 12 && !there(); i++) {
+    if (!run.crossing) {
+      sim.state.run.fuel = run.fuelMax;
+      castOff(sim, routeVia(run, to));
+    }
+    flyUntil(sim, there);
   }
-};
+  assert.ok(there(), `never got to ${to}`);
+}
 
 /** Answer the open event with a choice, and put it away. */
 function answer(sim, choice) {
@@ -117,9 +126,10 @@ test('late, opened or short cargo is paid for in part and moves no standing; a l
   const run = courier.state.run;
   const failed = [];
   courier.events.on('contract.failed', (event) => failed.push(event.reason));
-  // Waste jumps going back and forth until the deadline is gone.
-  const next = cheapestRoute(run.map, run.at, run.map.delivery).path[1];
-  while (!run.late) fly(courier, run.at === next ? run.map.start : next);
+  // Cast off and dawdle off the port until the deadline is gone.
+  run.deadline = 2;
+  castOff(courier, routeVia(run, run.map.delivery));
+  for (let i = 0; i < 20 * REACH.hour * 4 && !run.late; i++) courier.step();
   assert.deepEqual(failed, ['late']);
   assert.equal(run.contract.status, 'failed');
   assert.equal(courier.state.reputation.collective, -2);
@@ -166,8 +176,8 @@ test('a salvage claim: no cargo at the start, a derelict on the chart, a deadlin
     const claim = run.contract.claim;
     assert.equal(contractCrates(sim).length, 0);
     assert.equal(nodeOf(run.map, claim.node).kind, 'derelict');
-    const via = cheapestRoute(run.map, run.map.start, claim.node).jumps + cheapestRoute(run.map, claim.node, run.map.delivery).jumps;
-    assert.ok(run.deadline >= via, `seed ${i}: the deadline ${run.deadline} allows ${via} jumps by the claim`);
+    const via = cheapestRoute(run.map, run.map.start, claim.node).hours + cheapestRoute(run.map, claim.node, run.map.delivery).hours;
+    assert.ok(run.deadline >= via, `seed ${i}: the deadline ${run.deadline} allows ${via} hours by the claim`);
     assert.equal(sim.state.money, 120 + 100);
     if (i > 0) continue;
     // Straight to the drop: nothing to hand over.
@@ -180,10 +190,10 @@ test('a salvage claim: no cargo at the start, a derelict on the chart, a deadlin
     assert.equal(match({ fact: 'contract.claim' }, { sim }) !== null, true);
     answer(sim, 'leave');
     assert.equal(claim.done, false);
-    // Leave and come back: it opens again.
-    fly(sim, neighbours(run.map, run.at)[0]);
-    if (run.events.open) answer(sim, eventView(sim).choices.find((choice) => choice.available).id);
-    fly(sim, claim.node);
+    // Leave, fly on to the next port, and come back by it: it opens again.
+    flyUntil(sim, () => false);
+    assert.equal(run.crossing, null);
+    flyTo(sim, claim.node);
     assert.equal(run.events.open?.id, 'claim.aphelion');
     answer(sim, 'quick');
     assert.equal(claim.done, true);

@@ -3,6 +3,8 @@
 import { createContent } from '../src/engine/content.js';
 import { newCrewMember } from '../src/sim/crew.js';
 import { createSim } from '../src/sim/sim.js';
+import { eventView } from '../src/narrative/events.js';
+import { bestRoute, cheapestRoute, nodeOf } from '../src/sim/sector.js';
 import { readContentFiles } from '../tools/lib/load-content.js';
 
 export const content = createContent(readContentFiles());
@@ -44,3 +46,97 @@ export const shipCopy = () => {
   const { _file, ...data } = SHIP;
   return structuredClone(data);
 };
+
+/** Plot a route (point ids from where we are to a port) and cast off. Throws with the reason if either is refused. */
+export function castOff(sim, path) {
+  for (const command of [{ type: 'route.plot', path }, { type: 'route.sail' }]) {
+    const why = sim.whyNot(command);
+    if (why) throw new Error(`${command.type}: ${why}`);
+    sim.enqueue(command);
+    sim.step();
+  }
+}
+
+/** Answer an open event with the first choice open to us, and put it away. */
+export function answerFirst(sim, view) {
+  const choice = view.choices.find((one) => one.available);
+  sim.enqueue({ type: 'event.choose', choice: choice.id });
+  sim.step();
+  sim.enqueue({ type: 'event.dismiss' });
+}
+
+/**
+ * Fly the crossing under way to the end (H.6): skip along each lane to the next thing on it (`skip: false`
+ * flies it in ship time), answer each event with `answer(sim, view)`, then take the fix and jump into port.
+ * Returns the sim's event types seen on the way. Throws if the crossing is still going after `limit` ticks.
+ */
+export function flyCrossing(sim, { answer = answerFirst, skip = true, limit = 40000 } = {}) {
+  const seen = [];
+  const stop = sim.events.on('*', (_, type) => seen.push(type));
+  const run = sim.state.run;
+  for (let i = 0; run.crossing && i < limit; i++) {
+    const view = eventView(sim);
+    if (view && !view.result) answer(sim, view);
+    else if (view) sim.enqueue({ type: 'event.dismiss' });
+    else if (run.crossing.stalled) break;
+    else if (run.crossing.phase === 'under way' && skip && !sim.whyNot({ type: 'debug.run', skip: true })) sim.enqueue({ type: 'debug.run', skip: true });
+    else if (run.crossing.phase === 'off port' && !sim.whyNot({ type: 'route.jump' })) sim.enqueue({ type: 'route.jump' });
+    else if (run.crossing.phase === 'off port' && skip) mendForRunIn(sim);
+    sim.step();
+  }
+  stop();
+  if (run.crossing && !run.crossing.stalled) throw new Error(`still crossing after ${limit} ticks: ${run.crossing.phase} on lane ${run.crossing.leg}`);
+  return seen;
+}
+
+/** Plot, cast off and fly a route to its port. Returns the event types seen on the way. */
+export function fly(sim, path, options) {
+  castOff(sim, path);
+  return flyCrossing(sim, options);
+}
+
+/**
+ * A route from where we are that passes `via` (any point) and runs on to a port after it without crossing
+ * itself, the one nearest the drop; or, if a port comes first on the way to `via`, the route to that port.
+ * Returns a list of point ids.
+ */
+export function routeVia(run, via) {
+  const there = cheapestRoute(run.map, run.at, via).path;
+  const first = there.findIndex((id, i) => i > 0 && nodeOf(run.map, id).kind === 'port');
+  if (first >= 0) return there.slice(0, first + 1);
+  const ports = run.map.nodes.filter((node) => node.kind === 'port' && !there.includes(node.id));
+  const ons = ports
+    .map((port) => bestRoute(run.map, via, port.id, { ports: false }))
+    .filter((on) => on.path && on.path.slice(1).every((id) => !there.includes(id)))
+    .sort((a, b) => cheapestRoute(run.map, a.path.at(-1), run.map.delivery).fuel - cheapestRoute(run.map, b.path.at(-1), run.map.delivery).fuel || a.fuel - b.fuel);
+  return [...there, ...ons[0].path.slice(1)];
+}
+
+/** Off a port with no way in: mend whatever the run in needs (the sensors, the drive, the bridge) and hand her the fix (debug). */
+export function mendForRunIn(sim) {
+  for (const system of ['sensors', 'engines', 'helm']) {
+    const state = sim.state.systems[system];
+    if (state && !state.lost && state.damage > 0) sim.enqueue({ type: 'debug.system', system, damage: 0 });
+    if (sim.state.stations[system]?.down) sim.enqueue({ type: 'station.stand', station: system, down: false });
+  }
+  sim.enqueue({ type: 'debug.run', fix: true });
+}
+
+/** The quickest way from where we are to the nearest port we have the fuel for, never through another port. */
+export function nearestPort(sim) {
+  const { run } = sim.state;
+  const routes = run.map.nodes.filter((node) => node.kind === 'port' && node.id !== run.at).map((node) => bestRoute(run.map, run.at, node.id, { by: 'hours', ports: false }));
+  return routes.filter((route) => route.path && route.fuel <= run.fuel).sort((a, b) => a.hours - b.hours)[0].path;
+}
+
+/** Cast off for the nearest port and skip along the lanes until she is off it, ready for the run in. */
+export function offPort(sim) {
+  castOff(sim, nearestPort(sim));
+  const run = sim.state.run;
+  for (let i = 0; i < 200 && run.crossing.phase === 'under way'; i++) {
+    if (run.events.open) answerFirst(sim, eventView(sim));
+    else sim.enqueue({ type: 'debug.run', skip: true });
+    sim.step();
+  }
+  if (run.crossing.phase !== 'off port') throw new Error('never got off the port');
+}
