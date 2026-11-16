@@ -268,7 +268,8 @@ export function createShipRenderer(layout, { sensor = false } = {}) {
       // A little fatter than drawn, so a fingertip can find it.
       const fat = 0.5;
       const r = door.vertical ? { x: door.x - fat / 2, y: door.y - 0.5, w: fat, h: 1 } : { x: door.x - 0.5, y: door.y - fat / 2, w: 1, h: fat };
-      out.push({ id: door.id, kind: 'door', x: view.ox + r.x * view.scale, y: view.oy + r.y * view.scale, w: r.w * view.scale, h: r.h * view.scale, priority: 2 });
+      // A hatch in the deck is often underfoot: it beats the legs of whoever stands on it, and their body above stays theirs (D-132).
+      out.push({ id: door.id, kind: 'door', x: view.ox + r.x * view.scale, y: view.oy + r.y * view.scale, w: r.w * view.scale, h: r.h * view.scale, priority: door.vertical ? 2 : 4 });
     }
     return out;
   }

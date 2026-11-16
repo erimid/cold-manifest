@@ -36,16 +36,16 @@ function fight(sim, enemy, { engage = true } = {}) {
   return enemyOf(sim);
 }
 
-/** Take the crew who start in the hold and the brig off the ship, so those rooms stand empty. */
+/** Take the crew who start in the hold off the ship, so it stands empty. */
 function emptyRooms(sim) {
-  for (const member of Object.values(sim.state.crew)) if (['hold', 'brig'].includes(member.room)) delete sim.state.crew[member.id];
+  for (const member of Object.values(sim.state.crew)) if (member.room === 'hold') delete sim.state.crew[member.id];
 }
 
 // ---------- what a room gives off ----------
 
 test('a room gives off light, noise, heat and movement, and the creature will read the same numbers', () => {
   const sim = newCrewedSim('senses');
-  emptyRooms(sim); // the hold and the brig, where Vesna and Halloran start
+  emptyRooms(sim); // the hold, where Vesna starts
   seconds(sim, 1);
   const quiet = sense(sim, 'hold');
   assert.deepEqual(quiet, { light: 1, noise: 0, heat: 0, movement: 0 }, 'an empty lit hold: light and nothing else');
@@ -78,7 +78,7 @@ test('a room gives off light, noise, heat and movement, and the creature will re
 
 test('a bang rings and fades: a hit is loud where it lands, a gun where it is fired', () => {
   const sim = newCrewedSim('bang');
-  emptyRooms(sim); // the hold and the brig, where Vesna and Halloran start
+  emptyRooms(sim); // the hold, where Vesna starts
   seconds(sim, 1);
   go(sim, { type: 'debug.hit', at: 'us', room: 'brig', weapon: 'pulse-laser', force: true });
   assert.ok(sim.state.rooms.brig.noise > 0.9, `the hit: ${sim.state.rooms.brig.noise}`);
@@ -178,7 +178,7 @@ test('a dark, empty room out of sensor cover hides its state: Margo shows what s
 
 test('someone standing in a dark room is eyes on it; a fire in the dark is found once it is big enough to see by', () => {
   const sim = newCrewedSim('eyes');
-  emptyRooms(sim); // the hold and the brig, where Vesna and Halloran start
+  emptyRooms(sim); // the hold, where Vesna starts
   seconds(sim, 1);
   go(sim, { type: 'power.add', system: 'sensors', delta: -1 });
   go(sim, { type: 'lights.all', on: false });

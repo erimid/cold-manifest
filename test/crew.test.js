@@ -33,7 +33,7 @@ test('a run starts with six crew, one for each role, standing in the rooms the s
       ['Dace', 'engineer', 'reactor'],
       ['Okoro', 'medic', 'quarters'],
       ['Pruitt', 'gunner', 'weapons'],
-      ['Halloran', 'security', 'brig'],
+      ['Halloran', 'security', 'shields'],
       ['Vesna', 'quartermaster', 'hold'],
     ],
   );
