@@ -799,7 +799,11 @@ function playCrossing(seed, index) {
     } else if (run.at === run.map.delivery) {
       // The drop: hand over whatever is left of the cargo, if there is a contract left to hand over.
       if (!sim.whyNot({ type: 'contract.deliver' })) give({ type: 'contract.deliver' });
-      else settled = true;
+      else {
+        // Nothing to hand over (a claim left unworked): the captain walks away from the contract, as retiring would.
+        give({ type: 'contract.abandon' });
+        settled = true;
+      }
     } else if (!run.plot) {
       if (contract.claim && run.at === contract.claim.node && !contract.claim.done) tally.claimLeft = true; // it walked away from the claim
       portCall();
@@ -1087,7 +1091,7 @@ for (const type of [...new Set(crossings.map((c) => c.type))]) {
   const reasons = {};
   for (const c of of) if (c.status === 'failed') reasons[c.reason] = (reasons[c.reason] ?? 0) + 1;
   const unsettled = of.filter((c) => c.status === 'active').length;
-  out.push(`  ${type.padEnd(18)} ${of.length} taken: delivered ${done.length} (${whole} whole, ${done.filter((c) => c.late).length} late), failed ${of.length - done.length - unsettled} (${Object.entries(reasons).map(([k, n]) => `${k} ${n}`).join(', ') || 'none'}), never settled ${unsettled}; earned ${done.length ? mean(done.map((c) => c.earned)).toFixed(0) : '-'} of ${of[0].pay} on average when delivered`);
+  out.push(`  ${type.padEnd(18)} ${of.length} taken: delivered ${done.length} (${whole} whole, ${done.filter((c) => c.late).length} late), failed ${of.length - done.length - unsettled} (${Object.entries(reasons).map(([k, n]) => `${k} ${n}`).join(', ') || 'none'}), unfinished (ship or crew lost) ${unsettled}; earned ${done.length ? mean(done.map((c) => c.earned)).toFixed(0) : '-'} of ${of[0].pay} on average when delivered`);
 }
 out.push(`  inspections:       ${sumOf('inspections')} met, ${sumOf('seized')} found the contraband; ${crossings.filter((c) => c.type === 'salvage' && c.claimLeft).length} salvage claims walked away from`);
 out.push(`  ports:             ${sumOf('fuelBought')} fuel bought for ${sumOf('fuelSpent')} credits, ${sumOf('repairSpent')} credits on repairs; money at the end ${mean(crossings.map((c) => c.money)).toFixed(0)} on average (${Math.min(...crossings.map((c) => c.money))} to ${Math.max(...crossings.map((c) => c.money))})`);
