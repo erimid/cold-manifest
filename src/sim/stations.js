@@ -67,10 +67,16 @@ export const postOfRole = (role) => ROLES[role]?.station ?? null;
 
 /** The room a station is in, or undefined if the ship has none. */
 export function roomOfStation(sim, id) {
-  const station = STATIONS[id];
-  if (!station) return undefined;
-  return station.system ? sim.layout.roomOfSystem(station.system) : sim.layout.rooms.find((room) => room.kind === station.kind);
+  // Asked many times a tick, and a layout never changes: looked up once per layout.
+  let rooms = STATION_ROOMS.get(sim.layout);
+  if (!rooms) {
+    rooms = {};
+    for (const [key, station] of Object.entries(STATIONS)) rooms[key] = station.system ? sim.layout.roomOfSystem(station.system) : sim.layout.rooms.find((room) => room.kind === station.kind);
+    STATION_ROOMS.set(sim.layout, rooms);
+  }
+  return rooms[id];
 }
+const STATION_ROOMS = new WeakMap();
 
 /** The station in a room, or null. */
 export function stationOfRoom(sim, roomId) {
@@ -99,7 +105,9 @@ export function operatorOf(sim, id) {
   if (!STATIONS[id]?.skill) return null;
   const room = roomOfStation(sim, id);
   if (!room) return null;
-  for (const member of Object.values(sim.state.crew)) {
+  const { crew } = sim.state;
+  for (const key in crew) {
+    const member = crew[key];
     if (member.post === id && member.room === room.id && ready(member)) return member;
   }
   return null;
