@@ -12,6 +12,7 @@
 //
 // All the numbers here are starting values to tune by play (DECISIONS D-034).
 
+import { COLD_RATE, TEMP_COLD, WARM_RATE } from './cold.js';
 import { rating } from './stations.js';
 import { SPACE } from './systems.js';
 
@@ -44,6 +45,7 @@ export const TEMP_NORMAL = 20;
 export const TEMP_FIRE = 480; // added at full intensity
 export const TEMP_EXPOSED = -90; // open to space
 export const TEMP_RATE = 0.12;
+
 
 /** Below this much oxygen an unsuited crew member starts to suffocate. */
 export const BREATHABLE_O2 = 0.15;
@@ -170,11 +172,18 @@ function stepFire(sim, seconds) {
 
 function stepTemperature(sim, seconds) {
   const share = Math.min(1, TEMP_RATE * seconds);
+  // The air plant keeps the ship warm: stood down or dark, it slowly goes cold (F.2).
+  const plant = sim.state.systems.life_support;
+  const warm = plant.absent || (rating(sim, 'life_support') > 0 && plant.level - plant.damage > 0);
+  const climate = warm ? TEMP_NORMAL : TEMP_COLD;
   for (const room of sim.layout.rooms) {
     const r = sim.state.rooms[room.id];
     if (r.jettisoned) continue;
-    const target = TEMP_NORMAL + TEMP_FIRE * r.fire + (isExposed(sim, room.id) ? TEMP_EXPOSED * (1 - r.oxygen) : 0);
-    r.temperature += (target - r.temperature) * share;
+    const exposed = isExposed(sim, room.id);
+    const target = climate + TEMP_FIRE * r.fire + (exposed ? TEMP_EXPOSED * (1 - r.oxygen) : 0);
+    // A fire, a hole or a room still hot from one moves fast; the climate only creeps.
+    const slow = !exposed && r.fire === 0 && r.temperature <= TEMP_NORMAL + 1;
+    r.temperature += (target - r.temperature) * (slow ? Math.min(1, (target < r.temperature ? COLD_RATE : WARM_RATE) * seconds) : share);
   }
 }
 

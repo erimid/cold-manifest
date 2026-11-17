@@ -262,6 +262,7 @@ function checkPort(item) {
   if (!isNonEmptyString(item.name)) problems.push('missing name');
   if (!isNonEmptyString(item.text)) problems.push('missing text: what the port screen says about it');
   for (const key of ['fuel', 'hull', 'system', 'salvage']) if (!(Number.isInteger(item[key]) && item[key] >= 0)) problems.push(`${key} must be a whole number of credits, 0 or more`);
+  if (item.flare !== undefined && !(Number.isInteger(item.flare) && item.flare >= 0)) problems.push('flare must be a whole number of credits, 0 or more: what a flare costs (F.2)');
   if (!Array.isArray(item.services)) problems.push(`services must be a list (${SERVICES.join(', ')})`);
   else for (const service of item.services) if (!SERVICES.includes(service)) problems.push(`services: no service "${service}" (${SERVICES.join(', ')})`);
   return problems;
