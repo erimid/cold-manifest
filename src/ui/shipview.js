@@ -44,7 +44,7 @@ import { createIntercom } from './intercom.js';
 import { AUTO_PAUSE } from './settings.js';
 import { createShipRenderer } from './ship-render.js';
 import { createSituationCards } from './situations.js';
-import { bearingText, drawScope, rangeText, scopeDial, scopeHit, scopeMarks } from './scope.js';
+import { bearingText, drawScope, hunter, hunterText, rangeText, scopeDial, scopeHit, scopeMarks } from './scope.js';
 
 const percent = (value) => `${Math.round(value * 100)}%`;
 /** How long a crew member's intercom reply stays on the monitor, in real milliseconds. */
@@ -163,8 +163,8 @@ export function createShipView({ canvas, root, input, sim, clock, tempo = null, 
   /** What a long press on the scope says. */
   function describeScope(hit) {
     const contact = hit.contact !== undefined ? scopeView(sim).contacts.find((item) => item.id === hit.contact) : null;
-    if (contact) return `${contact.label}, ${contact.name.toLowerCase()}. ${contact.intent}. Bearing ${bearingText(contact.bearing)}, give or take ${Math.round(contact.bearingError)} degrees; about ${rangeText(contact.range, contact.rangeError)}. The patch is where it could be.`;
-    return 'The scope. It only listens: what it shows is what other ships give off, and how well the sensors hear it. Tap the dial to turn the ship that way.';
+    if (contact) return `${contact.label}, ${contact.name.toLowerCase()}. ${contact.stage ? `${contact.stageText}${contact.stage === 'gone' ? '' : `: ${Math.round(contact.certainty * 100)}% sure`}. The fan is its search beam, and the ring round it fills as it gets surer` : contact.intent}. Bearing ${bearingText(contact.bearing)}, give or take ${Math.round(contact.bearingError)} degrees; about ${rangeText(contact.range, contact.rangeError)}. The patch is where it could be.`;
+    return 'The scope. It only listens: what it shows is what other ships give off, and how well the sensors hear it. A fan from a contact is its search beam: when it crosses us it gets a look, and the ring round the contact fills as it gets surer. Tap the dial to turn the ship that way.';
   }
 
   // ---------- layout ----------
@@ -814,7 +814,7 @@ export function createShipView({ canvas, root, input, sim, clock, tempo = null, 
     ctx.textBaseline = 'bottom';
     ctx.textAlign = 'right';
     ctx.fillText('M.A.R.G.O. SCHEMATIC · COMPANY ISSUE', x + w - (scopeBox ? scopeBox.w + 28 : 18), y + h - 6);
-    if (scopeBox) drawScope(ctx, scopeBox, scopeView(sim), { selected: selected?.kind === 'contact' ? selected.id : null, time: (sim.state.tick + clock.alpha) * TICK_SECONDS, active: sensorsUp(sim), reduce: reduceMotion(), marks: situationMarks() });
+    if (scopeBox) drawScope(ctx, scopeBox, scopeView(sim), { selected: selected?.kind === 'contact' ? selected.id : null, active: sensorsUp(sim), reduce: reduceMotion(), marks: situationMarks() });
     ctx.textAlign = 'start';
     ctx.textBaseline = 'alphabetic';
   }
@@ -1142,7 +1142,7 @@ export function createShipView({ canvas, root, input, sim, clock, tempo = null, 
 
     if (selected.kind === 'contact') {
       // A return on the scope (H.1): what Margo makes of it, the lies we can hail it with, and (H.3) our gun.
-      const stats = { bearing: stat('Bearing'), range: stat('Range'), intent: stat('Doing'), fix: stat('Return'), gun: stat('Our gun') };
+      const stats = { bearing: stat('Bearing'), range: stat('Range'), intent: stat('Hunting us'), fix: stat('Return'), gun: stat('Our gun') };
       const title = el('div', { class: 'status__title', id: 'status-title' });
       const sub = el('div', { class: 'stencil' });
       const note = el('span', { class: 'status__note' });
@@ -1347,8 +1347,9 @@ export function createShipView({ canvas, root, input, sim, clock, tempo = null, 
       setText(panel.sub, seen.stale ? `Last seen ${seconds(seen.age)} ago` : 'On the scope');
       setText(panel.stats.bearing.value, `${bearingText(seen.bearing)} ±${Math.round(seen.bearingError)}°`);
       setText(panel.stats.range.value, `${rangeText(seen.range, seen.rangeError)} ±${Math.round(seen.rangeError * 100)}%`);
-      setText(panel.stats.intent.value, seen.intent);
-      panel.stats.intent.node.classList.toggle('is-alarm', seen.state === 'closing' || seen.state === 'alongside');
+      // How close it is to finding us (F.1): the stage of its awareness in words, and how sure it is.
+      setText(panel.stats.intent.value, seen.stage ? `${seen.stageText}${seen.stage === 'gone' ? '' : ` · ${Math.round(seen.certainty * 100)}% sure`}` : seen.intent);
+      panel.stats.intent.node.classList.toggle('is-alarm', seen.stage === 'sure');
       setText(panel.stats.fix.value, seen.stale ? 'lost' : percent(seen.quality));
       const contact = sim.state.scope.contacts.find((item) => item.id === panel.id);
       for (const [bluff, node] of Object.entries(panel.hails)) {
@@ -1806,7 +1807,8 @@ export function createShipView({ canvas, root, input, sim, clock, tempo = null, 
       },
       /** The scope's box and where each return is drawn on it. */
       get scope() {
-        return scopeBox ? { box: scopeBox, dial: scopeDial(scopeBox), marks: scopeMarks(scopeBox, scopeView(sim)) } : null;
+        const hunting = scopeBox ? hunter(scopeView(sim)) : null;
+        return scopeBox ? { box: scopeBox, dial: scopeDial(scopeBox), marks: scopeMarks(scopeBox, scopeView(sim)), hunting: hunting ? hunterText(hunting) : null } : null;
       },
       get selectedCrew() {
         return selectedCrew;

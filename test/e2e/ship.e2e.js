@@ -1944,6 +1944,19 @@ async function scopeTests(browser) {
         assert.match(await game(page, () => window.coldManifest.shipView.debug.infoText), /The scope\. It only listens/);
       });
     }
+    await check(`${name}: the scope says how close a ship is to finding us, in words and in sound (F.1)`, async () => {
+      await game(page, () => {
+        const { sim } = window.coldManifest;
+        sim.enqueue({ type: 'debug.contact', clear: true });
+        sim.enqueue({ type: 'debug.contact', encounter: 'patrol-cutter', range: 45, bearing: 120, miss: 5 });
+      });
+      // Its beam comes round: first it is only sweeping, then it has a sniff of a lit ship, then it is sure.
+      await page.waitForFunction(() => /^C\d+ (SWEEPING|BRUSHED US) · \d+%$/.test(window.coldManifest.shipView.debug.scope?.hunting ?? ''), null, { timeout: 8000 });
+      await page.waitForFunction(() => /^C\d+ (HAS A SNIFF|IS SURE) · \d+%$/.test(window.coldManifest.shipView.debug.scope?.hunting ?? ''), null, { timeout: 40000 });
+      const heard = await game(page, () => ({ unlocked: window.coldManifest.audio.unlocked, muted: window.coldManifest.audio.muted, played: Object.keys(window.coldManifest.audio.stats.played) }));
+      if (heard.unlocked && !heard.muted) assert.ok(heard.played.some((patch) => /^tone\d$/.test(patch)) && heard.played.includes('sniff'), `heard ${heard.played.join(', ')}`);
+      await game(page, () => window.coldManifest.sim.enqueue({ type: 'debug.contact', clear: true }));
+    });
     await context.close();
   }
   await check('the scope: no page errors', async () => assert.deepEqual(errors, []));

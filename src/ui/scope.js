@@ -1,6 +1,7 @@
 // The passive scope (Stage H, H.1; D-151): a small green screen let into the corner of Margo's monitor.
 // We are the centre. Drones and boarding pods on their way in are drawn as small marks (H.3). A contact is not a dot: it is the
 // patch of space it could be in, a wedge as wide as the bearing is unsure and as deep as the range is.
+// Since F.1 (D-215) each contact's search beam is drawn too, with a ring round its mark for how sure of us it is.
 // Drawing and hit-testing only: what is on the scope comes from scopeView() in sim/encounters.js.
 
 import { KM_PER_UNIT } from '../sim/encounters.js';
@@ -10,6 +11,106 @@ const GREEN = '#7fe39a';
 const AMBER = '#ffb347';
 const RED = '#ff8a2b';
 const RAD = Math.PI / 180;
+
+const LIME = '#cfe07a';
+const DIM = 'rgba(127, 227, 154, 0.45)';
+/**
+ * How each stage of a contact's awareness of us is marked on the scope (F.1, D-215): the colour of its mark and
+ * its search beam, the sign after its label, and the words under the dial. Never colour alone. The keys are
+ * STAGES_OF_AWARENESS in sim/encounters.js; the sounds are STAGE_SOUNDS in audio/patches.js.
+ */
+export const STAGE_MARKS = Object.freeze({
+  passing: Object.freeze({ colour: GREEN, sign: '', words: 'SWEEPING' }),
+  brushed: Object.freeze({ colour: LIME, sign: '~', words: 'BRUSHED US' }),
+  sniff: Object.freeze({ colour: AMBER, sign: '?', words: 'HAS A SNIFF' }),
+  sure: Object.freeze({ colour: RED, sign: '!', words: 'IS SURE' }),
+  searching: Object.freeze({ colour: AMBER, sign: '..', words: 'LOST US, SEARCHING' }),
+  gone: Object.freeze({ colour: DIM, sign: '', words: 'BREAKING OFF' }),
+});
+const markOf = (contact) => (contact.stale || !contact.stage ? null : STAGE_MARKS[contact.stage]);
+/** A colour with its alpha set: rgb(a) or #rrggbb in, rgba out. */
+function fade(colour, alpha) {
+  if (colour.startsWith('#')) return `rgba(${parseInt(colour.slice(1, 3), 16)}, ${parseInt(colour.slice(3, 5), 16)}, ${parseInt(colour.slice(5, 7), 16)}, ${alpha})`;
+  return colour.replace(/[\d.]+\)$/, `${alpha})`);
+}
+
+/** The contact the words under the dial are about: the one closest to finding us (the surest), or null. */
+export function hunter(view) {
+  let best = null;
+  for (const contact of view.contacts) if (markOf(contact) && contact.stage !== 'gone' && (!best || contact.certainty > best.certainty)) best = contact;
+  return best;
+}
+/** The words under the dial for it: "C1 HAS A SNIFF · 46%". */
+export const hunterText = (contact) => `${contact.label} ${STAGE_MARKS[contact.stage].words} · ${Math.round(contact.certainty * 100)}%`;
+
+/**
+ * A contact's search beam (F.1): a fan from its mark, pointing where the beam points. It is drawn against the line
+ * from the mark to us, so a beam that is on us is drawn across us however far out the mark is. A beam combing a
+ * patch has the edges of the patch drawn; one that is sure is a line held on what it is chasing.
+ */
+function drawSweep(ctx, dial, p, contact, mark) {
+  const { sweep } = contact;
+  const gap = Math.hypot(dial.cx - p.x, dial.cy - p.y);
+  if (gap < 4) return;
+  const toUs = Math.atan2(dial.cy - p.y, dial.cx - p.x); // canvas angle from the mark to us
+  const reach = Math.max(34, gap * 1.2);
+  const line = (angle, alpha, dash = []) => {
+    ctx.strokeStyle = fade(mark.colour, alpha);
+    ctx.lineWidth = 1;
+    ctx.setLineDash(dash);
+    ctx.beginPath();
+    ctx.moveTo(p.x, p.y);
+    ctx.lineTo(p.x + Math.cos(angle) * reach, p.y + Math.sin(angle) * reach);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  };
+  if (sweep.mode === 'locked') {
+    line(toUs + sweep.off * RAD, 0.85);
+    return;
+  }
+  if (sweep.mode === 'narrow') {
+    line(toUs + (sweep.centre - sweep.arc) * RAD, 0.3, [2, 4]);
+    line(toUs + (sweep.centre + sweep.arc) * RAD, 0.3, [2, 4]);
+  }
+  const at = toUs + sweep.off * RAD;
+  const glow = ctx.createRadialGradient(p.x, p.y, 2, p.x, p.y, reach);
+  glow.addColorStop(0, fade(mark.colour, 0.5));
+  glow.addColorStop(1, fade(mark.colour, 0.06));
+  ctx.fillStyle = glow;
+  ctx.beginPath();
+  ctx.moveTo(p.x, p.y);
+  ctx.arc(p.x, p.y, reach, at - sweep.beam * RAD, at + sweep.beam * RAD);
+  ctx.closePath();
+  ctx.fill();
+  line(at, 0.7);
+}
+
+/** How sure it is, as a ring round its mark filling clockwise from the top, with a notch where a sniff starts and where it is sure. */
+function drawCertainty(ctx, p, contact, mark, view) {
+  const r = 10;
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = fade(mark.colour, 0.25);
+  ctx.beginPath();
+  ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+  ctx.stroke();
+  if (contact.certainty > 0) {
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = mark.colour;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, r, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.min(1, contact.certainty));
+    ctx.stroke();
+  }
+  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = '#e9dcc3';
+  for (const share of [view.notice, view.sure]) {
+    if (!(share > 0)) continue;
+    const a = -Math.PI / 2 + Math.PI * 2 * share;
+    ctx.beginPath();
+    ctx.moveTo(p.x + Math.cos(a) * (r - 3), p.y + Math.sin(a) * (r - 3));
+    ctx.lineTo(p.x + Math.cos(a) * (r + 3), p.y + Math.sin(a) * (r + 3));
+    ctx.stroke();
+  }
+}
 
 /** A bearing as three digits, the way a helm calls it. */
 export const bearingText = (deg) => String(Math.round(deg) % 360).padStart(3, '0');
@@ -71,10 +172,10 @@ function wedge(ctx, dial, view, contact) {
 }
 
 /**
- * Draw the scope. `view` is scopeView(sim); `selected` a contact id or null; `time` game seconds (for the
- * sweep, which stops with the clock); `active` whether the sensors have power; `reduce` stills the sweep.
+ * Draw the scope. `view` is scopeView(sim); `selected` a contact id or null; `active` whether the sensors have
+ * power; `reduce` stills the rings a look and a ping throw off.
  */
-export function drawScope(ctx, box, view, { selected = null, time = 0, active = true, reduce = false, marks = [] } = {}) {
+export function drawScope(ctx, box, view, { selected = null, active = true, reduce = false, marks = [] } = {}) {
   const dial = scopeDial(box);
   const { cx, cy, r } = dial;
   ctx.save();
@@ -95,7 +196,7 @@ export function drawScope(ctx, box, view, { selected = null, time = 0, active = 
   ctx.fillStyle = 'rgba(127, 227, 154, 0.6)';
   ctx.fillText(`${view.range * KM_PER_UNIT} KM`, box.x + box.w - 10, box.y + 8);
 
-  // The dial: range rings, the cross, and a sweep going round while the clock runs.
+  // The dial: range rings and the cross.
   ctx.save();
   ctx.beginPath();
   ctx.arc(cx, cy, r, 0, Math.PI * 2);
@@ -115,15 +216,7 @@ export function drawScope(ctx, box, view, { selected = null, time = 0, active = 
   ctx.moveTo(cx, cy - r);
   ctx.lineTo(cx, cy + r);
   ctx.stroke();
-  if (!reduce) {
-    const angle = (time * 1.1) % (Math.PI * 2);
-    const sweep = ctx.createConicGradient(angle - Math.PI / 2, cx, cy);
-    sweep.addColorStop(0, 'rgba(127, 227, 154, 0)');
-    sweep.addColorStop(0.92, 'rgba(127, 227, 154, 0)');
-    sweep.addColorStop(1, `rgba(127, 227, 154, ${active ? 0.22 : 0.1})`);
-    ctx.fillStyle = sweep;
-    ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
-  }
+  // No sweep of our own goes round (F.1): the scope only listens, and the beams on it are other ships looking for us.
 
   // Decoys: ours, so we know exactly where they are.
   for (const decoy of view.decoys) {
@@ -166,12 +259,41 @@ export function drawScope(ctx, box, view, { selected = null, time = 0, active = 
     else ctx.fill();
   }
 
+  // Search beams (F.1), under everything else: where each contact is looking, and a ring off us when one crosses us
+  // (bright if it read something), and off it when it pings.
+  for (const contact of view.contacts) {
+    const mark = markOf(contact);
+    if (!mark || !contact.sweep) continue;
+    const p = at(dial, view, contact.bearing, contact.range);
+    drawSweep(ctx, dial, p, contact, mark);
+    const { sinceLook, sincePing, found } = contact.sweep;
+    if (sinceLook !== null && sinceLook < 0.6 && contact.sweep.mode !== 'locked') {
+      ctx.strokeStyle = fade(found ? mark.colour : GREEN, (found ? 0.9 : 0.4) * (1 - sinceLook / 0.6));
+      ctx.lineWidth = found ? 2.5 : 1.5;
+      ctx.beginPath();
+      ctx.arc(cx, cy, reduce ? 16 : 12 + sinceLook * 26, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    if (sincePing !== null && sincePing < 1.6) {
+      for (const lag of [0, 0.35]) {
+        const t = sincePing - lag;
+        if (t < 0) continue;
+        ctx.strokeStyle = fade(AMBER, 0.8 * (1 - t / 1.6));
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, reduce ? 18 : 6 + (t / 1.6) * r * 1.3, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    }
+  }
+
   // Contacts: the patch each could be in, then the best guess at where in it.
   for (const contact of view.contacts) {
-    const hot = contact.state === 'closing' || contact.state === 'alongside';
-    const colour = contact.stale ? 'rgba(127, 227, 154, 0.45)' : hot ? RED : GREEN;
+    const mark = markOf(contact);
+    const hot = contact.stage === 'sure';
+    const colour = mark ? mark.colour : DIM;
     wedge(ctx, dial, view, contact);
-    ctx.fillStyle = contact.stale ? 'rgba(127, 227, 154, 0.07)' : hot ? 'rgba(255, 138, 43, 0.2)' : 'rgba(127, 227, 154, 0.16)';
+    ctx.fillStyle = contact.stale ? 'rgba(127, 227, 154, 0.07)' : fade(colour, hot ? 0.2 : 0.14);
     ctx.fill();
     ctx.strokeStyle = colour;
     ctx.lineWidth = 1;
@@ -194,10 +316,11 @@ export function drawScope(ctx, box, view, { selected = null, time = 0, active = 
       ctx.lineWidth = 1.5;
       ctx.stroke();
     }
+    if (mark && contact.stage !== 'gone') drawCertainty(ctx, p, contact, mark, view);
     if (contact.id === selected) {
       ctx.strokeStyle = '#fff3d6';
       ctx.lineWidth = 1.5;
-      ctx.strokeRect(p.x - 9, p.y - 9, 18, 18);
+      ctx.strokeRect(p.x - 14, p.y - 14, 28, 28);
     }
   }
 
@@ -267,8 +390,9 @@ export function drawScope(ctx, box, view, { selected = null, time = 0, active = 
     const p = at(dial, view, contact.bearing, contact.range);
     const left = p.x > cx + r * 0.45;
     ctx.textAlign = left ? 'right' : 'left';
-    ctx.fillStyle = contact.stale ? 'rgba(127, 227, 154, 0.6)' : contact.state === 'closing' || contact.state === 'alongside' ? RED : GREEN;
-    ctx.fillText(`${contact.label}${contact.stale ? '?' : ''}`, p.x + (left ? -9 : 9), p.y - 8);
+    const mark = markOf(contact);
+    ctx.fillStyle = mark ? mark.colour : 'rgba(127, 227, 154, 0.6)';
+    ctx.fillText(mark ? `${contact.label}${mark.sign}` : `${contact.label}?`, p.x + (left ? -14 : 14), p.y - 12);
   }
 
   for (const mark of marks) {
@@ -279,18 +403,19 @@ export function drawScope(ctx, box, view, { selected = null, time = 0, active = 
     ctx.fillText(mark.label.toUpperCase(), p.x + (left ? -9 : 9), p.y + 9);
   }
 
-  // The helm, in words, under the dial.
+  // The helm, in words, under the dial; and the ship closest to finding us, with how sure it is (F.1).
+  const hunting = hunter(view);
   const lines = [
     `HDG ${bearingText(view.heading)}${Math.abs(((view.wanted - view.heading + 540) % 360) - 180) > 0.5 ? ` > ${bearingText(view.wanted)}` : ''} · ${view.burning ? 'BURNING' : view.speed > 0.01 ? 'DRIFTING' : 'AT REST'}`,
     `${(view.speed * KM_PER_UNIT).toFixed(1)} KM/S${view.speed > 0.01 ? ` ON ${bearingText(view.course)}` : ''} · FLARES ${view.flares}`,
-    view.contacts.length ? `${view.contacts.length} CONTACT${view.contacts.length === 1 ? '' : 'S'} · TAP ONE TO READ IT` : 'NO CONTACTS · TAP THE DIAL TO TURN',
+    hunting ? hunterText(hunting) : view.contacts.length ? `${view.contacts.length} CONTACT${view.contacts.length === 1 ? '' : 'S'} · TAP ONE TO READ IT` : 'NO CONTACTS · TAP THE DIAL TO TURN',
   ];
   ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
   ctx.font = `700 10px ${FONT}`;
   const top = cy + r + 8;
   lines.forEach((line, i) => {
-    ctx.fillStyle = i === 0 && view.burning ? AMBER : i === 2 ? 'rgba(127, 227, 154, 0.6)' : GREEN;
+    ctx.fillStyle = i === 0 && view.burning ? AMBER : i === 2 ? (hunting ? STAGE_MARKS[hunting.stage].colour : 'rgba(127, 227, 154, 0.6)') : GREEN;
     if (top + i * 14 + 12 <= box.y + box.h) ctx.fillText(line, box.x + 10, top + i * 14, box.w - 20);
   });
   ctx.restore();
