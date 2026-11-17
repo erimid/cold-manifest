@@ -25,7 +25,7 @@ export const STAGE_MARKS = Object.freeze({
   sniff: Object.freeze({ colour: AMBER, sign: '?', words: 'HAS A SNIFF' }),
   sure: Object.freeze({ colour: RED, sign: '!', words: 'IS SURE' }),
   searching: Object.freeze({ colour: AMBER, sign: '..', words: 'LOST US, SEARCHING' }),
-  gone: Object.freeze({ colour: DIM, sign: '', words: 'BREAKING OFF' }),
+  gone: Object.freeze({ colour: DIM, sign: '', words: 'LEAVING' }),
 });
 const markOf = (contact) => (contact.stale || !contact.stage ? null : STAGE_MARKS[contact.stage]);
 /** A colour with its alpha set: rgb(a) or #rrggbb in, rgba out. */

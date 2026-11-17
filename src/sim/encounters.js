@@ -139,7 +139,7 @@ export const STAGES_OF_AWARENESS = Object.freeze({
   sniff: 'Has a sniff of us',
   sure: 'Sure of us',
   searching: 'Lost us, and searching',
-  gone: 'Breaking off',
+  gone: 'Leaving',
 });
 
 /** The stage of a contact's awareness of us: a key of STAGES_OF_AWARENESS. */
@@ -367,6 +367,7 @@ export function spawnContact(sim, def, { range = 80, bearing = 0, miss = 20, sid
     watch: 0, // seconds it has shadowed us
     searching: false, // it is looking for us with nothing to go on
     combed: false, // it has reached the place it thought we were, this search
+    sought: 0, // seconds of this search
     sprint: false, // it had us firmly and lost us: it runs to where we were
     chased: 0, // seconds it has spent closing
     held: 0, // seconds alongside
@@ -723,14 +724,8 @@ function stepContact(sim, contact, dt, loud) {
       // Nothing to go on: it goes to where we ought to be (at a run, if it had us a moment ago) and looks
       // around. Its patience is mostly spent there, a little on the way. Its fix on a ship it has just lost
       // is only so good, and worse from far off.
-      if (!contact.searching) {
-        contact.searching = true;
-        contact.combed = false;
-        const off = unit(sim.rng.stream('encounters').range(0, 360));
-        const by = Math.max(SEARCH_ERROR.least, SEARCH_ERROR.ofRange * range) * sim.rng.stream('encounters').range(0.5, 1);
-        est.x += off.x * by;
-        est.y += off.y * by;
-      }
+      if (!contact.searching) beginSearch(sim, contact, range);
+      contact.sought += dt;
       headFor(contact, def, est.x, est.y, contact.sprint ? def.speed.chase : def.speed.cruise, dt, helm, 1);
       const there = Math.hypot(est.x - contact.x, est.y - contact.y) <= SEARCH_RADIUS;
       const spent = there ? dt : dt * SEARCH_ON_THE_WAY;
@@ -742,10 +737,11 @@ function stepContact(sim, contact, dt, loud) {
         if (contact.sweep.pings > 0) ping(sim, contact, def, loud);
       }
     }
-    if (contact.lostFor >= def.patience || (contact.searching && contact.watch >= HUNT.search)) return lose(sim, contact, contact.fooled ? 'decoy' : contact.burnFor > contact.lostFor / 2 ? 'outrun' : 'quiet');
+    if (contact.lostFor >= def.patience || (contact.searching && contact.sought >= HUNT.search)) return lose(sim, contact, contact.fooled ? 'decoy' : contact.burnFor > contact.lostFor / 2 ? 'outrun' : 'quiet');
     // Sure of us, or it has looked long enough and comes in anyway.
     if (contact.aware >= AWARE.close || (contact.aware >= AWARE.notice && contact.watch >= (def.shadow ?? 40))) {
       contact.state = 'closing';
+      contact.searching = false;
       sim.events.emit('contact.closing', info);
     }
     return;
@@ -767,6 +763,7 @@ function stepContact(sim, contact, dt, loud) {
       contact.sprint = true;
       contact.lostFor = 0;
       contact.burnFor = 0;
+      beginSearch(sim, contact, range);
       sim.events.emit('contact.searching', info);
     }
     return;
@@ -792,6 +789,18 @@ function stepContact(sim, contact, dt, loud) {
     // The clamp goes on and its party comes to our lock (H.2, boarders.js).
     startBoarding(sim, def, { contact: contact.id });
   }
+}
+
+/** It has lost us and starts a search: its fix on a ship it has just lost is only so good, and worse from far off. */
+function beginSearch(sim, contact, range) {
+  const rng = sim.rng.stream('encounters');
+  contact.searching = true;
+  contact.combed = false;
+  contact.sought = 0;
+  const off = unit(rng.range(0, 360));
+  const by = Math.max(SEARCH_ERROR.least, SEARCH_ERROR.ofRange * range) * rng.range(0.5, 1);
+  contact.est.x += off.x * by;
+  contact.est.y += off.y * by;
 }
 
 /**
@@ -1052,6 +1061,7 @@ export function shotAt(sim, contact) {
   contact.aware = 1;
   contact.target = null;
   Object.assign(contact.est, { x: 0, y: 0, vx: sim.state.helm.vx, vy: sim.state.helm.vy });
+  contact.searching = false;
   if (contact.state === 'unseen' || contact.state === 'shadowing') {
     contact.state = 'closing';
     sim.events.emit('contact.closing', { contact: contact.id, encounter: def.id, name: def.name, tick: sim.state.tick });
@@ -1280,6 +1290,7 @@ export const ENCOUNTER_COMMANDS = {
       contact.wary = true;
       contact.aware = 1;
       contact.target = null;
+      contact.searching = false;
       Object.assign(contact.est, { x: 0, y: 0, vx: sim.state.helm.vx, vy: sim.state.helm.vy });
       if (contact.state === 'unseen' || contact.state === 'shadowing') {
         contact.state = 'closing';

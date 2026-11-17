@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import { EVENT_SOUNDS, HUNT_TONES, PATCHES, STAGE_SOUNDS, huntTone, validatePatch } from '../src/audio/patches.js';
-import { AWARE, HUNT, STAGES_OF_AWARENESS, contactView, scopeView, stageOf } from '../src/sim/encounters.js';
+import { AWARE, HUNT, STAGES_OF_AWARENESS, contactView, scopeView, shotAt, stageOf } from '../src/sim/encounters.js';
 import { TICK_RATE, checkInvariants, createSim } from '../src/sim/sim.js';
 import { STAGE_MARKS, hunter, hunterText } from '../src/ui/scope.js';
 import { CATALOG, CREW, SHIP, content } from './helpers.js';
@@ -200,4 +200,25 @@ test('a contact is over in about a minute and a half: every kind, lit, dark or r
   lengths.sort((a, b) => a - b);
   assert.ok(lengths[Math.floor(lengths.length / 2)] < 90, `median ${lengths[Math.floor(lengths.length / 2)]} s`);
   assert.ok(lengths.at(-1) <= HUNT.most + 1, `longest ${lengths.at(-1)} s`);
+});
+
+test('a search lasts its own time however long the ship shadowed us first, and a ship that drops a chase goes straight to searching', () => {
+  const sim = newSim('hunt-search-clock');
+  goDark(sim);
+  go(sim, { type: 'debug.contact', encounter: 'drone-carrier', range: 40, bearing: 0, state: 'closing' });
+  const contact = first(sim);
+  contact.watch = HUNT.search + 10; // it shadowed us a long while before it closed
+  contact.searching = true; // and a shot brought it in while it was searching
+  shotAt(sim, contact);
+  const stages = [];
+  sim.events.on('contact.stage', (event) => stages.push(event.stage));
+  let searched = 0;
+  for (let i = 0; i < 120 * TICK_RATE && contact.state !== 'lost'; i++) {
+    sim.step();
+    if (contact.state === 'shadowing' && contact.searching) searched += 1 / TICK_RATE;
+  }
+  assert.ok(stages.includes('searching'), stages.join(' '));
+  assert.ok(!stages.includes('sniff'), `no sniff on the way from sure to searching: ${stages.join(' ')}`);
+  assert.ok(searched > 8, `it searched for ${searched} s before giving up`);
+  assert.ok(searched <= HUNT.search + 1, `and no longer than its search clock: ${searched} s`);
 });
