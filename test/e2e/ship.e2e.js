@@ -1809,9 +1809,12 @@ async function loopTests(browser) {
     await page.tap(`#sit-choice-${n}-sweep`, { force: true }); // locked: nothing happens
     assert.equal(await page.locator(`#sit-result-${n}`).count(), 0);
     // The chip folds the card and opens it again.
+    // The cards are drawn on the next frame: wait for it rather than read the page the instant after the tap.
     await page.tap(`#sit-chip-${n}`);
+    await page.waitForSelector(`#sit-choices-${n}`, { state: 'detached', timeout: 2000 }).catch(() => {});
     assert.equal(await page.locator(`#sit-choices-${n}`).count(), 0, 'folded');
     await page.tap(`#sit-chip-${n}`);
+    await page.waitForSelector(`#sit-choice-${n}-thread`, { timeout: 2000 });
     await page.tap(`#sit-choice-${n}-thread`);
     await page.waitForSelector(`#sit-result-${n}`, { timeout: 3000 });
     assert.match(await page.textContent(`#sit-result-${n}`), /Ilse takes the helm/);
