@@ -40,6 +40,8 @@
 //              Stage 2 are gone with the enemy ship sim (H.3): this mode replaces them.
 //              An encounter still going after ENCOUNTER_MINUTES is a failure. F.1: a contact is over in
 //              about a minute and a half; the report gives the median and the longest, alone and on the crossings
+//              F.2: going quiet is the lamps, sensors, drive and air plant all down; the report gives, kind by kind,
+//              how often each answer gets away and what it cost, and fails no run over it (the target is a report line)
 //   boardings  every kind of party from content/encounters/ at our lock in turn (H.2),
 //              against a bot with one answer: nothing, a bribe at the lock, handing over
 //              what they want, everyone hiding, everyone fighting at the lock, or venting
@@ -66,7 +68,9 @@ import { roundsInHold } from '../src/sim/hold.js';
 import { MANUAL_DOOR_SECONDS, TICK_RATE, TICK_SECONDS, checkInvariants, createSim } from '../src/sim/sim.js';
 import { COAST, bestRoute, cheapestRoute, heldReason, laneBetween, nodeOf, paceOf, routeTotals, whyNoRunIn } from '../src/sim/sector.js';
 import { contractCrates } from '../src/sim/contracts.js';
-import { BLUFFS, ENDINGS, SPAWN, STAGES_OF_AWARENESS, bluffChance, scopeView, whyNoPay } from '../src/sim/encounters.js';
+import { burn } from '../src/sim/senses.js';
+import { chill } from '../src/sim/cold.js';
+import { BLUFFS, ENDINGS, HELM, SPAWN, STAGES_OF_AWARENESS, bearingOf, bluffChance, scopeView, tellsOf, whyNoHail, whyNoPay } from '../src/sim/encounters.js';
 import { BOARD, GOALS, OUTCOMES as BOARD_OUTCOMES, REASONS, whyNoBribe } from '../src/sim/boarders.js';
 import { hidingSpot, lockersFree } from '../src/sim/agents.js';
 import { boardOffers } from '../src/sim/runflow.js';
@@ -535,7 +539,7 @@ function playCrossing(seed, index) {
   const { run } = sim.state;
   const contract = run.contract;
   const end = CROSSING_MINUTES * 60 * TICK_RATE;
-  const tally = { caught: 0, escapes: 0, quick: 0, routes: 0, strikes: 0, risks: {}, time: { under: 0, coast: 0, held: 0, off: 0, port: 0, pace: 0 }, real: 0, fastTicks: 0, busy: {}, died: {}, sighted: 0, lines: 0, outcomes: {}, events: 0, lapsed: 0, placed: 0, attended: 0, sends: 0, eventContacts: 0, shots: 0, braces: 0, tolls: 0, hooks: 0, met: {}, picked: {}, locked: 0, offered: 0, inspections: 0, seized: 0, fuelBought: 0, fuelSpent: 0, repairSpent: 0, claimLeft: false, contacts: {}, contactKinds: {}, contactSeconds: [], stages: {}, pings: 0, pingsFound: 0, looks: { found: 0, blank: 0 }, boardings: {}, staff: { crew: 0, margo: 0, dark: 0, well: 0, samples: 0 }, tired: 0, watchChanges: 0, mode: crewMode, margo: { quiet: 0, book: 0, push: 0, rating: 0, held: 0, samples: 0, hunted: 0, found: 0, stretched: 0, ownWay: 0, doubt: 0, changes: 0 } };
+  const tally = { caught: 0, escapes: 0, quick: 0, routes: 0, strikes: 0, risks: {}, time: { under: 0, coast: 0, held: 0, off: 0, port: 0, pace: 0 }, real: 0, fastTicks: 0, busy: {}, died: {}, sighted: 0, lines: 0, outcomes: {}, events: 0, lapsed: 0, placed: 0, attended: 0, sends: 0, eventContacts: 0, shots: 0, braces: 0, tolls: 0, hooks: 0, met: {}, picked: {}, locked: 0, offered: 0, inspections: 0, seized: 0, fuelBought: 0, fuelSpent: 0, fuelBurned: 0, repairSpent: 0, answers: {}, claimLeft: false, contacts: {}, contactKinds: {}, contactSeconds: [], stages: {}, pings: 0, pingsFound: 0, looks: { found: 0, blank: 0 }, boardings: {}, staff: { crew: 0, margo: 0, dark: 0, well: 0, samples: 0 }, tired: 0, watchChanges: 0, mode: crewMode, margo: { quiet: 0, book: 0, push: 0, rating: 0, held: 0, samples: 0, hunted: 0, found: 0, stretched: 0, ownWay: 0, doubt: 0, changes: 0 } };
   sim.events.on('margo.own_way', () => (tally.margo.ownWay += 1));
   sim.events.on('margo.doubt', () => (tally.margo.doubt += 1));
   sim.events.on('margo.manner', (event) => event.why !== 'order' && (tally.margo.changes += 1));
@@ -547,6 +551,7 @@ function playCrossing(seed, index) {
     tally.fuelSpent += event.cost;
   });
   sim.events.on('port.repaired', (event) => (tally.repairSpent += event.cost));
+  sim.events.on('fuel.burned', (event) => (tally.fuelBurned += event.spent));
   sim.events.on('event.opened', (event) => {
     if (event.event === 'checkpoint.inspection') tally.inspections += 1;
     tally.events += 1;
@@ -626,6 +631,46 @@ function playCrossing(seed, index) {
     if (sim.state.hull.points < sim.state.hull.max * 0.6) give({ type: 'port.repair', what: 'hull' });
     const need = cheapestRoute(run.map, run.at, goal()).fuel + (goal() === run.map.delivery ? 0 : cheapestRoute(run.map, goal(), run.map.delivery).fuel);
     if (run.fuel < Math.min(run.fuelMax, need + 2)) give({ type: 'port.refuel' });
+    if (sim.state.helm.flares < HELM.flares && sim.state.money > 300) give({ type: 'port.flares' });
+  }
+  /**
+   * A careful captain reads the scope (F.2): once Margo has made a hunting ship out, the answer its tells point to,
+   * once for each ship: a story for one that listens, a crate for one after cargo, a flare for one that goes after
+   * them, and the drive for one we can outrun, burning away from it until it gives up or gets close.
+   */
+  const answered = new Set();
+  let runningFrom = null;
+  function answer(live) {
+    if (runningFrom !== null && !live.some((contact) => contact.id === runningFrom && (contact.state === 'shadowing' || contact.state === 'closing'))) {
+      runningFrom = null;
+      give({ type: 'helm.burn', on: false });
+    }
+    for (const contact of live) {
+      if (answered.has(contact.id) || !contact.track.known || !(contact.state === 'shadowing' || contact.state === 'closing')) continue;
+      const tells = new Set(tellsOf(sim.encounters.byId.get(contact.encounter)).map((tell) => tell.key));
+      const best = Object.keys(BLUFFS).sort((a, b) => bluffChance(sim, contact, b) - bluffChance(sim, contact, a))[0];
+      if (tells.has('talks') && !whyNoHail(sim, { contact: contact.id, bluff: best })) {
+        give({ type: 'contact.hail', contact: contact.id, bluff: best });
+        tally.answers.bluff = (tally.answers.bluff ?? 0) + 1;
+      } else if (tells.has('cargo')) {
+        // Loose cargo first; a crate of the contract's own only to save the rest of the hold from a ship that is sure of us.
+        const crates = Object.values(sim.state.crates).filter((item) => item.kind === 'cargo' && item.room && !item.by);
+        const crate = crates.find((item) => !item.contract) ?? (contact.state === 'closing' ? crates.find((item) => item.contract) : null);
+        const hand = crate && ourCrew(sim).map(({ member }) => member).find((member) => member.alive && !member.job && member.task === 'idle' && sim.layout.room(member.room)?.kind !== 'helm');
+        if (!crate || !hand) continue;
+        give({ type: 'crate.jettison', crew: hand.id, crate: crate.id });
+        tally.answers.crate = (tally.answers.crate ?? 0) + 1;
+      } else if (tells.has('flare') && sim.state.helm.flares > 0 && contact.state === 'closing') {
+        give({ type: 'decoy.flare' });
+        tally.answers.flare = (tally.answers.flare ?? 0) + 1;
+      } else if (tells.has('slow') && runningFrom === null && run.fuel > 2) {
+        runningFrom = contact.id;
+        give({ type: 'helm.heading', heading: (bearingOf(contact.x, contact.y) + 180) % 360 });
+        give({ type: 'helm.burn', on: true });
+        tally.answers.run = (tally.answers.run ?? 0) + 1;
+      } else continue;
+      answered.add(contact.id);
+    }
   }
   let lost = false;
   let crewDead = false;
@@ -649,6 +694,7 @@ function playCrossing(seed, index) {
     if (sim.state.tick % TICK_RATE === 0) {
       const live = sim.state.scope.contacts.filter((contact) => contact.state !== 'lost' && contact.track.shown);
       for (const contact of live) if (contact.tolled && !whyNoPay(sim, contact.id)) give({ type: 'contact.pay', contact: contact.id });
+      if (run.crossing) answer(live);
       const slot = gunSlot(sim);
       const threat = live.find((contact) => contact.state === 'closing' || contact.state === 'alongside' || contact.tolled);
       // A careful captain (F.1): the lamps go out the moment a search beam brushes us, and stay out until the
@@ -846,6 +892,8 @@ const CONTACT_MOST_SECONDS = 180;
 const gunReach = (sim) => (gunSlot(sim) >= 0 ? sim.catalog.weapon(sim.state.weapons[gunSlot(sim)].id).range : 0);
 /** What the encounter bot can try. Each seed gives each kind of contact one of them, in turn. */
 const TACTICS = Object.freeze(['nothing', 'quiet', 'run', 'flare', 'crate', 'bluff', 'gun', 'pay']);
+/** No one answer may get away from more than this share of contacts in the encounter mode (PLAN F.2). */
+const ANSWER_MOST = 0.8;
 
 /**
  * One contact on the scope (H.1) and a bot with one idea. Throws on any failure, including an
@@ -860,7 +908,7 @@ function playEncounter(seed, def, tactic) {
   const bot = createRng(`encounter:${def.id}:${tactic}:${seed}`);
   const end = ENCOUNTER_MINUTES * 60 * TICK_RATE;
   const give = (command) => !sim.whyNot(command) && sim.enqueue(command);
-  const tally = { encounter: def.id, tactic, outcome: null, seconds: 0, stages: [], pings: 0, sighted: null, named: false, noticed: false, fooled: 0, hails: 0, flares: 0, crates: 0, shots: 0, struck: 0, incoming: 0, hits: 0, braced: 0, downed: 0, hull: 0, wrecked: false };
+  const tally = { encounter: def.id, wants: def.wants, tactic, outcome: null, seconds: 0, stages: [], pings: 0, sighted: null, named: false, noticed: false, fooled: 0, hails: 0, flares: 0, crates: 0, shots: 0, struck: 0, incoming: 0, hits: 0, braced: 0, downed: 0, hull: 0, wrecked: false, burned: 0, cold: 0, standing: 0, marks: 0, spent: 0 };
   sim.state.money = 200; // enough for a toll or a bribe, so paying is a real answer
   sim.events.on('weapon.fired', () => (tally.shots += 1));
   sim.events.on('pod.downed', () => (tally.downed += 1));
@@ -881,15 +929,17 @@ function playEncounter(seed, def, tactic) {
   sim.events.on('contact.noticed', () => (tally.noticed = true));
   sim.events.on('contact.fooled', () => (tally.fooled += 1));
   sim.events.on('contact.hailed', () => (tally.hails += 1));
+  sim.events.on('reputation.changed', ({ from, to }) => (tally.standing += to - from));
   sim.events.on('encounter.ended', (event) => {
     tally.outcome ??= event.outcome;
     tally.seconds = event.seconds;
   });
   const spawn = { range: bot.range(SPAWN.near, SPAWN.far), bearing: bot.range(0, 360), miss: bot.range(0, SPAWN.miss) };
   const stand = (station, down) => sim.state.stations[station].down !== down && give({ type: 'station.stand', station, down });
+  // Going quiet is everything off that shows (F.2): the lamps, the sensors, the drive and the air plant, so the ship goes cold.
   const dark = () => {
     give({ type: 'lights.all', on: false });
-    for (const station of ['sensors', 'engines']) stand(station, true);
+    for (const station of ['sensors', 'engines', 'life_support']) stand(station, true);
   };
   const fullBurn = (heading) => {
     // All the drive has: the engineer off the reactor and onto the engines.
@@ -953,11 +1003,16 @@ function playEncounter(seed, def, tactic) {
       }
     }
     sim.step();
+    // What the answer costs (F.2): seconds of the drive at full push, and seconds with someone aboard slowed by the cold.
+    tally.burned += burn(sim) * TICK_SECONDS;
+    if (ourCrew(sim).some(({ member }) => member.alive && chill(sim, member) < 1)) tally.cold += TICK_SECONDS;
     if (sim.state.tick % 20 === 0) {
       const problems = checkInvariants(sim);
       if (problems.length) throw new Error(`invariant broken at tick ${sim.state.tick}: ${problems[0]}`);
     }
   }
+  tally.marks = sim.state.scope.marks.length;
+  tally.spent = 200 - sim.state.money;
   if (!tally.outcome) throw new Error(`the ${def.id} was still on the scope after ${ENCOUNTER_MINUTES} minutes (${sim.state.scope.contacts.map((contact) => contact.state).join(', ') || 'no contact'})`);
   tally.hull = sim.state.hull.points;
   if (!ENDINGS[tally.outcome]) throw new Error(`the ${def.id} ended in no known way: "${tally.outcome}"`);
@@ -1229,10 +1284,17 @@ for (const type of [...new Set(crossings.map((c) => c.type))]) {
 }
 out.push(`  inspections:       ${sumOf('inspections')} met, ${sumOf('seized')} found the contraband; ${crossings.filter((c) => c.type === 'salvage' && c.claimLeft).length} salvage claims walked away from`);
 out.push(`  ports:             ${sumOf('fuelBought')} fuel bought for ${sumOf('fuelSpent')} credits, ${sumOf('repairSpent')} credits on repairs; money at the end ${mean(crossings.map((c) => c.money)).toFixed(0)} on average (${Math.min(...crossings.map((c) => c.money))} to ${Math.max(...crossings.map((c) => c.money))})`);
+{
+  const answers = {};
+  for (const c of crossings) for (const [k, n] of Object.entries(c.answers)) answers[k] = (answers[k] ?? 0) + n;
+  out.push(`  careful answers:   from what the scope said of each hunting ship (F.2): ${Object.entries(answers).map(([k, n]) => `${k} ${n}`).join(', ') || 'none'}; ${sumOf('fuelBurned')} fuel burned running from them`);
+}
 out.push(`  standing:          ${mean(crossings.map((c) => c.standing)).toFixed(2)} a crossing on average, all factions together`);
 out.push('');
 const endingList = (list) => Object.keys(ENDINGS).map((k) => [k, list.filter((e) => e.outcome === k).length]).filter(([, n]) => n > 0).map(([k, n]) => `${ENDINGS[k].toLowerCase()} ${n}`).join(', ') || 'none';
-const slipped = (list) => list.filter((e) => e.outcome !== 'docked').length;
+/** A contact got what it came for: it docked, it finished its scan, it spent its drones on us, or an unpaid toll came out of our hull (F.2). */
+const caught = (e) => ['docked', 'scanned', 'swarmed'].includes(e.outcome) || (e.wants === 'toll' && e.outcome !== 'paid' && e.hull < ship.hullPoints);
+const slipped = (list) => list.filter((e) => !caught(e)).length;
 out.push(`Encounters (H.1): ${encounters.length} contacts on the scope, every kind from content/encounters/ (${encounterDefs.length}) against a bot with one idea each`);
 out.push(`  how they ended:    ${endingList(encounters)}`);
 out.push(`  the scope:         a contact showed after ${mean(encounters.filter((e) => e.sighted !== null).map((e) => e.sighted)).toFixed(1)}s on average, ${pct(encounters.filter((e) => e.named).length, encounters.length)} were made out by name, ${pct(encounters.filter((e) => e.noticed).length, encounters.length)} noticed us; ${mean(encounters.map((e) => e.seconds)).toFixed(0)}s an encounter (longest ${Math.max(0, ...encounters.map((e) => e.seconds)).toFixed(0)}s)`);
@@ -1284,6 +1346,30 @@ out.push(`Stations and shifts (H.4): two watches on the crossings, ${POSTS.lengt
   out.push(`  her choices:       of the station time she held, quiet ${pct(her.quiet, her.held)}, by the book ${pct(her.book, her.held)}, pushed ${pct(her.push, her.held)}; her stations ran at ${(her.rating / Math.max(1, her.held)).toFixed(2)} on average`);
   out.push(`  her picture:       something hunting us ${pct(her.hunted, her.samples)} and on us ${pct(her.found, her.samples)} of the time; more to watch than she could ${pct(her.stretched, her.samples)}; ${(her.changes / Math.max(1, crossings.length)).toFixed(1)} changes of her own a crossing`);
   out.push(`  her orders:        on the by-the-book crossings (half of them begun at trust 30) she ran a station her own way ${crossings.reduce((n, c) => n + c.margo.ownWay, 0)} times and said she would not ${crossings.reduce((n, c) => n + c.margo.doubt, 0)} times`);
+}
+{
+  // Every escape costs (F.2): which answer gets away from which kind of contact, and what it cost.
+  out.push(`Every escape costs (F.2): got away, by kind of contact and the bot's one answer (target: no answer gets away from more than ${Math.round(100 * ANSWER_MOST)}%, and each is the best against at least one kind)`);
+  const away = (list) => (list.length ? list.filter((e) => !caught(e)).length / list.length : null);
+  const cell = (share) => (share === null ? '  -' : `${Math.round(100 * share)}`.padStart(3) + '%');
+  out.push(`  ${''.padEnd(18)} ${TACTICS.map((t) => t.padStart(7)).join('')}`);
+  const bestOf = {};
+  for (const def of encounterDefs) {
+    const shares = TACTICS.map((t) => away(encounters.filter((e) => e.encounter === def.id && e.tactic === t)));
+    const top = Math.max(...shares.map((x) => x ?? -1));
+    TACTICS.forEach((t, i) => { if (t !== 'nothing' && shares[i] !== null && shares[i] >= top - 1e-9) (bestOf[t] ??= []).push(def.id); });
+    out.push(`  ${def.id.padEnd(18)} ${shares.map((x) => cell(x).padStart(7)).join('')}`);
+  }
+  const overall = TACTICS.map((t) => away(encounters.filter((e) => e.tactic === t)));
+  out.push(`  ${'all kinds'.padEnd(18)} ${overall.map((x) => cell(x).padStart(7)).join('')}`);
+  const tooGood = TACTICS.filter((t, i) => overall[i] !== null && overall[i] > ANSWER_MOST);
+  const neverBest = TACTICS.filter((t) => t !== 'nothing' && !bestOf[t]);
+  for (const t of TACTICS.filter((x) => x !== 'nothing')) {
+    const of = encounters.filter((e) => e.tactic === t);
+    const avg = (key) => mean(of.map((e) => e[key]));
+    out.push(`  cost of ${t.padEnd(10)} drive ${avg('burned').toFixed(0)} s at full push, someone cold ${avg('cold').toFixed(0)} s, hull ${mean(of.map((e) => ship.hullPoints - e.hull)).toFixed(1)}, ${avg('spent').toFixed(0)} credits, standing ${avg('standing').toFixed(1)} (and ${of.reduce((n, e) => n + e.marks, 0)} lies to be found out), ${avg('flares').toFixed(1)} flares, ${avg('crates').toFixed(1)} crates, ${avg('shots').toFixed(1)} rounds`);
+  }
+  out.push(`  dominance:         ${tooGood.length ? `NOT MET: ${tooGood.join(', ')} get away from more than ${Math.round(100 * ANSWER_MOST)}%` : 'met'}; best against a kind: ${TACTICS.filter((t) => t !== 'nothing').map((t) => `${t} ${bestOf[t]?.join('/') ?? 'NONE'}`).join(', ')}${neverBest.length ? ` (NOT MET: ${neverBest.join(', ')})` : ''}`);
 }
 out.push(`Guns as deterrents (H.3): the same encounters, by what was fired and what it did`);
 for (const def of encounterDefs) {

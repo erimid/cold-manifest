@@ -98,7 +98,7 @@ test('the port screen offers every service with its price or the reason it canno
   let view = portView(sim);
   assert.equal(view.isDrop, false);
   const by = Object.fromEntries(view.services.map((service) => [service.id, service]));
-  assert.deepEqual(Object.keys(by), ['refuel', 'repair-hull', 'repair-systems', 'sell-salvage', 'sell-contract', 'abandon']);
+  assert.deepEqual(Object.keys(by), ['refuel', 'flares', 'repair-hull', 'repair-systems', 'sell-salvage', 'sell-contract', 'abandon']);
   assert.equal(by.refuel.why, null);
   assert.match(by.refuel.detail, /6 units, 72 credits/);
   assert.match(by['repair-hull'].detail, /3 points, 30 credits/);
@@ -108,7 +108,8 @@ test('the port screen offers every service with its price or the reason it canno
   assert.equal(by['sell-contract'].danger, true);
   assert.equal(view.deliver, null);
   assert.equal(view.canRetire, true);
-  assert.deepEqual(view.facts.map(([label]) => label), ['Money', 'Fuel', 'Hull', 'Contract']);
+  assert.deepEqual(view.facts.map(([label]) => label), ['Money', 'Fuel', 'Flares', 'Hull', 'Contract']);
+  assert.match(by.flares.why, /rack is full/);
   assert.match(Object.fromEntries(view.facts).Contract, /Smuggling: 4 of 4 crates aboard/);
   // Money short: as much fuel as it buys.
   sim.state.money = 30;

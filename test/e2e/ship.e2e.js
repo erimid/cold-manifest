@@ -1551,6 +1551,12 @@ async function loopTests(browser) {
       if (now !== 'ship') return now;
       if ((await situationsWaiting(page)).length) return 'situation';
       const phase = await game(page, () => window.coldManifest.sim.state.run.crossing?.phase ?? null);
+      // Ships on the scope are the scope suite's business: here they are cleared as she skips along (F.2: faster ships
+      // with radar dock on a slow runner, and a party aboard can take the hand the situation check below needs).
+      await game(page, () => {
+        const { sim } = window.coldManifest;
+        if (sim.state.scope.contacts.length && !sim.state.boarding) sim.enqueue({ type: 'debug.contact', clear: true });
+      });
       if (phase === 'under way') await game(page, () => !window.coldManifest.sim.whyNot({ type: 'debug.run', skip: true }) && window.coldManifest.sim.enqueue({ type: 'debug.run', skip: true }));
       else if (phase === 'off port') {
         await game(page, () => window.coldManifest.sim.enqueue({ type: 'debug.run', fix: true }));
@@ -1701,8 +1707,15 @@ async function loopTests(browser) {
     await game(page, () => {
       const { sim } = window.coldManifest;
       for (const member of Object.values(sim.state.crew)) if (member.alive && (member.room === 'cargo' || member.goal === 'cargo')) sim.enqueue({ type: 'crew.move', crew: member.id, room: 'quarters', ship: 'us' });
+      // Vesna is the one picked below: she waits in the quarters, clear of the hold's crates (a tap on her among
+      // them on CI's slow runner landed on a crate).
+      if (sim.state.crew.vesna.room !== 'quarters') sim.enqueue({ type: 'crew.move', crew: 'vesna', room: 'quarters', ship: 'us' });
     });
     await page.waitForFunction(() => Object.values(window.coldManifest.sim.state.crew).every((m) => !m.alive || (m.room !== 'cargo' && m.goal !== 'cargo')), null, { timeout: 45000 });
+    await page.waitForFunction(() => {
+      const vesna = window.coldManifest.sim.state.crew.vesna;
+      return vesna.room === 'quarters' && !vesna.path.length;
+    }, null, { timeout: 45000 });
     await game(page, () => {
       const { sim, shipView } = window.coldManifest;
       shipView.openChart(false);
@@ -1728,7 +1741,7 @@ async function loopTests(browser) {
       await page.touchscreen.tap(pick.x, pick.y);
       const took = await page.waitForFunction((n) => /^Send Vesna/.test(document.querySelector(`#sit-send-${n}`)?.textContent ?? ''), leak, { timeout: 2000 }).then(() => true, () => false);
       if (took) break;
-      assert.ok(tries < 4, 'a tap on Vesna picks her');
+      assert.ok(tries < 4, `a tap on Vesna picks her (${await game(page, () => JSON.stringify((({ alive, room, task }) => ({ alive, room, task }))(window.coldManifest.sim.state.crew.vesna)))})`);
     }
     await page.tap(`#sit-send-${leak}`);
     await page.waitForFunction((n) => document.querySelector(`#sit-${n}`)?.dataset.state === 'attended', leak, { timeout: 45000 });

@@ -153,6 +153,14 @@ export function stageOf(contact) {
 /** Inside this range a ship is seen by eye, however dark it runs: added to what the sensors read. */
 export const EYES = Object.freeze({ range: 6, strength: 0.3 });
 
+/**
+ * Every escape costs (F.2, D-218). A contact with a `radar` reads our hull itself, however dark we run, as strongly as
+ * its `strength` close in and falling to nothing at its `reach`: going quiet does not hide us from it, only distance does.
+ * A bluff it does not believe costs standing with its faction (`caught`), and one it does can still be found out
+ * later (`found`, at `foundChance`).
+ */
+export const BLUFF_COST = Object.freeze({ caught: -3, found: -1, foundChance: 0.3 });
+
 /** How close is alongside, and how close a contact gets to a decoy before it knows what it is. */
 export const ALONGSIDE = 3;
 /** What a decoy gives off, how long it lasts and how fast it leaves us. A flare also lights us up for a moment. */
@@ -194,7 +202,7 @@ const turnBetween = (from, to) => ((to - from + 540) % 360) - 180;
 /** Problems with an encounter definition (content/encounters/), as readable strings. `refs` holds weapons, encounters, factions and node kinds by id. */
 export function validateEncounter(item, refs = {}) {
   const problems = [];
-  const allowed = ['id', 'note', 'name', 'class', 'blurb', 'wants', 'at', 'weight', 'signature', 'sensors', 'reach', 'keen', 'notice', 'sure', 'speed', 'accel', 'standoff', 'shadow', 'patience', 'chase', 'decoys', 'bluffs', 'alongside', 'party', 'nerve', 'guns', 'drones', 'pods', 'toll', 'scan', 'pings'];
+  const allowed = ['id', 'note', 'name', 'class', 'blurb', 'wants', 'at', 'weight', 'signature', 'sensors', 'reach', 'keen', 'notice', 'sure', 'speed', 'accel', 'standoff', 'shadow', 'patience', 'chase', 'decoys', 'bluffs', 'alongside', 'party', 'nerve', 'guns', 'drones', 'pods', 'toll', 'scan', 'pings', 'radar'];
   for (const key of Object.keys(item)) if (!allowed.includes(key) && key !== '_file') problems.push(`unknown key "${key}"`);
   const text = (v) => typeof v === 'string' && v.trim().length > 0;
   const positive = (v) => typeof v === 'number' && Number.isFinite(v) && v > 0;
@@ -239,6 +247,7 @@ export function validateEncounter(item, refs = {}) {
     if (!positive(item.standoff)) problems.push('a ship that never docks needs a standoff: how far off it holds once it has us');
   }
   if (item.party?.faction && refs.factions && !refs.factions.has(item.party.faction)) problems.push(`party.faction: no faction "${item.party.faction}"`);
+  if (item.radar !== undefined && !(item.radar && positive(item.radar.reach) && share(item.radar.strength) && Object.keys(item.radar).every((key) => ['reach', 'strength'].includes(key)))) problems.push('radar must be { reach, strength }: how far its radar finds a dark hull, and how strongly close in (0 to 1)');
   if (item.pings !== undefined && !(Number.isInteger(item.pings) && item.pings >= 0)) problems.push('pings must be a whole number, 0 or more: how many times it will ping for a ship it cannot find');
   if (item.nerve !== undefined && !(typeof item.nerve === 'number' && item.nerve >= 0)) problems.push('nerve must be a number, 0 or more: how much of our gun it takes to break off (0: it never does)');
   const guns = item.guns;
@@ -302,6 +311,7 @@ export function newScopeState() {
     pods: [], // boarding pods in the air: { id, contact, encounter, lands }
     next: 1, // the next contact, decoy, drone or pod number
     record: [], // encounters that have ended: { encounter, outcome, seconds, tick }
+    marks: [], // bluffs that worked but will be found out (F.2): { faction, encounter }; the word reaches the next port before we do
   };
 }
 
@@ -436,6 +446,28 @@ export function returnQuality(sim, contact) {
   return clamp01(reading / SCOPE.clear);
 }
 
+/**
+ * What Margo knows of a kind of ship once she has made it out (F.2, D-219): what beats it and what does not, in a
+ * few words each, so a careful captain can pick an answer. Keys, in the order shown: radar, fast, slow, cargo,
+ * flare, talks, deaf, nerve, steady, toll, pings.
+ */
+export function tellsOf(def) {
+  const tells = [];
+  const best = Math.max(0, ...Object.values(def.bluffs ?? {}));
+  if (def.radar) tells.push({ key: 'radar', text: `Radar: going dark will not hide us inside ${Math.round(def.radar.reach * KM_PER_UNIT)} km` });
+  if (def.pings >= 2) tells.push({ key: 'pings', text: 'Pings for a quiet ship' });
+  if (def.speed.chase > HELM.speed) tells.push({ key: 'fast', text: 'Faster than us: running only buys time' });
+  else tells.push({ key: 'slow', text: 'We can outrun it' });
+  if ((def.decoys?.crate ?? 0) >= 1) tells.push({ key: 'cargo', text: 'After cargo: a crate may send it home' });
+  if ((def.decoys?.flare ?? 0) >= 1) tells.push({ key: 'flare', text: 'Goes after a flare' });
+  if (best >= 0.5) tells.push({ key: 'talks', text: 'Will listen to a good story' });
+  else if (!def.bluffs) tells.push({ key: 'deaf', text: 'Nobody aboard to lie to' });
+  if (def.toll) tells.push({ key: 'toll', text: `Lets us pass for ${def.toll.cost}` });
+  if ((def.nerve ?? 0) === 0) tells.push({ key: 'steady', text: 'Will not be shot off' });
+  else if (def.nerve <= 1) tells.push({ key: 'nerve', text: 'Breaks off at the first round' });
+  return tells;
+}
+
 const INTENT = Object.freeze({ unseen: 'On its own course', shadowing: 'Looking for something', closing: 'Closing on us', alongside: 'Alongside', docked: 'Docked', lost: 'Breaking off' });
 
 /**
@@ -449,7 +481,7 @@ export function contactView(sim, contact) {
   if (!track.shown) {
     if (!track.ghost) return null;
     const { ghost } = track;
-    return { id: contact.id, label, name: ghost.name, known: ghost.known, intent: 'Lost in the clutter', stage: null, stageText: 'Lost in the clutter', certainty: 0, sweep: null, state: null, bearing: ghost.bearing, range: ghost.range, bearingError: ghost.bearingError, rangeError: ghost.rangeError, quality: 0, stale: true, age: sim.state.tick - ghost.tick };
+    return { id: contact.id, label, name: ghost.name, known: ghost.known, intent: 'Lost in the clutter', stage: null, stageText: 'Lost in the clutter', certainty: 0, sweep: null, tells: [], state: null, bearing: ghost.bearing, range: ghost.range, bearingError: ghost.bearingError, rangeError: ghost.rangeError, quality: 0, stale: true, age: sim.state.tick - ghost.tick };
   }
   const def = defOf(sim, contact);
   const error = errorOf(track.q);
@@ -468,6 +500,7 @@ export function contactView(sim, contact) {
     quality: track.q,
     stale: false,
     age: 0,
+    tells: track.known ? tellsOf(def) : [],
     ...awarenessView(sim, contact),
   };
 }
@@ -577,8 +610,8 @@ const falloff = (distance, reach) => Math.max(0, 1 - distance / reach);
 export function readingOf(sim, contact, loud = signature(sim).total) {
   const def = defOf(sim, contact);
   const range = rangeOf(contact.x, contact.y);
-  // Close enough, a hull is seen by eye whatever it gives off.
-  return loud * def.sensors * falloff(range, def.reach) + EYES.strength * falloff(range, EYES.range);
+  // Close enough, a hull is seen by eye whatever it gives off; and a radar finds a hull however dark it runs (F.2).
+  return loud * def.sensors * falloff(range, def.reach) + EYES.strength * falloff(range, EYES.range) + (def.radar ? def.radar.strength * falloff(range, def.radar.reach) : 0);
 }
 
 /** The decoy a contact would rather chase than us, or null. */
@@ -1193,8 +1226,14 @@ export function attachEncounters(sim) {
   sim.events.on('crate.jettisoned', (event) => {
     if (event.kind !== 'ammo') dropDecoy(sim, 'crate', { crate: event.crate, label: event.label });
   });
-  sim.events.on('sector.jumped', () => {
+  sim.events.on('sector.jumped', ({ kind }) => {
     const { scope, helm } = sim.state;
+    // A lie that was found out (F.2): the word is at the port when we get in.
+    if (kind === 'port' && scope.marks?.length) {
+      for (const mark of scope.marks) changeReputation(sim, mark.faction, BLUFF_COST.found, 'bluff-found');
+      sim.events.emit('bluff.found', { marks: scope.marks.length, factions: [...new Set(scope.marks.map((mark) => mark.faction))], tick: sim.state.tick });
+      scope.marks = [];
+    }
     for (const contact of [...scope.contacts]) {
       if (contact.state !== 'lost') record(sim, contact, 'jumped');
     }
@@ -1285,7 +1324,14 @@ export const ENCOUNTER_COMMANDS = {
       const ok = sim.rng.stream('tactics').chance(chance);
       contact.tried.push(cmd.bluff);
       sim.events.emit('contact.hailed', { contact: contact.id, encounter: def.id, name: def.name, bluff: cmd.bluff, ok, chance, tick: sim.state.tick });
-      if (ok) return lose(sim, contact, 'bluff');
+      // A lie leaves a mark (F.2): one they see through costs standing with whoever they answer to at once, and
+      // one they swallow can still be found out, and the word is waiting at the next port.
+      const faction = def.party?.faction ?? null;
+      if (ok) {
+        if (faction && sim.rng.stream('tactics').chance(BLUFF_COST.foundChance)) sim.state.scope.marks.push({ faction, encounter: def.id });
+        return lose(sim, contact, 'bluff');
+      }
+      if (faction) changeReputation(sim, faction, BLUFF_COST.caught, 'bluff-caught');
       // A transmission is a bearing: it has us now, and it has heard enough.
       contact.wary = true;
       contact.aware = 1;

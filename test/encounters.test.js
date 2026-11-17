@@ -229,7 +229,7 @@ test('a ship that docks puts its party at our lock (H.2), and a second one waits
   const sim = newSim('dock-party');
   seconds(sim, 1);
   spawn(sim, 'patrol-cutter', { range: 30, bearing: 0, state: 'closing' });
-  spawn(sim, 'raider-skiff', { range: 30, bearing: 180, state: 'closing' });
+  spawn(sim, 'raider-skiff', { range: 50, bearing: 180, state: 'closing' }); // further out: a skiff is the faster of the two (F.2)
   const result = play(sim, 200);
   assert.equal(result.outcome, 'docked');
   assert.equal(sim.state.fight, undefined, 'no duel any more');
@@ -304,11 +304,11 @@ test('slipped by going quiet: a cutter that would have found us lit passes a dar
   assert.ok(lost.heard.includes('lost'));
 });
 
-test('slipped by out-running it: a raider closing on us is left behind at full burn, and catches a ship that sits still', () => {
+test('slipped by out-running it: a scrap hauler closing on us is left behind at full burn, and catches a ship that sits still', () => {
   const chase = (act) => {
     const sim = quietSim('outrun');
     seconds(sim, 1);
-    spawn(sim, 'raider-skiff', { range: 45, bearing: 0, state: 'closing' });
+    spawn(sim, 'scrap-hauler', { range: 25, bearing: 0, state: 'closing' });
     act(sim);
     return play(sim);
   };
@@ -319,7 +319,7 @@ test('slipped by out-running it: a raider closing on us is left behind at full b
     go(sim, { type: 'helm.burn', on: true });
   });
   assert.equal(run.outcome, 'outrun');
-  // The cutter is faster than we are: the same run does not shake it.
+  // The cutter is faster than we are (and since F.2 so is a raider): the same run does not shake it.
   const sim = quietSim('outrun-cutter');
   seconds(sim, 1);
   spawn(sim, 'patrol-cutter', { range: 45, bearing: 0, state: 'closing' });

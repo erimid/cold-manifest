@@ -7,7 +7,8 @@
 import { createRng } from '../engine/rng.js';
 import { ourCrew } from './combat.js';
 import { CONTRACT_TYPES, FAILURES, cargoCount, contractCrates, contractOf, settlement } from './contracts.js';
-import { FREE_PORT, portHere, refuelQuote, repairQuote, saleQuote } from './port.js';
+import { HELM } from './encounters.js';
+import { FREE_PORT, flareQuote, portHere, refuelQuote, repairQuote, saleQuote } from './port.js';
 import { nodeOf } from './sector.js';
 
 /** How many contracts the board shows: one of each type there is. */
@@ -175,6 +176,8 @@ export function portView(sim) {
 
   const fuel = refuelQuote(sim);
   add('refuel', { type: 'port.refuel' }, 'Refuel', fuel.units < fuel.want && fuel.units ? `All we can pay for: ${fuel.units} of ${fuel.want}, ${credits(fuel.cost)}` : `${plural(fuel.want, 'unit')}, ${credits(fuel.want * fuel.price)}`);
+  const flares = flareQuote(sim);
+  add('flares', { type: 'port.flares' }, 'Buy flares', flares.units < flares.want && flares.units ? `All we can pay for: ${flares.units} of ${flares.want}, ${credits(flares.cost)}` : `${plural(flares.want, 'flare')}, ${credits(flares.want * flares.price)}`);
   const hull = repairQuote(sim, 'hull');
   add('repair-hull', { type: 'port.repair', what: 'hull' }, 'Patch the hull', hull.units < hull.want && hull.units ? `${hull.units} of ${hull.want} points, ${credits(hull.cost)}` : `${plural(hull.want, 'point')}, ${credits(hull.want * hull.price)}`);
   const systems = repairQuote(sim, 'systems');
@@ -196,6 +199,7 @@ export function portView(sim) {
   const facts = [
     ['Money', String(sim.state.money)],
     ['Fuel', `${run.fuel} of ${run.fuelMax}`],
+    ['Flares', `${sim.state.helm.flares} of ${HELM.flares}`],
     ['Hull', `${sim.state.hull.points} of ${sim.state.hull.max}`],
     ['Contract', contractLine(sim)],
   ];

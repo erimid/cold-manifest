@@ -49,6 +49,7 @@
 import { LIFT_LOAD, POWERED, OUTPUT, OUTPUT_LEVELS, aiCoreStatus, live, liftRuns, litRooms, outputLimit, outputOf, reactorUp, setOutput, usable } from './power.js';
 import { ROLES, skillOf } from './roles.js';
 import { tiredness } from './watches.js';
+import { chill } from './cold.js';
 
 export const STATIONS = Object.freeze({
   helm: { name: 'Helm', skill: 'piloting', kind: 'helm', blurb: 'Brings her round and takes the fix for a jump. A good pilot does both faster.' },
@@ -184,7 +185,7 @@ export function rating(sim, id) {
   if (by === null) return 0;
   const pace = outputOf(sim).pace;
   if (id === 'ai_core') return pace > 0 ? 1 : 0;
-  if (by !== 'margo') return crewRating(sim.state.crew[by], STATIONS[id].skill) * pace;
+  if (by !== 'margo') return crewRating(sim.state.crew[by], STATIONS[id].skill) * chill(sim, sim.state.crew[by]) * pace;
   if (id === 'reactor') return MARGO_RATING * pace;
   if (sim.state.ai?.mind !== 'own') return MARGO_RATING * MANNERS[sim.state.stations[id].runs ?? 'book'].rating * pace;
   return buildTable(sim).rating[id] ?? 0;
@@ -324,7 +325,7 @@ function buildTable(sim) {
     const member = operator[id];
     if (member) {
       holder[id] = member.id;
-      value[id] = crewRating(member, skill) * pace;
+      value[id] = crewRating(member, skill) * chill(sim, member) * pace; // a cold hand is a slow one (F.2)
       continue;
     }
     if (!margo || stations[id].cover === 'crew') continue;

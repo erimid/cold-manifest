@@ -29,7 +29,7 @@
 // from 'voyage' and 'encounters') and kept in `sim.state.run`, so a run
 // replays from its seed and saves with the rest.
 
-import { THRUST, driveShare } from './senses.js';
+import { THRUST, burn, driveShare } from './senses.js';
 import { hasPilot, strike, stepFix, whyNoJump } from './combat.js';
 import { findContact, heldAlongside, liveContacts, SPAWN, spawnContact } from './encounters.js';
 import { rating } from './stations.js';
@@ -47,6 +47,14 @@ export const NODE_KINDS = Object.freeze({
 
 /** Fuel a lane costs: a short one, and a long one. */
 export const LANE_FUEL = Object.freeze({ short: 1, long: 2 });
+
+/**
+ * Running costs (F.2, D-221). Every `fuel` seconds of the drive at its full push burns a unit of fuel, on top of
+ * the lanes. And a hard burn is seen a long way off: `wake` seconds of it at full push leave a wake that lights us
+ * up for the next lane, where the lane brings up to `more` times as many ships again, and each one turns up with
+ * up to `aware` of a sniff of us already and a fair idea where to look.
+ */
+export const RUNNING = Object.freeze({ fuel: 60, wake: 30, more: 1, aware: 0.4 });
 
 /** The kinds of `where` a lane risk can have (content/sectors/). */
 export const RISK_WHERE = Object.freeze(['touches', 'beacon', 'union', 'default']);
@@ -365,6 +373,8 @@ export function newRunState(def, rng, { pursuit, slack: spare } = {}) {
     visited: [map.start],
     fuel: def.fuel.start,
     fuelMax: def.fuel.max,
+    burned: 0, // seconds of the drive at full push toward the next unit of fuel it burns (F.2)
+    wake: 0, // 0 to 1: how lit up our burning has left us for the next lane (F.2)
     hour: SHIP_HOUR, // seconds of ship time to an hour on the ship clock (shipclock.js, H.8)
     risks: Object.fromEntries((def.risks ?? []).map((risk) => [risk.id, risk])),
     hours: 0, // ship hours under way since the origin
@@ -498,7 +508,9 @@ function startLeg(sim) {
     return;
   }
   run.fuel -= lane.fuel;
-  Object.assign(c, { t: 0, length: lane.hours, eventAt: null });
+  // The wake we left on the last lane is what this one sees of us (F.2).
+  Object.assign(c, { t: 0, length: lane.hours, eventAt: null, wake: run.wake ?? 0 });
+  run.wake = 0;
   // The first time we pass a point its dice are thrown once; what comes, comes somewhere along the lane to it.
   // The contract's claim comes before anything the dice would bring: passing it opens the claim (endLeg).
   const state = run.events;
@@ -564,6 +576,7 @@ export function stepSector(sim, dt) {
   const hours = dt / run.hour;
   run.hours += hours;
   c.hours += hours;
+  stepRunning(sim, dt);
   if (!run.late && !run.delivered && run.hours > run.deadline) {
     run.late = true;
     sim.events.emit('contract.late', { hours: Math.floor(run.hours), deadline: run.deadline, tick: sim.state.tick });
@@ -582,18 +595,38 @@ export function stepSector(sim, dt) {
   stepPursuit(sim, hours);
 }
 
+/** A hard burn on the scope (F.2): it drinks fuel and leaves a wake for the next lane. */
+function stepRunning(sim, dt) {
+  const run = sim.state.run;
+  const push = burn(sim);
+  if (push <= 0) return;
+  run.wake = Math.min(1, (run.wake ?? 0) + (push * dt) / RUNNING.wake);
+  run.burned = (run.burned ?? 0) + push * dt;
+  if (run.burned < RUNNING.fuel) return;
+  run.burned -= RUNNING.fuel;
+  const was = run.fuel;
+  run.fuel = Math.max(0, run.fuel - 1);
+  sim.events.emit('fuel.burned', { fuel: run.fuel, spent: was - run.fuel, tick: sim.state.tick });
+}
+
 /** What a lane's risk brings, hour by hour: ships on the scope, and things hitting the hull. */
 function laneRisks(sim, risk, hours) {
   const run = sim.state.run;
+  const wake = run.crossing.wake ?? 0;
   if (risk.contacts > 0 && !run.delivered && liveContacts(sim).length < MAX_LANE_CONTACTS) {
     const rng = sim.rng.stream('encounters');
-    if (rng.chance(risk.contacts * hours)) {
+    if (rng.chance(risk.contacts * (1 + RUNNING.more * wake) * hours)) {
       const pool = Object.entries(risk.encounters ?? {}).filter(([id, weight]) => weight > 0 && sim.encounters.byId.has(id));
       if (pool.length) {
         const def = sim.encounters.byId.get(rng.weighted(pool, ([, weight]) => weight)[0]);
         // Far enough out that a ship with her sensors up sees it before it can see her: there is time to do something.
         const contact = spawnContact(sim, def, { range: rng.range(SPAWN.near, SPAWN.far), bearing: rng.range(0, 360), miss: rng.range(0, SPAWN.miss), side: rng.chance(0.5) ? 1 : -1 });
         contact.lane = risk.id;
+        // Our wake from the last lane (F.2): it comes in with a sniff of us, and knows which way to look.
+        if (wake > 0) {
+          contact.aware = Math.max(contact.aware, RUNNING.aware * wake);
+          contact.wake = true;
+        }
       }
     }
   }

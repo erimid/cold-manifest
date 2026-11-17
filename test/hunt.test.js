@@ -91,7 +91,8 @@ test('with a sniff it doubles back: the beam combs the patch we are in, and look
 
 test('go dark on a ship with a sniff and its certainty falls look by look; it searches, pings, and gives up', () => {
   const sim = newSim('hunt-dark');
-  go(sim, { type: 'debug.contact', encounter: 'patrol-cutter', range: 55, bearing: 100, miss: 20 });
+  // A bounty tender: no radar (F.2), so a dark ship is hidden from all but its ping.
+  go(sim, { type: 'debug.contact', encounter: 'bounty-tender', range: 55, bearing: 100, miss: 20 });
   let dark = false;
   const heard = hunt(sim, {
     each(s) {
@@ -115,7 +116,7 @@ test('a ping reads a dark ship that a beam cannot, if it is close; and it shows 
   const reads = (range) => {
     const sim = newSim('hunt-ping');
     goDark(sim);
-    go(sim, { type: 'debug.contact', encounter: 'patrol-cutter', range, bearing: 0, miss: range });
+    go(sim, { type: 'debug.contact', encounter: 'bounty-tender', range, bearing: 0, miss: range }); // no radar (F.2)
     return { sim, ...hunt(sim, { each: (s, h) => h.pings.length && h.looks.at(-1).tick < s.state.tick - TICK_RATE && (h.ended = h.ended ?? { outcome: 'stopped' }) }) };
   };
   const near = reads(20);
@@ -123,8 +124,8 @@ test('a ping reads a dark ship that a beam cannot, if it is close; and it shows 
   assert.equal(near.pings.length, 1, 'so after a few empty sweeps it pings');
   assert.equal(near.pings[0].found, true, 'and close in, the ping finds us');
   assert.equal(first(near.sim).track.known, true, 'a ping gives it away: we know what it is now');
-  assert.equal(first(near.sim).sweep.pings, 1, 'and it has one fewer left');
-  const far = reads(70);
+  assert.equal(first(near.sim).sweep.pings, ENCOUNTERS.find((def) => def.id === 'bounty-tender').pings - 1, 'and it has one fewer left');
+  const far = reads(95);
   assert.equal(far.pings[0]?.found ?? false, false, 'from far off it does not');
 });
 

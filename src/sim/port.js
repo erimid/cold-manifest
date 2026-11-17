@@ -5,16 +5,18 @@
 // nothing, so the sandbox and old tests are unchanged. The services, all paid in credits and all
 // settled at once (the clock is stopped on the port screen):
 //   port.refuel   fill the tanks, or as much of them as the money buys
+//   port.flares   fill the flare rack (F.2), where fuel is sold, at the port's `flare` price each
 //   port.repair   mend the hull ("hull") or every damaged system ("systems"), as far as the money goes
 //   port.sell     sell loose salvage at the yard ("salvage"), or the contract's own cargo ("contract"),
 //                 which fails the contract (contracts.js)
 // Hiring is a stub until Stage 4.
 
 import { addMoney, contractActive, contractOf, failContract } from './contracts.js';
+import { HELM } from './encounters.js';
 import { nodeOf } from './sector.js';
 
 /** The port a sim with no port content uses: everything free, as it was before ports had prices. */
-export const FREE_PORT = Object.freeze({ id: 'free', name: 'Port', text: 'A dock.', fuel: 0, hull: 0, system: 0, salvage: 0, services: Object.freeze(['refuel', 'repair', 'sell', 'hire']) });
+export const FREE_PORT = Object.freeze({ id: 'free', name: 'Port', text: 'A dock.', fuel: 0, flare: 0, hull: 0, system: 0, salvage: 0, services: Object.freeze(['refuel', 'repair', 'sell', 'hire']) });
 export const SERVICES = Object.freeze(['refuel', 'repair', 'sell', 'hire']);
 export const REPAIRS = Object.freeze(['hull', 'systems']);
 export const SALES = Object.freeze(['salvage', 'contract']);
@@ -31,7 +33,7 @@ function whyNoPort(sim, service) {
   const run = sim.state.run;
   if (!run) return 'there is no chart for this run';
   const port = portHere(sim);
-  if (!port) return 'only a port has that';
+  if (!port || run.crossing) return 'only a port has that'; // under way, the port we left is behind us
   if (sim.state.boarding) return 'not with a party at the lock';
   if (!(port.services ?? SERVICES).includes(service)) return `${port.name} does not offer that`;
   return null;
@@ -58,6 +60,26 @@ export function whyNoRefuel(sim) {
   const quote = refuelQuote(sim);
   if (!quote.want) return 'the tanks are full';
   if (!quote.units) return `fuel is ${quote.price} credits a unit and we have ${sim.state.money}`;
+  return null;
+}
+
+// ---------- flares (F.2) ----------
+
+/** What filling the flare rack would buy and cost: { want, units, cost, price }. A flare costs what it is. */
+export function flareQuote(sim) {
+  const price = (portHere(sim) ?? FREE_PORT).flare ?? 0;
+  const want = Math.max(0, HELM.flares - sim.state.helm.flares);
+  const units = affordable(sim, want, price);
+  return { want, units, cost: units * price, price };
+}
+
+/** Why we cannot buy flares right now, or null. */
+export function whyNoFlares(sim) {
+  const problem = whyNoPort(sim, 'refuel');
+  if (problem) return problem === 'only a port has that' ? 'only a port sells flares' : problem;
+  const quote = flareQuote(sim);
+  if (!quote.want) return 'the flare rack is full';
+  if (!quote.units) return `flares are ${quote.price} credits each and we have ${sim.state.money}`;
   return null;
 }
 
@@ -153,6 +175,16 @@ export const PORT_COMMANDS = {
       addMoney(sim, -quote.cost, 'fuel');
       run.fuel += quote.units;
       sim.events.emit('port.refueled', { node: run.at, bought: quote.units, cost: quote.cost, fuel: run.fuel, tick: sim.state.tick });
+    },
+  },
+  // Fill the flare rack, as far as the money goes (F.2).
+  'port.flares': {
+    check: (sim) => whyNoFlares(sim),
+    apply(sim) {
+      const quote = flareQuote(sim);
+      addMoney(sim, -quote.cost, 'flares');
+      sim.state.helm.flares += quote.units;
+      sim.events.emit('port.flares', { bought: quote.units, cost: quote.cost, flares: sim.state.helm.flares, tick: sim.state.tick });
     },
   },
   'port.repair': {

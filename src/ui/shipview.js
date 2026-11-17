@@ -26,6 +26,7 @@ import { braced, capacitorOf, capacity, chargeOf, findCrew, gunChance, gunSlot, 
 import { GOALS, REASONS, OUTCOMES as BOARDING_OUTCOMES, bribeChance, describeBoarder, partyOf, whyNoBribe, whyNoYield } from '../sim/boarders.js';
 import { HIDING, compartmentsFree, whyNoHide } from '../sim/agents.js';
 import { describeTask } from '../sim/crew.js';
+import { chill } from '../sim/cold.js';
 import { BLUFFS, ENDINGS, bluffChance, findContact, scopeView, whyNoHail, whyNoPay } from '../sim/encounters.js';
 import { describeJob, magazineOf, pickHand, roundsInHold } from '../sim/hold.js';
 import { nerveWord, topMemory } from '../sim/memory.js';
@@ -45,6 +46,9 @@ import { AUTO_PAUSE } from './settings.js';
 import { createShipRenderer } from './ship-render.js';
 import { createSituationCards } from './situations.js';
 import { bearingText, drawScope, hunter, hunterText, rangeText, scopeDial, scopeHit, scopeMarks } from './scope.js';
+
+/** What the contact panel says until Margo has made the ship out (F.2: then what beats it). */
+const CONTACT_HINT = 'A hail is a lie told once. The gun cannot sink anything; it can make a ship think twice, and every round tells everyone where we are.';
 
 const percent = (value) => `${Math.round(value * 100)}%`;
 /** How long a crew member's intercom reply stays on the monitor, in real milliseconds. */
@@ -1152,12 +1156,13 @@ export function createShipView({ canvas, root, input, sim, clock, tempo = null, 
       const lay = button('btn-gun', 'Lay the gun', () => order({ type: 'gun.target', contact: gun() >= 0 && sim.state.weapons[gun()].target === id ? null : id }), 'btn--danger');
       const fetch = gun() >= 0 && magazineOf(sim, gun()) !== null ? button('btn-fetch-rounds', 'Fetch rounds', () => crateOrder({ type: 'weapon.load', slot: gun() })) : null;
       const pay = button('btn-pay', 'Pay', () => order({ type: 'contact.pay', contact: id }));
+      const hint = el('span', { class: 'status__hint status__hint--inline', id: 'contact-hint' }, CONTACT_HINT);
       nodes.status.replaceChildren(
         el('div', { class: 'status__head' }, title, sub, note),
         el('div', { class: 'status__stats' }, Object.values(stats).map((s) => s.node)),
-        el('div', { class: 'status__controls status__controls--row' }, Object.values(hails), lay, fetch, pay, el('span', { class: 'status__hint status__hint--inline', id: 'contact-hint' }, 'A hail is a lie told once. The gun cannot sink anything; it can make a ship think twice, and every round tells everyone where we are.')),
+        el('div', { class: 'status__controls status__controls--row' }, Object.values(hails), lay, fetch, pay, hint),
       );
-      panel = { kind: 'contact', id, stats, title, sub, note, hails, lay, fetch, pay };
+      panel = { kind: 'contact', id, stats, title, sub, note, hails, lay, fetch, pay, hint };
       updatePanel();
       return;
     }
@@ -1344,6 +1349,8 @@ export function createShipView({ canvas, root, input, sim, clock, tempo = null, 
         return;
       }
       setText(panel.title, `${seen.label} · ${seen.name}`);
+      // What beats it (F.2): once Margo has made it out, what she knows of its kind.
+      setText(panel.hint, seen.tells?.length ? `Margo: ${seen.tells.map((tell) => tell.text).join('. ')}.` : CONTACT_HINT);
       setText(panel.sub, seen.stale ? `Last seen ${seconds(seen.age)} ago` : 'On the scope');
       setText(panel.stats.bearing.value, `${bearingText(seen.bearing)} ±${Math.round(seen.bearingError)}°`);
       setText(panel.stats.range.value, `${rangeText(seen.range, seen.rangeError)} ±${Math.round(seen.rangeError * 100)}%`);
@@ -1388,7 +1395,7 @@ export function createShipView({ canvas, root, input, sim, clock, tempo = null, 
       setText(panel.stats.post.value, member.post ? STATIONS[member.post].name : 'none');
       const { roster } = sim.state;
       setText(panel.stats.watch.value, roster.watches > 1 ? `${watchName(member.watch)}${onWatch(sim, member) ? ' · on' : ' · below'}` : roster.watches === 1 ? 'all hands' : 'none kept');
-      setText(panel.stats.rest.value, member.alive ? `${tiredWord(member)}${member.asleep ? ' · asleep' : ''}` : 'none');
+      setText(panel.stats.rest.value, member.alive ? `${tiredWord(member)}${member.asleep ? ' · asleep' : ''}${ship === sim && chill(sim, member) < 1 ? ' · cold' : ''}` : 'none');
       panel.stats.rest.node.classList.toggle('is-alarm', member.alive && member.fatigue >= 0.9);
       for (const { station, node } of panel.posts) {
         node.classList.toggle('is-on', member.post === station);

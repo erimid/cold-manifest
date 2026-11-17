@@ -19,6 +19,7 @@
 // went with the duel in H.3.
 
 import { crewEmit, harmCrew } from './atmosphere.js';
+import { chill } from './cold.js';
 import { refusalOf } from './memory.js';
 import { skillFactor, skillOf } from './roles.js';
 import { liftRuns } from './power.js';
@@ -402,7 +403,7 @@ function walk(sim, member, seconds) {
   let time = seconds;
   // Feeling the way through an unlit room is slower (S2.5, D-096).
   const lit = sim.state.rooms[member.room]?.light ?? 1;
-  const pace = WALK_SPEED * (member.suit ? SUIT_SPEED : 1) * (member.carry ? CARRY_SPEED : 1) * (lit < DARK_LIGHT ? DARK_WALK : 1);
+  const pace = WALK_SPEED * (member.suit ? SUIT_SPEED : 1) * (member.carry ? CARRY_SPEED : 1) * (lit < DARK_LIGHT ? DARK_WALK : 1) * chill(sim, member);
   member.task = 'walking';
   while (member.path.length) {
     const next = member.path[0];
@@ -534,8 +535,8 @@ function work(sim, member, seconds) {
     return;
   }
 
-  // Hurt people work slower, and so does anyone in a suit, in the dark or dead on their feet (watches.js).
-  let rate = (0.5 + 0.5 * member.health) * (member.suit ? SUIT_WORK : 1) * tiredness(member) * seconds;
+  // Hurt people work slower, and so does anyone in a suit, in the dark, dead on their feet (watches.js) or cold (cold.js, F.2).
+  let rate = (0.5 + 0.5 * member.health) * (member.suit ? SUIT_WORK : 1) * tiredness(member) * chill(sim, member) * seconds;
   if (job.type !== 'extinguish' && r.light < 0.5) rate *= DARK_WORK;
   // Engineers mend, patch and free doors faster (D-131). Anyone can put out a fire.
   if (job.type === 'repair' || job.type === 'patch' || job.type === 'unjam') rate *= skillFactor(skillOf(member, 'engineering'));
