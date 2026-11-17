@@ -1707,8 +1707,15 @@ async function loopTests(browser) {
     await game(page, () => {
       const { sim } = window.coldManifest;
       for (const member of Object.values(sim.state.crew)) if (member.alive && (member.room === 'cargo' || member.goal === 'cargo')) sim.enqueue({ type: 'crew.move', crew: member.id, room: 'quarters', ship: 'us' });
+      // Vesna is the one picked below: she waits in the quarters, clear of the hold's crates (a tap on her among
+      // them on CI's slow runner landed on a crate).
+      if (sim.state.crew.vesna.room !== 'quarters') sim.enqueue({ type: 'crew.move', crew: 'vesna', room: 'quarters', ship: 'us' });
     });
     await page.waitForFunction(() => Object.values(window.coldManifest.sim.state.crew).every((m) => !m.alive || (m.room !== 'cargo' && m.goal !== 'cargo')), null, { timeout: 45000 });
+    await page.waitForFunction(() => {
+      const vesna = window.coldManifest.sim.state.crew.vesna;
+      return vesna.room === 'quarters' && !vesna.path.length;
+    }, null, { timeout: 45000 });
     await game(page, () => {
       const { sim, shipView } = window.coldManifest;
       shipView.openChart(false);
