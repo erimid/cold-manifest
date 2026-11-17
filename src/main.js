@@ -12,7 +12,7 @@ import { createInput } from './engine/input.js';
 import { createRng, newRunSeed } from './engine/rng.js';
 import { createStateMachine } from './engine/state-machine.js';
 import { findCrew, ourCrew } from './sim/combat.js';
-import { eventView } from './narrative/events.js';
+import { eventView, waiting } from './narrative/events.js';
 import { FAILURES, contractActive } from './sim/contracts.js';
 import { boardOffers, lostEnding, portView, screenForArrival, summarize } from './sim/runflow.js';
 import { nodeOf } from './sim/sector.js';
@@ -187,7 +187,8 @@ function backToShip() {
   else {
     machine.go('ship');
     // An event can put a ship on the scope coming for us: the chart stays down so the scope is what the captain sees.
-    shipView.openChart(!sim.state.scope.contacts.some((contact) => contact.state === 'closing' || contact.state === 'alongside'));
+    // Nor over something waiting aboard (H.7): its room and its card are what the captain needs to see.
+    shipView.openChart(!waiting(sim).length && !sim.state.scope.contacts.some((contact) => contact.state === 'closing' || contact.state === 'alongside'));
   }
 }
 

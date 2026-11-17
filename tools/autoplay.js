@@ -644,7 +644,7 @@ function playCrossing(seed, index) {
         if (contract.claim && item.id === contract.claim.event && pick === 'leave') tally.claimLeft = true;
       } else if (sim.state.tick - (sent.get(item.n) ?? -1e9) > 30 * TICK_RATE) {
         // Never whoever is flying her: the bot keeps the helm held (below), and would only call them back.
-        const hand = nearestHand(sim, item.room, (member) => sim.layout.room(member.room)?.kind !== 'helm');
+        const hand = nearestHand(sim, item.room, (member) => sim.layout.room(member.room)?.kind !== 'helm' && !item.about.includes(member.id));
         if (hand && give({ type: 'crew.move', crew: hand.id, room: item.room, ship: 'us' }) !== false) {
           sent.set(item.n, sim.state.tick);
           tally.sends += 1;

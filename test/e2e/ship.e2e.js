@@ -69,7 +69,8 @@ const settleSituations = (page) =>
   game(page, (safe) => {
     const { sim } = window.coldManifest;
     for (const one of sim.state.run?.events.aboard.filter((item) => !item.result) ?? []) {
-      const spare = Object.values(sim.state.crew).filter((member) => member.owner === 'player' && member.alive).sort((a, b) => b.index - a.index)[0];
+      const about = Object.values(one.cast);
+      const spare = Object.values(sim.state.crew).filter((member) => member.owner === 'player' && member.alive && !about.includes(member.id)).sort((a, b) => b.index - a.index)[0];
       const was = { room: spare.room, x: spare.x, y: spare.y, px: spare.px, py: spare.py, path: spare.path, goal: spare.goal, task: spare.task, asleep: spare.asleep };
       const room = sim.layout.room(one.room);
       Object.assign(spare, { room: one.room, x: room.x + room.w / 2, y: room.y + room.h - 0.5, px: room.x + room.w / 2, py: room.y + room.h - 0.5, path: [], goal: null, task: 'idle', asleep: false });

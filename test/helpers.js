@@ -84,7 +84,8 @@ export const situation = (sim, n) => situationViews(sim).find((view) => view.n =
 export function dealWith(sim, n, pick = (view) => view.choices.find((one) => one.available).id, { dismiss = true } = {}) {
   let back = null;
   if (situation(sim, n).state === 'waiting') {
-    const spare = Object.values(sim.state.crew).filter((member) => member.owner === 'player' && member.alive).sort((a, b) => b.index - a.index)[0];
+    const about = situation(sim, n).about;
+    const spare = Object.values(sim.state.crew).filter((member) => member.owner === 'player' && member.alive && !about.includes(member.id)).sort((a, b) => b.index - a.index)[0];
     const { room, x, y, px, py, path, goal, task, asleep, hidden } = spare;
     back = () => Object.assign(spare, { room, x, y, px, py, path, goal, task, asleep, hidden });
     standIn(sim, spare.id, situation(sim, n).room);

@@ -289,6 +289,44 @@ test('left alone for its hours a situation lapses: it does what its lapse says a
   assert.deepEqual(checkInvariants(bare), []);
 });
 
+test('the people a situation is about do not attend it themselves; taken off the ship, the matter goes with them; a lapse with nothing to tell still leads on', () => {
+  const about = aboardOne([], { cast: { patient: { pick: 'random' } }, place: { room: ['$patient', 'quarters'] }, sign: '{patient} is unwell in {room}.', text: '{who} looks in on {patient}.' });
+  const sim = runSim([about]);
+  const lapsed = heard(sim, 'event.lapsed');
+  give(sim, { type: 'debug.event', event: 'test.one' });
+  const one = sim.state.run.events.aboard[0];
+  const patient = one.cast.patient;
+  assert.equal(one.room, sim.state.crew[patient].room, 'placed where the patient is');
+  for (let i = 0; i < 5; i++) sim.step();
+  assert.equal(only(sim).state, 'waiting', 'the patient does not look in on themselves');
+  assert.deepEqual(only(sim).about, [patient], 'and the card knows not to send them');
+  const other = Object.keys(sim.state.crew).find((id) => id !== patient && sim.state.crew[id].owner === 'player');
+  standIn(sim, other, one.room);
+  sim.step();
+  assert.equal(only(sim).state, 'attended');
+  assert.equal(only(sim).by, sim.state.crew[other].name);
+  assert.ok(only(sim).text.startsWith(`${sim.state.crew[other].name} looks in on ${sim.state.crew[patient].name}`));
+
+  // Whoever was there is carried off: the card goes back to waiting rather than naming nobody.
+  delete sim.state.crew[other];
+  assert.equal(only(sim).by, null);
+  sim.step();
+  assert.equal(only(sim).state, 'waiting');
+  // The patient is carried off: nothing is left to deal with.
+  delete sim.state.crew[patient];
+  sim.step();
+  assert.equal(situationViews(sim).length, 0);
+  assert.deepEqual([lapsed.at(-1).event, lapsed.at(-1).text], ['test.one', null]);
+
+  const then = { ...aboardOne(), id: 'test.two', place: { room: 'engines' }, at: [] };
+  const chain = runSim([aboardOne([], { lapse: { hours: 0.2, effects: [{ do: 'event', event: 'test.two' }] } }), then]);
+  give(chain, { type: 'debug.event', event: 'test.one' });
+  castOff(chain, routeVia(chain.state.run, chain.state.run.map.delivery));
+  for (let i = 0; i < 0.2 * chain.state.run.hour * 20 + 2; i++) chain.step();
+  assert.deepEqual(situationViews(chain).map((view) => [view.id, view.room]), [['test.two', 'engines']]);
+  assert.deepEqual(checkInvariants(chain), []);
+});
+
 test('a hull alongside heaves her to until it is dealt with or lapses; the room going over the side takes the matter with it', () => {
   const sim = runSim([aboardOne([], { place: { room: 'airlock', scope: 'Dead hull', hold: true }, lapse: { hours: 1, text: 'She drops astern.' } })]);
   castOff(sim, routeVia(sim.state.run, sim.state.run.map.delivery));

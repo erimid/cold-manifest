@@ -18,8 +18,8 @@ export function chipNote(view) {
 }
 
 /**
- * `order(command)` gives an order (returns true if it was taken); `nearest(room)` names the hand who would
- * get to a room soonest ({ id, name } or null); `selected()` is the crew member picked on the ship view
+ * `order(command)` gives an order (returns true if it was taken); `nearest(room, about)` names the hand who would
+ * get to a room soonest, leaving out the ids in `about` ({ id, name } or null); `selected()` is the crew member picked on the ship view
  * ({ id, name } or null).
  */
 export function createSituationCards({ sim, order, nearest, selected }) {
@@ -51,8 +51,10 @@ export function createSituationCards({ sim, order, nearest, selected }) {
         ),
       ];
     }
-    const picked = selected();
-    const hand = picked ?? nearest(view.room);
+    // The people it is about are in it, not sent to it.
+    const chosen = selected();
+    const picked = chosen && !view.about.includes(chosen.id) ? chosen : null;
+    const hand = picked ?? nearest(view.room, view.about);
     return [
       el('p', { class: 'sitcard__text', id: `sit-sign-${view.n}` }, view.sign),
       el('p', { class: 'sitcard__hint' }, `Nobody is in ${view.roomName}. Whoever goes there deals with it.`),
@@ -77,7 +79,7 @@ export function createSituationCards({ sim, order, nearest, selected }) {
         'button',
         { class: 'btn sitcard__chip', type: 'button', id: `sit-chip-${view.n}`, 'aria-expanded': String(isOpen), press: toggle },
         el('span', { class: 'sitcard__mark', 'aria-hidden': 'true' }, view.state === 'answered' ? '·' : '!'),
-        el('span', { class: 'sitcard__title' }, view.title, el('small', {}, chipNote(view))),
+        el('span', { class: 'sitcard__title' }, view.title, el('small', { class: 'sitcard__note' }, chipNote(view))),
       ),
       isOpen && el('div', { class: 'panel sitcard__body', role: 'group', 'aria-label': view.title }, body(view)),
     );
@@ -95,7 +97,8 @@ export function createSituationCards({ sim, order, nearest, selected }) {
      */
     update({ boxOf, bounds, hidden = false }) {
       if (node.hidden !== hidden) node.hidden = hidden;
-      const views = hidden ? [] : situationViews(sim);
+      if (hidden) return; // the cards keep their state under the chart
+      const views = situationViews(sim);
       const live = new Set(views.map((view) => view.n));
       for (const [n, card] of cards) {
         if (live.has(n)) continue;
@@ -115,15 +118,18 @@ export function createSituationCards({ sim, order, nearest, selected }) {
       const picked = selected();
       views.forEach((view, i) => {
         const isOpen = open === view.n;
-        const key = JSON.stringify([view.state, view.title, view.by, view.text, view.choices, view.result, chipNote(view), isOpen, isOpen && view.state === 'waiting' ? (picked?.id ?? nearest(view.room)?.id ?? null) : null]);
+        const key = JSON.stringify([view.state, view.title, view.by, view.text, view.choices, view.result, isOpen, isOpen && view.state === 'waiting' ? ((picked && !view.about.includes(picked.id) ? picked.id : null) ?? nearest(view.room, view.about)?.id ?? null) : null]);
         let card = cards.get(view.n);
         if (!card || card.key !== key) {
           const fresh = build(view, isOpen);
           if (card) card.node.replaceWith(fresh);
           else node.append(fresh);
-          card = { node: fresh, key, state: view.state };
+          card = { node: fresh, key, state: view.state, note: fresh.querySelector('.sitcard__note') };
           cards.set(view.n, card);
         }
+        // The hours left tick down in place, so a card being read (or a button under a finger) is not rebuilt for them.
+        const note = chipNote(view);
+        if (card.note.textContent !== note) card.note.textContent = note;
         // The chip sits on the top edge of its room; a second matter in the same room sits under the first.
         const box = boxOf(view.room);
         const same = views.slice(0, i).filter((other) => other.room === view.room).length;

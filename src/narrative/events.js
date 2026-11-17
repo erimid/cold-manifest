@@ -124,7 +124,7 @@ function reachOf(sim, open) {
     hazard: ['text', (node?.hazard ?? 'the hazard').toLowerCase()],
     ship: ['text', sim.layout.name ?? 'the ship'],
     ...(open.room ? { room: ['room', open.room] } : {}),
-    ...(open.by ? { who: ['crew', open.by] } : {}),
+    ...(open.by && sim.state.crew[open.by] ? { who: ['crew', open.by] } : {}),
     ...Object.fromEntries(Object.entries(open.cast).map(([name, id]) => [name, ['crew', id]])),
   });
 }
@@ -146,10 +146,13 @@ function roomOfPlace(sim, event, cast) {
   return null;
 }
 
-/** Our people standing in a room, awake and in plain sight: the ones who can deal with what is there. */
-function attendants(sim, room) {
+/**
+ * Our people standing in a room, awake and in plain sight: the ones who can deal with what is there. Never the
+ * people it is about (`cast`: ids): the patient does not look in on their own cough, nor a fighter part the fight.
+ */
+function attendants(sim, room, cast = []) {
   return Object.values(sim.state.crew)
-    .filter((member) => member.owner === 'player' && member.alive && !member.asleep && !member.hidden && member.room === room && member.task !== 'walking')
+    .filter((member) => member.owner === 'player' && member.alive && !member.asleep && !member.hidden && member.room === room && member.task !== 'walking' && !cast.includes(member.id))
     .sort((a, b) => a.index - b.index);
 }
 
@@ -295,7 +298,7 @@ export function situationViews(sim) {
       const event = sim.transit.byId.get(one.id);
       if (!event) return null;
       const ctx = { sim, vars: reachOf(sim, one) };
-      const attended = Boolean(one.by) && !one.result;
+      const attended = Boolean(one.by && sim.state.crew[one.by]) && !one.result;
       return {
         n: one.n,
         id: event.id,
@@ -305,8 +308,9 @@ export function situationViews(sim) {
         sign: fillText(event.sign ?? event.title, ctx),
         mark: one.mark,
         hold: one.hold,
+        about: Object.values(one.cast), // the people it is about: they cannot be the one sent to it
         state: one.result ? 'answered' : attended ? 'attended' : 'waiting',
-        by: one.by ? (sim.state.crew[one.by]?.name ?? null) : null,
+        by: sim.state.crew[one.by]?.name ?? null,
         text: attended ? fillText(event.text, ctx) : null,
         choices: attended ? event.choices.map((choice) => choiceView(sim, one, choice)).filter(Boolean) : [],
         result: one.result ? { choice: one.result.choice, text: one.result.text, lapsed: Boolean(one.result.lapsed) } : null,
@@ -325,7 +329,7 @@ export function whyNoChoice(sim, choiceId, situation) {
   const event = open && sim.transit.byId.get(open.id);
   if (!event) return situation !== undefined ? `no situation ${situation} aboard` : 'no event is waiting for an answer';
   if (open.result) return situation !== undefined ? 'that has been dealt with' : 'that event has been answered';
-  if (situation !== undefined && !open.by) return `nobody is in ${sim.layout.room(open.room)?.name ?? 'that room'} to deal with it`;
+  if (situation !== undefined && !sim.state.crew[open.by]?.alive) return `nobody is in ${sim.layout.room(open.room)?.name ?? 'that room'} to deal with it`;
   const choice = event.choices.find((one) => one.id === choiceId);
   if (!choice) return `the event has no choice "${choiceId}"`;
   return requirement(choice.requires, { sim, vars: reachOf(sim, open) }).met ? null : 'that choice is not open to us';
@@ -374,11 +378,9 @@ function lapse(sim, one) {
   const ctx = { sim, vars: reachOf(sim, one), open: one };
   const text = event?.lapse?.text ? fillText(event.lapse.text, ctx) : null;
   sim.events.emit('event.lapsed', { event: one.id, situation: one.n, room: one.room, text, tick: sim.state.tick });
-  if (!text) {
-    const list = sim.state.run.events.aboard;
-    list.splice(list.indexOf(one), 1);
-  } else one.result = { choice: null, outcome: null, text, lapsed: true };
+  one.result = { choice: null, outcome: null, text: text ?? '', lapsed: true };
   applyEffects(event?.lapse?.effects, ctx);
+  if (!text) putAway(sim, one); // nothing to read: gone at once, and whatever it leads on to comes
 }
 
 /** Leave every event behind (the jump into port): nothing of them carries on. */
@@ -403,13 +405,13 @@ export function stepSituations(sim, dt) {
       if (one.shown >= RESULT_SECONDS) putAway(sim, one);
       continue;
     }
-    if (!liveRoom(sim, one.room)) {
-      // The room went over the side, and the matter with it.
+    if (!liveRoom(sim, one.room) || Object.values(one.cast).some((id) => !sim.state.crew[id])) {
+      // The room went over the side, or one of the people it was about was taken off the ship: the matter went with them.
       sim.events.emit('event.lapsed', { event: one.id, situation: one.n, room: one.room, text: null, tick: sim.state.tick });
       run.events.aboard.splice(run.events.aboard.indexOf(one), 1);
       continue;
     }
-    const there = attendants(sim, one.room);
+    const there = attendants(sim, one.room, Object.values(one.cast));
     const by = there.find((member) => member.id === one.by) ?? there[0] ?? null;
     if ((by?.id ?? null) !== one.by) {
       one.by = by?.id ?? null;
@@ -468,7 +470,6 @@ export function checkEventInvariants(sim) {
     if (!sim.state.rooms[one.room]) problems.push(`situation ${one.n} is in "${one.room}", which is not a room`);
     if (seen.has(one.n) || one.n > state.serial) problems.push(`situation number ${one.n} is used twice or was never given out`);
     seen.add(one.n);
-    if (one.by && !sim.state.crew[one.by]) problems.push(`situation ${one.n} is attended by "${one.by}", who is not aboard`);
     if (one.next && !one.result) problems.push(`situation ${one.n} leads on before it is answered`);
   }
   return problems;
@@ -599,5 +600,6 @@ export function checkEvent(item, refs = {}) {
 export function followUps(item) {
   const ids = [];
   for (const choice of Array.isArray(item.choices) ? item.choices : []) for (const outcome of Array.isArray(choice?.outcomes) ? choice.outcomes : []) for (const effect of Array.isArray(outcome?.effects) ? outcome.effects : []) if (effect?.do === 'event' && typeof effect.event === 'string') ids.push(effect.event);
+  for (const effect of Array.isArray(item.lapse?.effects) ? item.lapse.effects : []) if (effect?.do === 'event' && typeof effect.event === 'string') ids.push(effect.event);
   return ids;
 }
