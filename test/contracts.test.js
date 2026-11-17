@@ -8,12 +8,12 @@ import { hashState } from '../src/engine/hash.js';
 import { validateContent } from '../src/engine/content-schema.js';
 import { validateCondition, match } from '../src/narrative/conditions.js';
 import { applyEffects, validateEffects } from '../src/narrative/effects.js';
-import { eventView } from '../src/narrative/events.js';
+import { eventView, situationViews } from '../src/narrative/events.js';
 import { OPENED_SHARE, cargoCount, contractCrates, settlement, whyNoDeliver } from '../src/sim/contracts.js';
-import { cheapestRoute, nodeOf } from '../src/sim/sector.js';
+import { cheapestRoute, heldReason, nodeOf } from '../src/sim/sector.js';
 import { checkInvariants, createSim } from '../src/sim/sim.js';
 import { readContentFiles } from '../tools/lib/load-content.js';
-import { CATALOG, CREW, EVENTS, SHIP, castOff, content, mendForRunIn, routeVia } from './helpers.js';
+import { CATALOG, CREW, EVENTS, SHIP, castOff, content, dealWith, dealWithAll, mendForRunIn, routeVia, standIn } from './helpers.js';
 
 const REACH = content.require('sectors', 'the-reach');
 const PORTS = content.all('ports');
@@ -31,6 +31,7 @@ function flyUntil(sim, stop) {
   const run = sim.state.run;
   for (let i = 0; i < 20000 && run.crossing && !stop(); i++) {
     if (run.events.open) answer(sim, eventView(sim).choices.find((choice) => choice.available).id);
+    else if (dealWithAll(sim)) continue;
     else if (run.crossing.phase === 'under way') sim.enqueue({ type: 'debug.run', skip: true });
     else if (!sim.whyNot({ type: 'route.jump' })) sim.enqueue({ type: 'route.jump' });
     else mendForRunIn(sim);
@@ -40,11 +41,11 @@ function flyUntil(sim, stop) {
 
 /**
  * Fly the cheapest way to `to`, port to port, with the tanks topped up, until we are at it (a port) or an event
- * about it is on the table, or we have passed it (any other point). Returns once we are there.
+ * about it is on the table or waiting aboard, or we have passed it (any other point). Returns once we are there.
  */
 function flyTo(sim, to) {
   const run = sim.state.run;
-  const there = () => run.at === to || run.events.open?.node === to;
+  const there = () => run.at === to || run.events.open?.node === to || run.events.aboard.some((one) => one.node === to && !one.result);
   for (let i = 0; i < 12 && !there(); i++) {
     if (!run.crossing) {
       sim.state.run.fuel = run.fuelMax;
@@ -54,6 +55,9 @@ function flyTo(sim, to) {
   }
   assert.ok(there(), `never got to ${to}`);
 }
+
+/** The salvage claim alongside, as its card shows it (H.7), or undefined. */
+const claimAboard = (sim) => situationViews(sim).find((view) => view.id === 'claim.aphelion' && !view.result);
 
 /** Answer the open event with a choice, and put it away. */
 function answer(sim, choice) {
@@ -186,16 +190,18 @@ test('a salvage claim: no cargo at the start, a derelict on the chart, a deadlin
     assert.match(whyNoDeliver(straight), /the claim at .* was never worked/);
     // To the claim: its event opens, before anything the dice would bring.
     flyTo(sim, claim.node);
-    assert.equal(run.events.open?.id, 'claim.aphelion');
+    assert.equal(claimAboard(sim)?.id, 'claim.aphelion', 'she is alongside: a situation at one of our locks');
+    assert.equal(claimAboard(sim).mark, 'The claim');
+    assert.equal(heldReason(sim), 'we are standing by something alongside');
     assert.equal(match({ fact: 'contract.claim' }, { sim }) !== null, true);
-    answer(sim, 'leave');
+    dealWith(sim, claimAboard(sim).n, () => 'leave');
     assert.equal(claim.done, false);
     // Leave, fly on to the next port, and come back by it: it opens again.
     flyUntil(sim, () => false);
     assert.equal(run.crossing, null);
     flyTo(sim, claim.node);
-    assert.equal(run.events.open?.id, 'claim.aphelion');
-    answer(sim, 'quick');
+    assert.equal(claimAboard(sim)?.id, 'claim.aphelion');
+    dealWith(sim, claimAboard(sim).n, () => 'quick');
     assert.equal(claim.done, true);
     assert.equal(contractCrates(sim).length, 2);
     assert.ok(contractCrates(sim).every((crate) => crate.kind === 'salvage' && !crate.sealed));
@@ -210,10 +216,15 @@ test('a salvage claim: no cargo at the start, a derelict on the chart, a deadlin
 test('the engineer can cut the sealed bay: every crate of the claim comes aboard', () => {
   const sim = contractSim(SALVAGE, { seed: 'claim-0', events: true });
   flyTo(sim, sim.state.run.contract.claim.node);
-  const cut = eventView(sim).choices.find((choice) => choice.id === 'cut');
+  const claim = claimAboard(sim);
+  assert.equal(claim.state, 'waiting');
+  assert.deepEqual(claim.choices, [], 'nothing is offered until someone is at the lock');
+  standIn(sim, 'pruitt', claim.room);
+  sim.step();
+  const cut = claimAboard(sim).choices.find((choice) => choice.id === 'cut');
   assert.equal(cut.available, true);
   assert.match(cut.tag, /Dace/);
-  answer(sim, 'cut');
+  dealWith(sim, claim.n, () => 'cut');
   assert.equal(contractCrates(sim).length, 4);
 });
 
@@ -292,7 +303,7 @@ test('a contract run replays from its seed and survives a snapshot', () => {
   const play = () => {
     const sim = contractSim(SALVAGE, { seed: 'replay', events: true });
     flyTo(sim, sim.state.run.contract.claim.node);
-    if (sim.state.run.events.open) answer(sim, 'quick');
+    if (claimAboard(sim)) dealWith(sim, claimAboard(sim).n, () => 'quick');
     return sim;
   };
   const a = play();

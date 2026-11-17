@@ -46,7 +46,7 @@ async function startServer() {
 // ---------- helpers that run against the page ----------
 
 /** Choices that cannot bring a ship down on us or kill anyone, in the order to prefer them, for flying through events (S3.3). */
-const SAFE_CHOICES = ['leave', 'pass', 'note', 'thread', 'sweep', 'manifest', 'rest', 'keep', 'press-on'];
+const SAFE_CHOICES = ['leave', 'pass', 'note', 'thread', 'sweep', 'manifest', 'rest', 'keep', 'press-on', 'brig', 'reseal', 'tape', 'part'];
 /** Answer whatever event is on the screen with a safe choice, read the outcome, and go on (a follow-up event is answered too). */
 async function answerEvents(page) {
   for (let i = 0; i < 4 && (await page.evaluate(() => window.coldManifest.machine.state)) === 'event'; i++) {
@@ -59,6 +59,31 @@ async function answerEvents(page) {
 }
 
 const game = (page, fn, arg) => page.evaluate(fn, arg);
+/** The situations aboard still waiting for an answer (H.7): [{ n, id, room, node, hold, by }]. */
+const situationsWaiting = (page) => game(page, () => (window.coldManifest.sim.state.run?.events.aboard ?? []).filter((one) => !one.result).map(({ n, id, room, node, hold, by }) => ({ n, id, room, node, hold, by })));
+/**
+ * Deal with every situation aboard through the sim, not its card (for suites that are about something else):
+ * the last hand is stood in its room, a safe choice is taken, the card is put away and the hand put back.
+ */
+const settleSituations = (page) =>
+  game(page, (safe) => {
+    const { sim } = window.coldManifest;
+    for (const one of sim.state.run?.events.aboard.filter((item) => !item.result) ?? []) {
+      const about = Object.values(one.cast);
+      const spare = Object.values(sim.state.crew).filter((member) => member.owner === 'player' && member.alive && !about.includes(member.id)).sort((a, b) => b.index - a.index)[0];
+      const was = { room: spare.room, x: spare.x, y: spare.y, px: spare.px, py: spare.py, path: spare.path, goal: spare.goal, task: spare.task, asleep: spare.asleep };
+      const room = sim.layout.room(one.room);
+      Object.assign(spare, { room: one.room, x: room.x + room.w / 2, y: room.y + room.h - 0.5, px: room.x + room.w / 2, py: room.y + room.h - 0.5, path: [], goal: null, task: 'idle', asleep: false });
+      sim.step();
+      const choices = sim.transit.byId.get(one.id).choices.map((choice) => choice.id);
+      const pick = [...safe.filter((id) => choices.includes(id)), ...choices].find((id) => !sim.whyNot({ type: 'event.choose', situation: one.n, choice: id }));
+      sim.enqueue({ type: 'event.choose', situation: one.n, choice: pick });
+      sim.step();
+      sim.enqueue({ type: 'event.dismiss', situation: one.n });
+      sim.step();
+      Object.assign(spare, was);
+    }
+  }, SAFE_CHOICES);
 const tick = (page) => game(page, () => window.coldManifest.sim.state.tick);
 const door = (page, id) => game(page, (did) => ({ ...window.coldManifest.sim.state.doors[did] }), id);
 const room = (page, id) => game(page, (rid) => ({ ...window.coldManifest.sim.state.rooms[rid] }), id);
@@ -87,6 +112,27 @@ const doorIs = (page, id, state, openness) =>
  * A hit target's box and a point to tap it at, in page pixels. For a room that is its middle, or the nearest
  * point along its middle that no crew member's body covers (people stand in rooms, D-132).
  */
+/** What the ship looked like when a tap check went wrong (CI only fails where we cannot look). */
+const dump = async (page, label, extra = {}) =>
+  console.log(`        DIAG ${label}`, JSON.stringify({
+    ...extra,
+    ...(await game(page, () => {
+      const c = window.coldManifest;
+      return {
+        tick: c.sim.state.tick,
+        paused: c.sim.state.paused,
+        sel: c.shipView.debug.selected,
+        selCrew: c.shipView.debug.selectedCrew,
+        status: document.querySelector('#status')?.textContent.slice(0, 200),
+        vp: [window.innerWidth, window.innerHeight],
+        crew: Object.values(c.sim.state.crew).map((m) => [m.id, m.room, m.task, m.goal, Math.round(m.x * 10) / 10, Math.round(m.y * 10) / 10]),
+        doors: Object.entries(c.sim.state.doors).filter(([, d]) => d.state !== 'closed').map(([id, d]) => [id, d.state]),
+        targets: c.shipView.debug.targets().filter((t) => t.kind !== 'room').map((t) => [t.id, Math.round(t.x), Math.round(t.y), Math.round(t.w), Math.round(t.h), t.priority]),
+        rooms: c.shipView.debug.targets().filter((t) => t.kind === 'room' && ['door_control', 'bridge', 'aft_corridor', 'quarters'].includes(t.id)).map((t) => [t.id, Math.round(t.x), Math.round(t.y), Math.round(t.w), Math.round(t.h)]),
+      };
+    })),
+  }));
+
 async function target(page, id) {
   const all = await game(page, () => window.coldManifest.shipView.debug.targets());
   const t = all.find((x) => x.id === id);
@@ -428,6 +474,7 @@ async function touchTests(browser) {
     const t = await target(page, 'door_control');
     await page.touchscreen.tap(t.mx, t.my);
     await sleep(200);
+    if (!/no way through/i.test(await page.textContent('#status'))) await dump(page, 'locked door', { t });
     assert.match(await page.textContent('#status'), /no way through/i);
     assert.equal(await game(page, () => window.coldManifest.sim.state.crew.okoro.goal), null);
     await game(page, () => window.coldManifest.sim.enqueue({ type: 'door.set', door: 'd_door_control', state: 'closed' }));
@@ -474,7 +521,10 @@ async function touchTests(browser) {
   await check('jettison: an unsealed room refuses and says why', async () => {
     const d = await target(page, 'd_door_control');
     await page.touchscreen.tap(d.mx, d.my);
-    await doorIs(page, 'd_door_control', 'open', 1);
+    await doorIs(page, 'd_door_control', 'open', 1).catch(async (err) => {
+      await dump(page, 'jettison unsealed', { d });
+      throw err;
+    });
     const t = await target(page, 'door_control');
     await page.touchscreen.tap(t.mx, t.my);
     await page.tap('#btn-jettison');
@@ -728,7 +778,7 @@ async function voiceTests(browser) {
     await page.waitForFunction(() => window.coldManifest.sim.state.rooms.sensors.fire > 0.3, null, { timeout: 2000 });
     assert.equal(await paused(page), false, 'no pause this time');
     const saved = await game(page, () => JSON.parse(window.localStorage.getItem('cold-manifest.settings.v1')));
-    assert.deepEqual(saved.autoPause, { fired: true, boarded: true, fire: false, breach: true, death: true, objection: true, refusal: true, contact: true });
+    assert.deepEqual(saved.autoPause, { fired: true, boarded: true, fire: false, breach: true, death: true, objection: true, refusal: true, situation: true, contact: true });
   });
 
   await check('settings: sound off silences everything, sound on brings the hum back', async () => {
@@ -761,7 +811,7 @@ async function voiceTests(browser) {
   await check('a reload keeps the settings', async () => {
     await page.reload();
     await page.waitForFunction(() => window.coldManifest?.machine.state === 'title');
-    assert.deepEqual(await game(page, () => window.coldManifest.settings.values.autoPause), { fired: true, boarded: true, fire: false, breach: true, death: true, objection: true, refusal: true, contact: true });
+    assert.deepEqual(await game(page, () => window.coldManifest.settings.values.autoPause), { fired: true, boarded: true, fire: false, breach: true, death: true, objection: true, refusal: true, situation: true, contact: true });
   });
 
   await check('no page errors', async () => assert.deepEqual(errors, []));
@@ -1163,7 +1213,10 @@ async function margoTests(browser) {
     await page.keyboard.press('Escape');
     const t = await target(page, 'bridge');
     await page.touchscreen.tap(t.mx, t.my);
-    await page.tap('#btn-lights');
+    await page.tap('#btn-lights', { timeout: 4000 }).catch(async (err) => {
+      await dump(page, 'lamp', { t });
+      throw err;
+    });
     assert.match(await page.textContent('#status'), /Ilse wants the lamp on\. Not after the dark in Bridge\./);
     assert.equal((await room(page, 'bridge')).lightsOn, true);
   });
@@ -1303,6 +1356,7 @@ async function chartTests(browser) {
         await page.waitForFunction(() => window.coldManifest.machine.state === 'ship');
         continue;
       }
+      await settleSituations(page); // a hull alongside would hold her (H.7)
       await game(page, () => !window.coldManifest.sim.whyNot({ type: 'debug.run', skip: true }) && window.coldManifest.sim.enqueue({ type: 'debug.run', skip: true }));
       await sleep(150);
     }
@@ -1452,11 +1506,15 @@ async function loopTests(browser) {
       });
       return legs;
     });
-  /** Cast off on a route, skip along each lane (debug), and stop at whatever the crossing opens. Returns 'event', 'port' or 'ship'. */
+  /**
+   * Cast off on a route, skip along each lane (debug), and stop at whatever the crossing brings. Returns 'event' (a
+   * decision over the radio), 'situation' (something waiting in a room, H.7), 'port' or 'ship'.
+   */
   const flyOn = async () => {
     for (let i = 0; i < 60; i++) {
       const now = await state();
       if (now !== 'ship') return now;
+      if ((await situationsWaiting(page)).length) return 'situation';
       const phase = await game(page, () => window.coldManifest.sim.state.run.crossing?.phase ?? null);
       if (phase === 'under way') await game(page, () => !window.coldManifest.sim.whyNot({ type: 'debug.run', skip: true }) && window.coldManifest.sim.enqueue({ type: 'debug.run', skip: true }));
       else if (phase === 'off port') {
@@ -1469,7 +1527,53 @@ async function loopTests(browser) {
   };
   let sawPort = false;
   let sawEvent = false;
+  let sawSituation = false;
   const metKinds = new Set();
+  /** Where an element sits on the screen. */
+  const boxOf = (selector) => page.$eval(selector, (node) => (({ x, y, width, height }) => ({ x, y, w: width, h: height }))(node.getBoundingClientRect()));
+  /** A room's rectangle on the screen, from the ship view's own fit. */
+  const roomOnScreen = (id) =>
+    game(page, (rid) => {
+      const { sim, shipView } = window.coldManifest;
+      const v = shipView.debug.view;
+      const room = sim.layout.room(rid);
+      return { x: v.ox + room.x * v.scale, y: v.oy + room.y * v.scale, w: room.w * v.scale, h: room.h * v.scale };
+    }, id);
+  /**
+   * The first situation the crossing brings is played on its card, the way a captain would: the chip sits on its
+   * room, the card says what is known and offers to send somebody, they walk there, and then it offers its choices.
+   */
+  const playSituation = async (one) => {
+    assert.equal(await game(page, () => window.coldManifest.shipView.debug.chartOpen), false, 'the chart came down for it');
+    await page.waitForSelector(`#sit-chip-${one.n}`, { timeout: 2000 });
+    const chip = await boxOf(`#sit-chip-${one.n}`);
+    const room = await roomOnScreen(one.room);
+    assert.ok(chip.h >= 44 && chip.w >= 44, `the chip is ${chip.w}x${chip.h}`);
+    assert.ok(chip.x >= room.x - 2 && chip.x <= room.x + room.w && chip.y >= room.y - 2 && chip.y <= room.y + room.h, `the chip (${Math.round(chip.x)}, ${Math.round(chip.y)}) is on its room ${JSON.stringify(room)}`);
+    assert.equal(/[{}]/.test(await page.textContent(`#sit-${one.n}`)), false, 'every name on the card is filled in');
+    if ((await page.getAttribute(`#sit-${one.n}`, 'data-state')) === 'waiting') {
+      if ((await game(page, () => window.coldManifest.shipView.debug.situationOpen)) !== one.n) await page.tap(`#sit-chip-${one.n}`);
+      assert.match(await page.textContent(`#sit-${one.n}`), /Nobody is in /);
+      assert.equal(await page.locator(`#sit-choices-${one.n}`).count(), 0, 'no choices until somebody is there');
+      await shot('h7-situation-waiting-ipad');
+      await big(`#sit-${one.n} button`);
+      await page.tap(`#sit-send-${one.n}`);
+      await page.waitForFunction((n) => document.querySelector(`#sit-${n}`)?.dataset.state === 'attended', one.n, { timeout: 45000 });
+    }
+    assert.equal(await game(page, () => window.coldManifest.shipView.debug.situationOpen), one.n, 'the card opens when somebody is there');
+    assert.match(await page.textContent(`#sit-chip-${one.n}`), / is there/i);
+    assert.ok((await page.locator(`#sit-choices-${one.n} .btn`).count()) >= 2);
+    assert.equal(/[{}]/.test(await page.textContent(`#sit-${one.n}`)), false, 'every name in the text is filled in');
+    await shot('h7-situation-ipad');
+    await big(`#sit-${one.n} button`);
+    const open = await page.$$eval(`#sit-choices-${one.n} .btn:not([disabled])`, (list, n) => list.map((b) => b.id.replace(`sit-choice-${n}-`, '')), one.n);
+    await page.tap(`#sit-choice-${one.n}-${SAFE_CHOICES.find((id) => open.includes(id)) ?? open[0]}`);
+    await page.waitForSelector(`#sit-result-${one.n}`, { timeout: 3000 });
+    assert.equal(await page.locator(`#sit-choices-${one.n}`).count(), 0, 'the choices are gone once one is made');
+    await shot('h7-situation-outcome-ipad');
+    await page.tap(`#sit-dismiss-${one.n}`);
+    await page.waitForSelector(`#sit-${one.n}`, { state: 'detached', timeout: 3000 });
+  };
   await check('every crossing ends in a port that opens its screen; the events on the lanes open theirs and leave for the ship again', async () => {
     const legs = await route();
     for (let leg = 0; leg < legs.length; leg++) {
@@ -1483,11 +1587,27 @@ async function loopTests(browser) {
       for (let i = 0; i < 30; i++) {
         const now = await flyOn();
         if (now === 'port') break;
+        if (now === 'situation') {
+          // Something aboard (H.7): on the ship view, at its room. The first is played on its card; the rest are settled.
+          for (const one of await situationsWaiting(page)) {
+            const kind = await game(page, (id) => window.coldManifest.sim.state.run.map.nodes.find((n) => n.id === id).kind, one.node);
+            metKinds.add(kind);
+            assert.ok(await game(page, ([id, k]) => (window.coldManifest.content.get('events', id).at ?? []).includes(k) || id.startsWith('claim') || id === 'derelict.the-log', [one.id, kind]), `${one.id} belongs on the way to a ${kind}`);
+            assert.equal(typeof (await game(page, (id) => window.coldManifest.content.get('events', id).place.room, one.id)) !== 'undefined', true, `${one.id} has a room`);
+          }
+          if (!sawSituation) {
+            sawSituation = true;
+            await playSituation((await situationsWaiting(page))[0]);
+          }
+          await settleSituations(page);
+          continue;
+        }
         assert.equal(now, 'event', 'the screen follows the sim');
         const view = await game(page, () => window.coldManifest.sim.state.run.events.open);
         const kind = await game(page, (id) => window.coldManifest.sim.state.run.map.nodes.find((n) => n.id === id).kind, view.node);
         metKinds.add(kind);
-        assert.ok(await game(page, ([id, k]) => (window.coldManifest.content.get('events', id).at ?? []).includes(k) || id.startsWith('claim'), [view.id, kind]), `${view.id} belongs on the way to a ${kind}`);
+        assert.ok(await game(page, ([id, k]) => (window.coldManifest.content.get('events', id).at ?? []).includes(k), [view.id, kind]), `${view.id} belongs on the way to a ${kind}`);
+        assert.equal(await game(page, (id) => window.coldManifest.content.get('events', id).place, view.id), 'radio', 'only a decision over the radio takes the screen');
         assert.ok((await page.locator('#event-choices .btn').count()) >= 2);
         assert.equal(/[{}]/.test(await page.textContent('#event')), false, 'every name in the text is filled in');
         if (!sawEvent) {
@@ -1527,36 +1647,104 @@ async function loopTests(browser) {
     }
   });
 
-  await check('an event shows who meets a choice, locks what the crew cannot do, tells the outcome and goes back to the ship', async () => {
-    assert.ok(sawEvent, 'the way across met at least one event');
+  await check('a situation card shows who meets a choice and locks what the crew cannot do; a radio decision still takes the screen', async () => {
+    assert.ok(sawSituation, 'the way across met at least one situation aboard');
     await page.tap('#btn-depart');
     await page.waitForFunction(() => window.coldManifest.machine.state === 'ship');
-    // Put the hazard event on the table with the sensors dark: one choice is met by Ilse, one is locked.
+    // A leak in the cargo hold, where nobody is: the card says what is known and offers to send the nearest hand.
     await game(page, () => {
-      const { sim } = window.coldManifest;
+      const { sim, shipView } = window.coldManifest;
+      shipView.openChart(false);
+      sim.enqueue({ type: 'debug.event', event: 'cargo.leak' });
+    });
+    await page.waitForSelector('.sitcard[data-event="cargo.leak"]', { timeout: 3000 });
+    const leak = Number((await page.getAttribute('.sitcard[data-event="cargo.leak"]', 'id')).replace('sit-', ''));
+    assert.equal(await page.getAttribute(`#sit-${leak}`, 'data-state'), 'waiting');
+    assert.match(await page.textContent(`#sit-chip-${leak}`), /Nobody there · \d+ h/i);
+    assert.equal(await game(page, () => window.coldManifest.shipView.debug.situationOpen), leak, 'a new matter opens its card when nothing else is being read');
+    assert.match(await page.textContent(`#sit-sign-${leak}`), /Something is dripping in Cargo hold/);
+    assert.match(await game(page, () => window.coldManifest.sim.state.ai.log.at(-1).text), /Something is dripping/, 'Margo says the sign');
+    assert.equal(await page.locator(`#sit-choices-${leak}`).count(), 0, 'no choices until somebody is there');
+    assert.match(await page.textContent(`#sit-send-${leak}`), /^Send \w+Nearest hand awake$/);
+    await shot('h7-situation-waiting-ipad');
+    await big(`#sit-${leak} button`);
+    // With one of the crew picked, the card sends them instead.
+    const pick = await crewTarget(page, 'vesna');
+    await page.touchscreen.tap(pick.x, pick.y);
+    await page.waitForFunction((n) => /^Send Vesna/.test(document.querySelector(`#sit-send-${n}`)?.textContent ?? ''), leak, { timeout: 2000 });
+    await page.tap(`#sit-send-${leak}`);
+    await page.waitForFunction((n) => document.querySelector(`#sit-${n}`)?.dataset.state === 'attended', leak, { timeout: 45000 });
+    assert.equal(await game(page, () => window.coldManifest.sim.state.crew.vesna.room), 'cargo');
+    assert.match(await page.textContent(`#sit-text-${leak}`), /^Vesna follows the drip/);
+    assert.match(await page.textContent(`#sit-choice-${leak}-reseal`), /^\[Dace, Engineering\] /);
+    await page.tap(`#sit-choice-${leak}-reseal`);
+    await page.waitForSelector(`#sit-result-${leak}`, { timeout: 3000 });
+    assert.match(await page.textContent(`#sit-chip-${leak}`), /Dealt with/i);
+    await page.tap(`#sit-dismiss-${leak}`);
+    await page.waitForSelector(`#sit-${leak}`, { state: 'detached', timeout: 3000 });
+    await page.touchscreen.tap(pick.x, pick.y).catch(() => {});
+    await game(page, () => window.coldManifest.sim.state.run.flags.crate_resealed === true || Promise.reject(new Error('the outcome did not take')));
+
+    // The hazard on the bridge with the sensors dark and Ilse at the helm: one choice is met by her, one is locked.
+    await game(page, () => {
+      const { sim, shipView } = window.coldManifest;
+      shipView.openChart(false);
       if (!sim.state.stations.sensors.down) {
         sim.enqueue({ type: 'station.stand', station: 'sensors', down: true });
         sim.step();
       }
       sim.enqueue({ type: 'debug.event', event: 'hazard.loud-lane' });
     });
+    await page.waitForSelector('.sitcard[data-event="hazard.loud-lane"][data-state="attended"]', { timeout: 3000 });
+    const n = Number((await page.getAttribute('.sitcard[data-event="hazard.loud-lane"]', 'id')).replace('sit-', ''));
+    assert.equal(await page.getAttribute(`#sit-${n}`, 'data-room'), 'bridge');
+    assert.match(await page.textContent(`#sit-chip-${n}`), /Ilse is there/i);
+    assert.match(await page.textContent(`#sit-choice-${n}-thread`), /^\[Ilse, Piloting\] /);
+    assert.equal(await page.isDisabled(`#sit-choice-${n}-thread`), false);
+    assert.match(await page.textContent(`#sit-choice-${n}-sweep`), /^\[Needs Sensors running\] /);
+    assert.equal(await page.isDisabled(`#sit-choice-${n}-sweep`), true);
+    assert.equal(await page.textContent(`#sit-choice-${n}-press-on`), 'Hold the course and take what comes');
+    await shot('h7-situation-tags-ipad');
+    await page.tap(`#sit-choice-${n}-sweep`, { force: true }); // locked: nothing happens
+    assert.equal(await page.locator(`#sit-result-${n}`).count(), 0);
+    // The chip folds the card and opens it again.
+    await page.tap(`#sit-chip-${n}`);
+    assert.equal(await page.locator(`#sit-choices-${n}`).count(), 0, 'folded');
+    await page.tap(`#sit-chip-${n}`);
+    await page.tap(`#sit-choice-${n}-thread`);
+    await page.waitForSelector(`#sit-result-${n}`, { timeout: 3000 });
+    assert.match(await page.textContent(`#sit-result-${n}`), /Ilse takes the helm/);
+    await page.tap(`#sit-dismiss-${n}`);
+    await page.waitForSelector(`#sit-${n}`, { state: 'detached', timeout: 3000 });
+    assert.equal(await state(), 'ship', 'none of it left the ship view');
+
+    // A patrol on the radio is a decision on the table: the event view, with the tags, as before.
+    const money = await game(page, () => {
+      const { sim } = window.coldManifest;
+      const had = sim.state.money;
+      sim.state.money = 0;
+      sim.enqueue({ type: 'debug.event', event: 'checkpoint.patrol-line' });
+      return had;
+    });
     await page.waitForFunction(() => window.coldManifest.machine.state === 'event', null, { timeout: 3000 });
-    assert.match(await page.textContent('#choice-thread'), /^\[Ilse, Piloting\] /);
-    assert.equal(await page.isDisabled('#choice-thread'), false);
-    assert.match(await page.textContent('#choice-sweep'), /^\[Needs Sensors running\] /);
-    assert.equal(await page.isDisabled('#choice-sweep'), true);
-    assert.equal(await page.textContent('#choice-press-on'), 'Hold the course and take what comes');
+    sawEvent = true;
+    assert.match(await page.textContent('#choice-talk'), /^\[\w+, Negotiation\] /);
+    assert.equal(await page.isDisabled('#choice-talk'), false);
+    assert.match(await page.textContent('#choice-pay'), /^\[Needs 60 credits\] /);
+    assert.equal(await page.isDisabled('#choice-pay'), true);
+    assert.equal(await page.textContent('#choice-manifest'), 'Send the manifest and wait');
     await shot('s3-3-event-tags-ipad');
     await big('#event-choices .btn');
-    await page.tap('#choice-sweep', { force: true }); // locked: nothing happens
+    await page.tap('#choice-pay', { force: true }); // locked: nothing happens
     assert.equal(await page.isVisible('#btn-event-continue'), false);
-    await page.tap('#choice-thread');
-    assert.match(await page.textContent('#event-result'), /Ilse takes the helm/);
+    await page.tap('#choice-manifest');
+    assert.match(await page.textContent('#event-result'), /Proceed/);
     assert.equal(await page.locator('#event-choices').count(), 0, 'the choices are gone once one is made');
     await shot('s3-3-event-outcome-ipad');
     await page.tap('#btn-event-continue');
     await page.waitForFunction(() => window.coldManifest.machine.state === 'ship');
     assert.equal(await game(page, () => window.coldManifest.sim.state.run.events.open), null);
+    await game(page, (had) => (window.coldManifest.sim.state.money = had), money);
     // Back to the drop's port screen for the hand-over.
     await game(page, () => window.coldManifest.machine.go('port', { node: window.coldManifest.sim.state.run.at }));
   });
@@ -1921,7 +2109,7 @@ async function watchTests(browser) {
     await page.tap('#btn-post-sensors');
     await page.waitForFunction(() => window.coldManifest.sim.state.crew.vesna.post === 'sensors', null, { timeout: 2000 });
     assert.match(await page.textContent('#status'), /Post\s*Sensors/);
-    await page.waitForFunction(() => window.coldManifest.sim.state.crew.vesna.room === 'sensors' && !window.coldManifest.sim.state.crew.vesna.path.length, null, { timeout: 45000 });
+    await page.waitForFunction(() => window.coldManifest.sim.state.crew.vesna.room === 'sensors' && !window.coldManifest.sim.state.crew.vesna.path.length, null, { timeout: 45000 }).catch(async (e) => { console.log('DIAG', JSON.stringify(await game(page, () => { const c = window.coldManifest; const v = c.sim.state.crew.vesna; return { v: { room: v.room, task: v.task, asleep: v.asleep, path: v.path, goal: v.goal, post: v.post, watch: v.watch, x: v.x, y: v.y }, paused: c.sim.state.paused, tick: c.sim.state.tick, machine: c.machine.state, aboard: c.sim.state.run?.events?.aboard, roster: c.sim.state.roster }; }))); throw e; });
     await page.waitForFunction(() => /Vesna/.test(document.querySelector('#station-sensors').textContent), null, { timeout: 4000 });
     const was = await game(page, () => window.coldManifest.sim.state.crew.vesna.watch);
     await page.tap('#btn-watch');

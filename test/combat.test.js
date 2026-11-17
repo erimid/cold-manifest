@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { validateContent } from '../src/engine/content-schema.js';
 import { hashState } from '../src/engine/hash.js';
-import { BRACE, CAPACITOR, DARK_STATION, FIX, braced, chargeOf, fixOf, gunSlot, pdSlot, roleOf, stationPace, weaponsPowered, whyNoJump } from '../src/sim/combat.js';
+import { BRACE, CAPACITOR, DARK_STATION, DEAD_RECKONING, FIX, braced, chargeOf, fixOf, gunSlot, pdSlot, roleOf, stationPace, stepFix, weaponsPowered, whyNoJump } from '../src/sim/combat.js';
 import { DARK_WALK } from '../src/sim/crew.js';
 import { airlockRooms, nearestAirlock } from '../src/sim/boarding.js';
 import { validateLayout } from '../src/sim/ship.js';
@@ -209,6 +209,18 @@ test('a jump needs a sensor fix, the helm held and the engines running; a hit sh
   sim.state.fix = 0;
   go({ type: 'station.stand', station: 'sensors', down: true });
   assert.match(whyNoJump(sim), /sensors are dark/);
+  // Stripped out by a salvage crew they cannot be mended at sea: the helm works the fix out by dead reckoning, slowly (D-205).
+  go({ type: 'station.stand', station: 'sensors', down: false });
+  Object.assign(sim.state.systems.sensors, { damage: sim.state.systems.sensors.level, stripped: true });
+  sim.step();
+  const fixFor = (time) => {
+    for (let i = 0; i < time * 20; i++) stepFix(sim, 1 / 20);
+  };
+  fixFor(10);
+  assert.ok(fixOf(sim) > 0 && fixOf(sim) < 0.25, `a slow fix without them (${fixOf(sim)})`);
+  assert.match(whyNoJump(sim), /the sensor fix is at/);
+  fixFor((FIX.seconds / DEAD_RECKONING) * 1.6);
+  assert.equal(whyNoJump(sim), null, 'and in the end she can make the run in');
 });
 
 test('running dark costs: a gun on a dark gun deck charges slower, and crew feel their way through an unlit room', () => {

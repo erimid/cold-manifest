@@ -261,9 +261,11 @@ export const EFFECTS = Object.freeze({
   // Another event follows this one, whatever its own conditions say.
   event: {
     args: { event: typed('event') },
-    run(sim, a) {
+    run(sim, a, ctx) {
       const run = sim.state.run;
-      if (run) run.events.next = a.event;
+      // It follows whatever is being answered: the situation in hand (H.7), else the decision on the table.
+      if (ctx.open?.n) ctx.open.next = a.event;
+      else if (run) run.events.next = a.event;
     },
   },
   // Somebody starts following us (sector.js), or gives up (on); or whoever follows loses `delay` hours (H.6).

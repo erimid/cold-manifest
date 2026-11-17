@@ -27,7 +27,7 @@ import { attachJudgement, checkJudgementInvariants, considerOrder, overrode, sta
 import { attachVoice, checkVoiceInvariants, newVoiceState, stepVoice } from '../ai/voice.js';
 import { createEventBus } from '../engine/events.js';
 import { createRngSet } from '../engine/rng.js';
-import { EVENT_CHANCE, attachEvents, buildEvents, checkEventInvariants, eventCommands, newEventState } from '../narrative/events.js';
+import { EVENT_CHANCE, attachEvents, buildEvents, checkEventInvariants, eventCommands, newEventState, stepSituations } from '../narrative/events.js';
 import { buildRules } from '../narrative/rules.js';
 import { ATMOSPHERE_COMMANDS, checkAtmosphereInvariants, stepAtmosphere } from './atmosphere.js';
 import { COMBAT_COMMANDS, START_MONEY, checkCombatInvariants, newCombatState, stepCombat } from './combat.js';
@@ -342,7 +342,7 @@ function stepLights(sim) {
 // Margo decides how she runs the stations she holds (ai/margo.js) once they are settled; what she changes
 // takes hold when they are settled again at the end of the tick.
 const WATCH_HOOKS = { send: (sim, member, room) => sendTo(sim, member, room, 'watch'), postRoom: roomOfStation };
-const SYSTEMS = [(sim) => stepCrew(sim, TICK_SECONDS), (sim) => stepWatches(sim, TICK_SECONDS, WATCH_HOOKS), (sim) => stepHold(sim, TICK_SECONDS), (sim) => stepAtmosphere(sim, TICK_SECONDS), stepPower, stepStations, stepMargo, stepDoors, stepLights, (sim) => stepNerve(sim, TICK_SECONDS), (sim) => stepSenses(sim, TICK_SECONDS), (sim) => stepCombat(sim, TICK_SECONDS), (sim) => stepSector(sim, TICK_SECONDS), (sim) => stepEncounters(sim, TICK_SECONDS), (sim) => stepBoarders(sim, TICK_SECONDS), stepPower, stepStations, stepJudgement, stepVoice];
+const SYSTEMS = [(sim) => stepCrew(sim, TICK_SECONDS), (sim) => stepWatches(sim, TICK_SECONDS, WATCH_HOOKS), (sim) => stepHold(sim, TICK_SECONDS), (sim) => stepAtmosphere(sim, TICK_SECONDS), stepPower, stepStations, stepMargo, stepDoors, stepLights, (sim) => stepNerve(sim, TICK_SECONDS), (sim) => stepSenses(sim, TICK_SECONDS), (sim) => stepCombat(sim, TICK_SECONDS), (sim) => stepSector(sim, TICK_SECONDS), (sim) => stepSituations(sim, TICK_SECONDS), (sim) => stepEncounters(sim, TICK_SECONDS), (sim) => stepBoarders(sim, TICK_SECONDS), stepPower, stepStations, stepJudgement, stepVoice];
 
 /**
  * Create a simulation.

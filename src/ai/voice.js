@@ -222,8 +222,31 @@ function speak(sim, entry, line) {
   sim.events.emit('ai.line', { ...spoken, trigger: entry.trigger });
 }
 
+/** How long a line stays up, in ticks. */
+const lineTicks = (text) => Math.ceil((LINE_BASE_SECONDS + text.length * LINE_SECONDS_PER_CHAR + LINE_GAP_SECONDS) * TICKS);
+
+/**
+ * Say words that are not from the library: the sign of a situation aboard (H.7), which is content of its own.
+ * It cuts in on whatever she was saying. With her core dark she says nothing. Returns true if it was said.
+ */
+export function sayText(sim, { id, text, category = 'situation', priority = 4, trigger = 'event.opened' }) {
+  const ai = sim.state.ai;
+  if (!text || aiCoreStatus(sim).state === 'offline') return false;
+  ai.speaking = { id, until: sim.state.tick + lineTicks(text), priority };
+  ai.said += 1;
+  const spoken = { n: ai.said, tick: sim.state.tick, id, category, priority, text };
+  ai.log.push(spoken);
+  if (ai.log.length > LOG_MAX) ai.log.shift();
+  scheduleIdle(sim);
+  sim.events.emit('ai.line', { ...spoken, trigger });
+  return true;
+}
+
 /** Listen for the things she remarks on. Called once when the sim is created. */
 export function attachVoice(sim) {
+  // Something aboard wants looking at (H.7): she says what is known of it, and where.
+  sim.events.on('event.opened', (event) => event.situation !== undefined && sayText(sim, { id: `situation.${event.event}`, text: event.sign }));
+  sim.events.on('event.lapsed', (event) => event.situation !== undefined && event.text && sayText(sim, { id: `lapsed.${event.event}`, text: event.text, trigger: 'event.lapsed' }));
   for (const trigger of Object.keys(TRIGGERS)) {
     if (trigger === 'idle' || trigger === 'run.start') continue;
     sim.events.on(trigger, (event) => requestLine(sim, trigger, event));
