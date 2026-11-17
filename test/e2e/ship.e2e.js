@@ -112,6 +112,27 @@ const doorIs = (page, id, state, openness) =>
  * A hit target's box and a point to tap it at, in page pixels. For a room that is its middle, or the nearest
  * point along its middle that no crew member's body covers (people stand in rooms, D-132).
  */
+/** What the ship looked like when a tap check went wrong (CI only fails where we cannot look). */
+const dump = async (page, label, extra = {}) =>
+  console.log(`        DIAG ${label}`, JSON.stringify({
+    ...extra,
+    ...(await game(page, () => {
+      const c = window.coldManifest;
+      return {
+        tick: c.sim.state.tick,
+        paused: c.sim.state.paused,
+        sel: c.shipView.debug.selected,
+        selCrew: c.shipView.debug.selectedCrew,
+        status: document.querySelector('#status')?.textContent.slice(0, 200),
+        vp: [window.innerWidth, window.innerHeight],
+        crew: Object.values(c.sim.state.crew).map((m) => [m.id, m.room, m.task, m.goal, Math.round(m.x * 10) / 10, Math.round(m.y * 10) / 10]),
+        doors: Object.entries(c.sim.state.doors).filter(([, d]) => d.state !== 'closed').map(([id, d]) => [id, d.state]),
+        targets: c.shipView.debug.targets().filter((t) => t.kind !== 'room').map((t) => [t.id, Math.round(t.x), Math.round(t.y), Math.round(t.w), Math.round(t.h), t.priority]),
+        rooms: c.shipView.debug.targets().filter((t) => t.kind === 'room' && ['door_control', 'bridge', 'aft_corridor', 'quarters'].includes(t.id)).map((t) => [t.id, Math.round(t.x), Math.round(t.y), Math.round(t.w), Math.round(t.h)]),
+      };
+    })),
+  }));
+
 async function target(page, id) {
   const all = await game(page, () => window.coldManifest.shipView.debug.targets());
   const t = all.find((x) => x.id === id);
@@ -453,6 +474,7 @@ async function touchTests(browser) {
     const t = await target(page, 'door_control');
     await page.touchscreen.tap(t.mx, t.my);
     await sleep(200);
+    if (!/no way through/i.test(await page.textContent('#status'))) await dump(page, 'locked door', { t });
     assert.match(await page.textContent('#status'), /no way through/i);
     assert.equal(await game(page, () => window.coldManifest.sim.state.crew.okoro.goal), null);
     await game(page, () => window.coldManifest.sim.enqueue({ type: 'door.set', door: 'd_door_control', state: 'closed' }));
@@ -499,7 +521,10 @@ async function touchTests(browser) {
   await check('jettison: an unsealed room refuses and says why', async () => {
     const d = await target(page, 'd_door_control');
     await page.touchscreen.tap(d.mx, d.my);
-    await doorIs(page, 'd_door_control', 'open', 1);
+    await doorIs(page, 'd_door_control', 'open', 1).catch(async (err) => {
+      await dump(page, 'jettison unsealed', { d });
+      throw err;
+    });
     const t = await target(page, 'door_control');
     await page.touchscreen.tap(t.mx, t.my);
     await page.tap('#btn-jettison');
@@ -1188,7 +1213,10 @@ async function margoTests(browser) {
     await page.keyboard.press('Escape');
     const t = await target(page, 'bridge');
     await page.touchscreen.tap(t.mx, t.my);
-    await page.tap('#btn-lights');
+    await page.tap('#btn-lights', { timeout: 4000 }).catch(async (err) => {
+      await dump(page, 'lamp', { t });
+      throw err;
+    });
     assert.match(await page.textContent('#status'), /Ilse wants the lamp on\. Not after the dark in Bridge\./);
     assert.equal((await room(page, 'bridge')).lightsOn, true);
   });
