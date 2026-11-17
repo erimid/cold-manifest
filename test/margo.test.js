@@ -289,3 +289,15 @@ test('the station table settles once a tick, matches a fresh reading, and surviv
   assert.equal(copy.state.ai.mind, 'own');
   assert.equal(copy.state.stations.sensors.cover, 'hers');
 });
+
+test('under way on a crossing the drive needs her, so it gets her attention before the doors (H.8)', async () => {
+  const { needOf } = await import('../src/sim/stations.js');
+  const { castOff } = await import('./helpers.js');
+  const { bestRoute } = await import('../src/sim/sector.js');
+  const sim = createSim({ seed: 'drive', ship: SHIP, crew: CREW, ...CATALOG, margo: 'own', sector: content.require('sectors', 'the-reach'), run: { pursuit: false } });
+  assert.equal(needOf(sim, 'engines'), 0, 'in port the drive is idle');
+  const { run } = sim.state;
+  const port = run.map.nodes.find((node) => node.kind === 'port' && node.id !== run.at && bestRoute(run.map, run.at, node.id, { ports: false }).path);
+  castOff(sim, bestRoute(run.map, run.at, port.id, { ports: false }).path);
+  assert.equal(needOf(sim, 'engines'), 1, 'under way it is in use');
+});

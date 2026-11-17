@@ -23,10 +23,15 @@
 // long crossing; three keep it fresh with fewer hands up; all hands is for
 // the bad quarter of an hour.
 
+import { SHIP_HOUR, WATCH_HOURS } from './shipclock.js';
+
 const TICKS = 20;
 
-/** A watch in seconds, and fatigue gained a second awake (more at work) and lost a second asleep. */
-export const WATCH = Object.freeze({ seconds: 240, tire: 1 / 480, work: 1.5, rest: 1 / 500 });
+/**
+ * A watch in seconds (WATCH_HOURS on the ship clock, 240 s: H.8 made the 240 s watch eight hours, D-206), and
+ * fatigue gained a second awake (more at work) and lost a second asleep.
+ */
+export const WATCH = Object.freeze({ seconds: WATCH_HOURS * SHIP_HOUR, tire: 1 / 480, work: 1.5, rest: 1 / 500 });
 /** Fatigue past `from` slows a hand, down to `floor` of their pace at 1. */
 export const TIRED = Object.freeze({ from: 0.6, floor: 0.6 });
 

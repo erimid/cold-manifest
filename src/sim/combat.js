@@ -87,7 +87,7 @@ export const START_MONEY = 120;
  * contact and a miss `fear.miss`; at the contact's `nerve` it breaks off. Firing lights us up by `flare`
  * on top of the gun's own flash, and costs `standing` with the faction of a ship that answers to one.
  */
-export const GUN = Object.freeze({ hit: 0.85, floor: 0.35, far: 0.5, flightPerUnit: 0.08, fear: Object.freeze({ hit: 1, miss: 0.35 }), flare: 0.35, standing: -2 });
+export const GUN = Object.freeze({ hit: 0.85, floor: 0.35, far: 0.5, flightPerUnit: 0.08, fear: Object.freeze({ hit: 1, miss: 0.5 }), flare: 0.35, standing: -2 });
 /** Point defence (D-174): each charged burst downs what it is aimed at with chance `hit`, and `edge` more for each point the guns' station is rated over the book (a gunner on it), less under. */
 export const PD = Object.freeze({ hit: 0.45, edge: 0.6 });
 /** What a carrier's drones spit at our hull (S2.5, D-097; content/weapons/). */

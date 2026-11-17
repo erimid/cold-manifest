@@ -509,7 +509,8 @@ function fight(sim, member, foes, seconds) {
   if (!struck.length) return false;
   member.task = 'fighting';
   const target = struck.reduce((weakest, other) => (other.health < weakest.health ? other : weakest));
-  const blow = ((0.5 + 0.5 * member.health) * skillFactor(skillOf(member, 'combat')) * seconds) / MELEE_SECONDS;
+  // A boarder hits harder for what they carry (`party.arms`, H.8): sidearms, batons and stunners against our fists and spanners.
+  const blow = ((0.5 + 0.5 * member.health) * skillFactor(skillOf(member, 'combat')) * (member.agent?.arms ?? 1) * seconds) / MELEE_SECONDS;
   harmCrew(sim, target.id, stun ? Math.min(blow, target.health - STUN_FLOOR) : blow, 'melee');
   if (stun && target.health <= STUN_FLOOR + 1e-9) target.stunned = true;
   return true;

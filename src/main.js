@@ -7,6 +7,7 @@ import { AI_SLOTS } from './ai/categories.js';
 import { createAudio } from './audio/engine.js';
 import { EVENT_SOUNDS } from './audio/patches.js';
 import { createClock } from './engine/clock.js';
+import { createTempo } from './sim/tempo.js';
 import { loadContent } from './engine/content-browser.js';
 import { createInput } from './engine/input.js';
 import { createRng, newRunSeed } from './engine/rng.js';
@@ -25,7 +26,7 @@ import { createShipView } from './ui/shipview.js';
 import { renderContracts, renderEvent, renderHub, renderPort, renderScene, renderSummary } from './ui/screens.js';
 import { renderTitle } from './ui/title.js';
 
-const VERSION = '0.29.0';
+const VERSION = '0.30.0';
 
 const params = new URLSearchParams(window.location.search);
 const flags = {
@@ -49,8 +50,8 @@ function storage() {
 const settings = createSettings({
   storage: storage(),
   touch: window.matchMedia('(pointer: coarse)').matches,
-  // ?autopause=0 and ?sound=0 override the saved settings for this visit (tests use them).
-  overrides: { autoPause: onOff('autopause'), sound: onOff('sound') },
+  // ?autopause=0, ?sound=0 and ?fast=0 override the saved settings for this visit (tests use them).
+  overrides: { autoPause: onOff('autopause'), sound: onOff('sound'), fastTime: onOff('fast') },
 });
 
 const content = loadContent();
@@ -116,6 +117,8 @@ const AUTO_PAUSE_TEXT = {
 /** The run in progress, or null. `contract` (the board's offer) is null in the sandbox. */
 let sim;
 let clock;
+/** Fast time on a quiet crossing (H.8): how many times normal speed the clock runs this frame. */
+let tempo;
 let shipView;
 let runInfo = null;
 /** Finished runs this visit, and the crew who died in them (the records hub; the real Wall is Stage 9). */
@@ -128,6 +131,7 @@ function newGame(seed, { contract = null, pursuit } = {}) {
   // Only a run with a contract meets events: the sandbox has nowhere to show them.
   sim = createSim({ seed, ship: content.require('ships', 'margin-of-error'), crew, watches: flags.watches, margo: flags.margo, lines: content.all('ai-lines'), weapons: content.all('weapons'), rules, events: contract ? content.all('events') : [], sector: content.require('sectors', 'the-reach'), run: pursuit === undefined ? {} : { pursuit }, contract: contract?.template ?? null, ports, encounters: content.all('encounters') });
   clock = createClock({ sim, tickSeconds: TICK_SECONDS });
+  tempo = createTempo();
   clock.onChange(() => audio.play('pause'));
   runInfo = { contract, seed, seen: new Set([sim.state.run.at]), pending: null, doom: null, handedOver: false };
   const mine = sim;
@@ -139,7 +143,7 @@ function newGame(seed, { contract = null, pursuit } = {}) {
       if (name && !(HIDDEN_ALARMS.has(type) && unseen(mine, event))) audio.play(name);
     });
   }
-  shipView = createShipView({ canvas: viewCanvas, root, input, sim, clock, audio, settings, debug: flags.debug, crewReplies, onBack: () => machine.go('title') });
+  shipView = createShipView({ canvas: viewCanvas, root, input, sim, clock, tempo, audio, settings, debug: flags.debug, crewReplies, onBack: () => machine.go('title') });
   for (const item of AUTO_PAUSE) {
     const trip = (event) => {
       if (!settings.values.autoPause[item.id] || clock.paused) return;
@@ -344,7 +348,13 @@ function frame(now) {
   const dt = Math.min(0.25, Math.max(0, (now - last) / 1000));
   last = now;
 
-  if (LIVE_STATES.has(machine.state)) clock.advance(dt);
+  if (LIVE_STATES.has(machine.state)) {
+    // Fast time when nothing is happening on a crossing (H.8, D-207); straight back to normal when anything does.
+    if (clock.paused) tempo.reset();
+    else clock.tempo = tempo.step(sim, dt, settings.values.fastTime !== false);
+    if (clock.paused) clock.tempo = 1;
+    clock.advance(dt);
+  }
   settleRun();
   machine.update(dt);
 

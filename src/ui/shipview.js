@@ -36,6 +36,7 @@ import { roomView, sensorsUp, signature, unseen } from '../sim/senses.js';
 import { SPACE, SYSTEMS } from '../sim/systems.js';
 import { roleOf, skillWords } from '../sim/roles.js';
 import { TICK_SECONDS } from '../sim/sim.js';
+import { SHIP_HOUR, clockText, hoursText } from '../sim/shipclock.js';
 import { nearestHand, situationViews } from '../narrative/events.js';
 import { createChart } from './chart.js';
 import { el } from './dom.js';
@@ -84,7 +85,7 @@ const seconds = (ticks) => `${Math.max(0, Math.ceil(ticks * TICK_SECONDS))}s`;
 const TYPE_SPEED = 45;
 const BLIP_EVERY = 3;
 
-export function createShipView({ canvas, root, input, sim, clock, onBack, audio = null, settings = null, debug = false, crewReplies = {} }) {
+export function createShipView({ canvas, root, input, sim, clock, tempo = null, onBack, audio = null, settings = null, debug = false, crewReplies = {} }) {
   const { layout } = sim;
   const intercom = createIntercom(crewReplies);
   let heard = null; // the last intercom reply: { name, text, at } (real time, so it shows while paused)
@@ -236,10 +237,8 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
 
   // ---------- the AI's text box, her log, and settings ----------
 
-  const stamp = (tick) => {
-    const s = Math.floor(tick * TICK_SECONDS);
-    return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
-  };
+  /** When a line was said, on the ship clock (H.8). */
+  const stamp = (tick) => clockText(tick);
 
   /** Type the newest line out a few characters a frame. Real time, so a line finishes even if the game pauses on it. */
   function updateVoice() {
@@ -307,7 +306,7 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
     } }, label, el('small', {}, on ? 'On' : 'Off'));
     nodes.sheet.replaceChildren(
       el('div', { class: 'stencil' }, 'Settings'),
-      el('div', { class: 'sheet__pairs' }, toggle('set-sound', 'Sound', 'sound', settings.values.sound), toggle('set-shake', 'Screen shake', 'shake', settings.values.shake), toggle('set-scanlines', 'Scanlines', 'scanlines', settings.values.scanlines !== false)),
+      el('div', { class: 'sheet__pairs sheet__pairs--four' }, toggle('set-sound', 'Sound', 'sound', settings.values.sound), toggle('set-shake', 'Screen shake', 'shake', settings.values.shake), toggle('set-scanlines', 'Scanlines', 'scanlines', settings.values.scanlines !== false), toggle('set-fast', 'Fast time', 'fastTime', settings.values.fastTime !== false)),
       el('div', { class: 'stencil sheet__sub' }, 'Pause the game when'),
       el('div', { class: 'sheet__pairs' }, ...AUTO_PAUSE.map((item) => toggle(`set-pause-${item.id}`, item.label, `autoPause.${item.id}`, settings.values.autoPause[item.id]))),
     );
@@ -526,7 +525,7 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
     setText(power.lights, `Lights · ${litRooms(sim)} rooms`);
     const { roster } = sim.state;
     const left = watchLeft(sim);
-    setText(power.watchNote, roster.watches > 1 ? `${watchName(roster.on)} watch · ${Math.floor(left / 60)}:${String(Math.floor(left % 60)).padStart(2, '0')}` : roster.watches === 1 ? 'All hands' : 'No watch bill');
+    setText(power.watchNote, roster.watches > 1 ? `${watchName(roster.on)} watch · ${hoursText(left / SHIP_HOUR)} left` : roster.watches === 1 ? 'All hands' : 'No watch bill');
     for (const { level, node } of power.outputs) {
       node.classList.toggle('is-on', output === level && limit !== null);
       node.setAttribute('aria-pressed', String(output === level));
@@ -1681,11 +1680,17 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
 
   let lastClock = '';
   function updateClock() {
-    // Fixed width, so the bar beside it never reflows as the time ticks.
-    const text = `${clock.paused ? 'PAUSED ' : 'running'} ${stamp(sim.state.tick)}`;
+    // The ship clock (H.8): the day and the hour, and the watch with the deck when one is kept. Fixed width, so
+    // the bar beside it never reflows as the time ticks; the state word says paused, running or fast time.
+    const fast = !clock.paused && clock.tempo > 1;
+    const state = clock.paused ? 'PAUSED ' : fast ? `FAST ${Math.round(clock.tempo)}x` : 'running';
+    const watch = sim.state.roster.watches > 1 ? ` · ${watchName(sim.state.roster.on)} watch` : '';
+    const text = `${state} ${clockText(sim.state.tick)}${watch}`;
     if (text !== lastClock) {
       lastClock = text;
       nodes.clock.textContent = text;
+      nodes.clock.classList.toggle('is-fast', fast);
+      nodes.clock.title = fast ? 'Fast time: nothing is happening' : clock.paused ? 'Paused' : tempo?.reason ? `Normal speed: ${tempo.reason}` : 'Normal speed';
     }
     const label = clock.paused ? 'Resume' : 'Pause';
     if (nodes.pauseLabel.textContent !== label) {

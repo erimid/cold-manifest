@@ -11,7 +11,7 @@
 //     "advance": 200,                       paid when it is taken, and taken off the fee at the drop
 //     "latePay": 0.5,                       the share of the fee still paid when late; 0 fails it the moment it is late
 //     "followed": 0.75,                     the chance somebody follows it (the pursuit hook, sector.js)
-//     "slack": [0.55, 0.7],                 spare time on the deadline, a share of the cheapest way's hours, instead of the sector's (H.6)
+//     "slack": [0.25, 0.4],                 spare time on the deadline, a share of the cheapest way's hours, instead of the sector's (H.6)
 //     "value": 160,                         what a port pays for one of its crates if you sell the cargo instead
 //     "cargo": [ { "count": 4, "kind": "cargo", "label": "...", "contents": "...", "contraband": true } ],
 //                                           the crates it puts in the hold: sealed manifest crates by

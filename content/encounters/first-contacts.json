@@ -55,6 +55,7 @@
       },
       "party": {
         "size": 3,
+        "arms": 2.5,
         "names": [
           "Officer Brandt",
           "Scanner Ileri",
@@ -127,6 +128,7 @@
       },
       "party": {
         "size": 3,
+        "arms": 2.5,
         "names": [
           "Kett",
           "Orla",
@@ -201,6 +203,7 @@
       },
       "party": {
         "size": 3,
+        "arms": 2.5,
         "names": [
           "Warrant Officer Haas",
           "Tracker Venn",
@@ -262,6 +265,7 @@
       "nerve": 1,
       "party": {
         "size": 2,
+        "arms": 1.5,
         "names": [
           "Cutter Dubois",
           "Cutter Pym"

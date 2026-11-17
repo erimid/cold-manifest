@@ -238,15 +238,16 @@ export function openEvent(sim, id, { force = false, node } = {}) {
 /**
  * An event on the lane to a point we are about to pass (H.6; sector.js threw its dice when the lane began).
  * The highest priority first: the dice only fall between the events of one priority, and go down a priority
- * when none of them can open. Returns true if one opened.
+ * when none of them can open. With `aboard: true` only situations aboard can come (a lane's hourly chance,
+ * H.8), never a decision over the radio. Returns true if one opened.
  */
-export function rollLaneEvent(sim, nodeId) {
+export function rollLaneEvent(sim, nodeId, { aboard: only = false } = {}) {
   const run = sim.state.run;
   const state = run?.events;
   const node = run && nodeOf(run.map, nodeId);
   if (!state || !node || !canMeet(sim) || !sim.transit.all.length) return false;
   const here = new Set(state.aboard.map((one) => one.id));
-  const fits = sim.transit.all.filter((event) => (event.at ?? []).includes(node.kind) && !here.has(event.id) && !(event.once !== false && state.met.includes(event.id)));
+  const fits = sim.transit.all.filter((event) => (event.at ?? []).includes(node.kind) && !here.has(event.id) && !(event.once !== false && state.met.includes(event.id)) && (!only || isAboard(event)));
   for (const priority of [...new Set(fits.map((event) => event.priority ?? 0))].sort((a, b) => b - a)) {
     const pool = fits.filter((event) => (event.priority ?? 0) === priority);
     while (pool.length) {

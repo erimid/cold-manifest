@@ -43,7 +43,7 @@
       "short": "Slugs",
       "kind": "kinetic",
       "power": 1,
-      "charge": 13,
+      "charge": 9,
       "flight": 1.1,
       "damage": 2,
       "pierce": 0,
@@ -57,7 +57,7 @@
       },
       "blurb": "A mass driver salvaged from a mining rig, and the one gun a hauler is allowed. Slow, loud, fed by hand three slugs to a load. It cannot sink anything; it can make a ship think twice.",
       "role": "gun",
-      "range": 30
+      "range": 40
     },
     {
       "id": "breaching-lance",

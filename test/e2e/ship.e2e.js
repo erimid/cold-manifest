@@ -113,6 +113,12 @@ const doorIs = (page, id, state, openness) =>
  * point along its middle that no crew member's body covers (people stand in rooms, D-132).
  */
 /** What the ship looked like when a tap check went wrong (CI only fails where we cannot look). */
+/** E2E_CPU=6 slows the page's CPU that many times over (Chrome's own throttle), to look for checks that race the clock on a slow runner. */
+async function throttle(context, page) {
+  const rate = Number(process.env.E2E_CPU ?? 1);
+  if (rate > 1) await (await context.newCDPSession(page)).send('Emulation.setCPUThrottlingRate', { rate });
+}
+
 const dump = async (page, label, extra = {}) =>
   console.log(`        DIAG ${label}`, JSON.stringify({
     ...extra,
@@ -124,6 +130,7 @@ const dump = async (page, label, extra = {}) =>
         sel: c.shipView.debug.selected,
         selCrew: c.shipView.debug.selectedCrew,
         status: document.querySelector('#status')?.textContent.slice(0, 200),
+        info: document.querySelector('#info') && !document.querySelector('#info').hidden ? document.querySelector('#info').textContent.slice(0, 120) : null,
         vp: [window.innerWidth, window.innerHeight],
         crew: Object.values(c.sim.state.crew).map((m) => [m.id, m.room, m.task, m.goal, Math.round(m.x * 10) / 10, Math.round(m.y * 10) / 10]),
         doors: Object.entries(c.sim.state.doors).filter(([, d]) => d.state !== 'closed').map(([id, d]) => [id, d.state]),
@@ -173,6 +180,7 @@ async function touchTests(browser) {
   console.log('iPad, landscape, touch');
   const context = await browser.newContext({ ...devices['iPad (gen 7) landscape'] });
   const page = await context.newPage();
+  await throttle(context, page);
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
   await openShip(page, (sel) => page.tap(sel));
@@ -749,7 +757,7 @@ async function voiceTests(browser) {
     await page.waitForFunction((text) => document.querySelector('#ai-text').textContent === text, line.text, { timeout: 4000 });
     assert.ok((await game(page, () => window.coldManifest.audio.stats.played.blip ?? 0)) > 0, 'her voice blips as it types');
     await page.tap('#btn-log');
-    assert.match(await page.textContent('#ailog'), new RegExp(`00:00\\s+${line.text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+    assert.match(await page.textContent('#ailog'), new RegExp(`Day 1 0800\\s+${line.text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
     await page.tap('#btn-log');
     assert.equal(await page.isHidden('#sheet'), true);
   });
@@ -2075,7 +2083,7 @@ async function watchTests(browser) {
   await check('a new run keeps two watches: the watch on deck walks to its posts and the watch below turns in', async () => {
     assert.equal(await game(page, () => window.coldManifest.sim.state.roster.watches), 2);
     await page.tap('#btn-breakers');
-    assert.match(await page.textContent('#watch-note'), /First watch · \d:\d\d/);
+    assert.match(await page.textContent('#watch-note'), /First watch · \d+ h( \d+ min)? left/);
     await page.waitForFunction(() => {
       const s = window.coldManifest.sim.state;
       const crew = Object.values(s.crew).filter((m) => m.owner === 'player');

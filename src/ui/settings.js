@@ -6,7 +6,7 @@ const KEY = 'cold-manifest.settings.v1';
 
 /** Auto-pause is on by default on touch screens, where a slip of the finger costs more (brief §7). */
 export function defaultSettings({ touch = false } = {}) {
-  return { sound: true, shake: true, scanlines: true, autoPause: { fired: touch, contact: touch, boarded: touch, fire: touch, breach: touch, death: touch, objection: touch, refusal: touch, situation: touch } };
+  return { sound: true, shake: true, scanlines: true, fastTime: true, autoPause: { fired: touch, contact: touch, boarded: touch, fire: touch, breach: touch, death: touch, objection: touch, refusal: touch, situation: touch } };
 }
 
 /** What each auto-pause setting is called, and which game event trips it. */
@@ -31,7 +31,7 @@ export const AUTO_PAUSE = Object.freeze([
 export function mergeSettings(defaults, saved) {
   const out = structuredClone(defaults);
   if (!saved || typeof saved !== 'object') return out;
-  for (const key of ['sound', 'shake', 'scanlines']) if (typeof saved[key] === 'boolean') out[key] = saved[key];
+  for (const key of ['sound', 'shake', 'scanlines', 'fastTime']) if (typeof saved[key] === 'boolean') out[key] = saved[key];
   for (const key of Object.keys(out.autoPause)) {
     if (typeof saved.autoPause?.[key] === 'boolean') out.autoPause[key] = saved.autoPause[key];
   }
@@ -40,7 +40,7 @@ export function mergeSettings(defaults, saved) {
 
 /**
  * Load settings. `storage` is localStorage (or null where it is blocked);
- * `overrides` come from the URL (?autopause=0, ?sound=0) and are not saved.
+ * `overrides` come from the URL (?autopause=0, ?sound=0, ?fast=0) and are not saved.
  */
 export function createSettings({ storage, touch, overrides = {} }) {
   let saved = null;
@@ -51,6 +51,7 @@ export function createSettings({ storage, touch, overrides = {} }) {
   }
   const values = mergeSettings(defaultSettings({ touch }), saved);
   if (typeof overrides.sound === 'boolean') values.sound = overrides.sound;
+  if (typeof overrides.fastTime === 'boolean') values.fastTime = overrides.fastTime;
   if (typeof overrides.autoPause === 'boolean') for (const key of Object.keys(values.autoPause)) values.autoPause[key] = overrides.autoPause;
   const listeners = new Set();
 

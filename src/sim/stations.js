@@ -250,7 +250,9 @@ export function needOf(sim, id) {
     case 'sensors':
       return state.scope?.contacts.some((contact) => contact.state !== 'lost') ? 2 : 1;
     case 'engines':
-      return state.helm?.burn ? 1 : 0;
+      // In use on a burn, or under way on a crossing, where the drive sets the pace (H.8: left at her floor, the
+      // drive made a crossing she flew half as long again as one the crew flew).
+      return state.helm?.burn || (state.run?.crossing?.phase === 'under way' && !state.run.crossing.stalled) ? 1 : 0;
     case 'doors':
       return state.boarding ? 2 : 1;
     case 'shields':

@@ -1,12 +1,13 @@
 // The sector chart, its lanes, and crossings over it (S3.1, D-104; H.6, D-193 to D-199).
 
+import { SHIP_HOUR } from '../src/sim/shipclock.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { createRng } from '../src/engine/rng.js';
 import { hashState } from '../src/engine/hash.js';
 import { struck } from '../src/sim/encounters.js';
-import { COAST, NODE_KINDS, bestRoute, checkSector, cheapestRoute, generateSector, hoursLeft, laneBetween, nodeOf, paceOf, routeTotals, whyNoRunIn } from '../src/sim/sector.js';
+import { COAST, NODE_KINDS, PURSUER, bestRoute, checkSector, cheapestRoute, generateSector, hoursLeft, laneBetween, nodeOf, paceOf, routeTotals, whyNoRunIn } from '../src/sim/sector.js';
 import { checkInvariants, createSim } from '../src/sim/sim.js';
 import { CATALOG, CREW, LINES, SHIP, castOff, content, fly, flyCrossing } from './helpers.js';
 
@@ -27,7 +28,7 @@ const step = (sim, n = 1) => {
   for (let i = 0; i < n; i++) sim.step();
 };
 /** Ticks in one ship hour. */
-const HOUR = REACH.hour * 20;
+const HOUR = SHIP_HOUR * 20;
 
 test('every seeded chart is sound: 15 to 25 points, all reachable, every lane with hours and a risk, a delivery we can afford', () => {
   const kinds = new Set();
@@ -206,6 +207,8 @@ test('the cheapest way across reaches the delivery, port to port, and is deliver
   assert.ok(seen.includes('sector.delivered'));
 });
 
+const BUSY = 3;
+
 /** Put the sim on a lane of the given risk for as long as it takes, and count what turns up there. */
 function sitOn(risk, hours, seed = 'sit') {
   const sim = createSim({ seed, ship: SHIP, ...CATALOG, sector: REACH, encounters: ENCOUNTERS, run: { pursuit: false } });
@@ -214,6 +217,8 @@ function sitOn(risk, hours, seed = 'sit') {
   if (!lane) return null;
   run.at = lane.a;
   run.crossing = { path: [lane.a, lane.b], leg: 0, t: 0, length: 1e6, eventAt: null, phase: 'under way', stalled: false, hours: 0 };
+  // Three times the lane's own chance an hour, so a short sit sees enough ships (the expectation below allows for it).
+  for (const [id, one] of Object.entries(run.risks)) run.risks[id] = { ...one, contacts: one.contacts * BUSY };
   const met = {};
   let hits = 0;
   sim.events.on('contact.spawned', (event) => (met[event.encounter] = (met[event.encounter] ?? 0) + 1));
@@ -226,14 +231,14 @@ function sitOn(risk, hours, seed = 'sit') {
 }
 
 test('risks along the route change what turns up: each lane brings its own ships, and hazard lanes strike the hull', () => {
-  const hours = 60;
+  const hours = 30;
   for (const risk of REACH.risks) {
     const seen = [0, 1, 2].map((i) => sitOn(risk.id, hours, `sit:${risk.id}:${i}`)).filter(Boolean);
     assert.ok(seen.length, `a chart with a ${risk.id} lane`);
     const met = {};
     for (const one of seen) for (const [id, n] of Object.entries(one.met)) met[id] = (met[id] ?? 0) + n;
     const total = Object.values(met).reduce((a, b) => a + b, 0);
-    const expected = risk.contacts * hours * seen.length;
+    const expected = risk.contacts * BUSY * hours * seen.length;
     assert.ok(total >= expected * 0.4 && total <= expected * 2 + 3, `${risk.id}: ${total} contacts in ${hours * seen.length} hours, about ${expected} expected`);
     for (const id of Object.keys(met)) assert.ok(risk.encounters[id] > 0, `${risk.id} brought a ${id}, which it does not hold`);
     const hits = seen.reduce((sum, one) => sum + one.hits, 0);
@@ -291,6 +296,29 @@ test('a follower slipped any other way picks the trail up again after its lead',
   assert.equal(run.pursuit.done, false);
   assert.equal(run.pursuit.contact, null);
   assert.equal(run.pursuit.wait, REACH.pursuit.lead);
+});
+
+test('a follower slipped in the dark takes longer each time to find us again, and gives up after three', () => {
+  const sim = runSim('shake', { pursuit: true });
+  const { run } = sim.state;
+  castOff(sim, nearestPort(sim));
+  run.crossing.length = 1e6;
+  const ended = [];
+  sim.events.on('pursuit.ended', (event) => ended.push(event.outcome));
+  for (let slip = 1; slip <= PURSUER.shake; slip++) {
+    sim.enqueue({ type: 'debug.run', pursuit: 'catch' });
+    step(sim);
+    const contact = pursuer(sim);
+    assert.ok(contact, `found us, time ${slip}`);
+    sim.events.emit('encounter.ended', { contact: contact.id, encounter: contact.encounter, outcome: 'quiet', pursuer: true, tick: sim.state.tick });
+    assert.equal(run.pursuit.slipped, slip);
+    if (slip < PURSUER.shake) {
+      assert.equal(run.pursuit.done, false);
+      assert.equal(run.pursuit.wait, REACH.pursuit.lead * (1 + slip), 'a longer lead each time');
+    }
+  }
+  assert.equal(run.pursuit.done, true, 'shaken off for good');
+  assert.deepEqual(ended, ['shaken']);
 });
 
 test('the debug panel brings the follower in under way, and sends it home', () => {

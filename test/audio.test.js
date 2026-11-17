@@ -125,7 +125,7 @@ test('settings default to auto-pause on touch only, and every auto-pause has a s
 });
 
 test('saved settings are merged carefully, saved on change, and survive bad storage', () => {
-  assert.deepEqual(mergeSettings(defaultSettings({ touch: true }), { sound: 'loud', shake: false, autoPause: { fire: false, tea: true }, junk: 1 }), { sound: true, shake: false, scanlines: true, autoPause: { fired: true, contact: true, boarded: true, fire: false, breach: true, death: true, objection: true, refusal: true, situation: true } });
+  assert.deepEqual(mergeSettings(defaultSettings({ touch: true }), { sound: 'loud', shake: false, autoPause: { fire: false, tea: true }, junk: 1 }), { sound: true, shake: false, scanlines: true, fastTime: true, autoPause: { fired: true, contact: true, boarded: true, fire: false, breach: true, death: true, objection: true, refusal: true, situation: true } });
 
   const store = new Map([['cold-manifest.settings.v1', JSON.stringify({ sound: false })]]);
   const storage = { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, v) };
@@ -136,10 +136,10 @@ test('saved settings are merged carefully, saved on change, and survive bad stor
   settings.set('autoPause.breach', true);
   settings.set('sound', true);
   assert.deepEqual(seen, [true, true]);
-  assert.deepEqual(JSON.parse(store.get('cold-manifest.settings.v1')), { sound: true, shake: true, scanlines: true, autoPause: { fired: false, contact: false, boarded: false, fire: false, breach: true, death: false, objection: false, refusal: false, situation: false } });
+  assert.deepEqual(JSON.parse(store.get('cold-manifest.settings.v1')), { sound: true, shake: true, scanlines: true, fastTime: true, autoPause: { fired: false, contact: false, boarded: false, fire: false, breach: true, death: false, objection: false, refusal: false, situation: false } });
 
   // URL overrides apply for the visit; broken or missing storage falls back to defaults.
-  assert.deepEqual(createSettings({ storage, touch: true, overrides: { autoPause: false, sound: false } }).values, { sound: false, shake: true, scanlines: true, autoPause: { fired: false, contact: false, boarded: false, fire: false, breach: false, death: false, objection: false, refusal: false, situation: false } });
+  assert.deepEqual(createSettings({ storage, touch: true, overrides: { autoPause: false, sound: false } }).values, { sound: false, shake: true, scanlines: true, fastTime: true, autoPause: { fired: false, contact: false, boarded: false, fire: false, breach: false, death: false, objection: false, refusal: false, situation: false } });
   const bad = { getItem: () => '{not json', setItem: () => { throw new Error('full'); } };
   const fallback = createSettings({ storage: bad, touch: true });
   assert.equal(fallback.values.autoPause.fire, true);

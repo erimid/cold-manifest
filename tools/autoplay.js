@@ -12,6 +12,9 @@
 //   --ship ID      ship layout to fly (default "margin-of-error")
 //
 //   --report FILE  also write the report to FILE as Markdown
+//   --only LIST    play only these modes, comma separated (chaos, scenario, fire, crossing, encounter,
+//                  boarding); for tuning, the gate plays them all (H.8)
+//   --once         play each seed once, with no replay check; for tuning only (H.8)
 //
 // Autoplay v1 (end of Stage 1) plays every seed twice over (S2.1 and S2.2 add modes below):
 //   chaos      a bot that does everything at random, to find crashes
@@ -66,6 +69,7 @@ import { BLUFFS, ENDINGS, SPAWN, bluffChance, scopeView, whyNoPay } from '../src
 import { BOARD, GOALS, OUTCOMES as BOARD_OUTCOMES, REASONS, whyNoBribe } from '../src/sim/boarders.js';
 import { hidingSpot, lockersFree } from '../src/sim/agents.js';
 import { boardOffers } from '../src/sim/runflow.js';
+import { createTempo } from '../src/sim/tempo.js';
 import { writeFileSync } from 'node:fs';
 
 import { readContentFiles } from './lib/load-content.js';
@@ -78,6 +82,19 @@ function option(name, fallback) {
 const runs = Number(option('runs', 100));
 const minutes = Number(option('minutes', 10));
 const baseSeed = String(option('seed', 'auto'));
+const MODES = ['chaos', 'scenario', 'fire', 'crossing', 'encounter', 'boarding'];
+const only = new Set(String(option('only', MODES.join(','))).split(','));
+const once = process.argv.includes('--once');
+for (const mode of only) if (!MODES.includes(mode)) {
+  console.error(`Unknown mode "${mode}": use ${MODES.join(', ')}`);
+  process.exit(2);
+}
+/** Play a mode twice and compare the hashes, or once with --once. */
+function twice(play) {
+  const first = play();
+  if (once) return [first, first];
+  return [first, play()];
+}
 if (!Number.isInteger(runs) || runs <= 0 || !(minutes > 0)) {
   console.error('Usage: node tools/autoplay.js [--runs N] [--minutes M] [--seed S] [--ship ID]');
   process.exit(2);
@@ -489,7 +506,7 @@ function playScenario(seed, { incoming = false } = {}) {
   };
 }
 
-const CROSSING_MINUTES = 45;
+const CROSSING_MINUTES = 150;
 /** Who runs the ship on a crossing, in turn (H.5): the crew; Margo, her way; the crew again; Margo, ordered by the book. */
 const MARGO_MODES = Object.freeze(['crew', 'margo', 'crew', 'book']);
 /** The chance the crossing bot takes the quickest route in hours over the cheapest in fuel, when the two differ and it can pay for it (H.6). */
@@ -517,11 +534,12 @@ function playCrossing(seed, index) {
   const { run } = sim.state;
   const contract = run.contract;
   const end = CROSSING_MINUTES * 60 * TICK_RATE;
-  const tally = { caught: 0, escapes: 0, quick: 0, routes: 0, strikes: 0, risks: {}, time: { under: 0, coast: 0, held: 0, off: 0, port: 0, pace: 0 }, sighted: 0, lines: 0, outcomes: {}, events: 0, lapsed: 0, placed: 0, attended: 0, sends: 0, eventContacts: 0, shots: 0, braces: 0, tolls: 0, hooks: 0, met: {}, picked: {}, locked: 0, offered: 0, inspections: 0, seized: 0, fuelBought: 0, fuelSpent: 0, repairSpent: 0, claimLeft: false, contacts: {}, contactKinds: {}, boardings: {}, staff: { crew: 0, margo: 0, dark: 0, well: 0, samples: 0 }, tired: 0, watchChanges: 0, mode: crewMode, margo: { quiet: 0, book: 0, push: 0, rating: 0, held: 0, samples: 0, hunted: 0, found: 0, stretched: 0, ownWay: 0, doubt: 0, changes: 0 } };
+  const tally = { caught: 0, escapes: 0, quick: 0, routes: 0, strikes: 0, risks: {}, time: { under: 0, coast: 0, held: 0, off: 0, port: 0, pace: 0 }, real: 0, fastTicks: 0, busy: {}, died: {}, sighted: 0, lines: 0, outcomes: {}, events: 0, lapsed: 0, placed: 0, attended: 0, sends: 0, eventContacts: 0, shots: 0, braces: 0, tolls: 0, hooks: 0, met: {}, picked: {}, locked: 0, offered: 0, inspections: 0, seized: 0, fuelBought: 0, fuelSpent: 0, repairSpent: 0, claimLeft: false, contacts: {}, contactKinds: {}, boardings: {}, staff: { crew: 0, margo: 0, dark: 0, well: 0, samples: 0 }, tired: 0, watchChanges: 0, mode: crewMode, margo: { quiet: 0, book: 0, push: 0, rating: 0, held: 0, samples: 0, hunted: 0, found: 0, stretched: 0, ownWay: 0, doubt: 0, changes: 0 } };
   sim.events.on('margo.own_way', () => (tally.margo.ownWay += 1));
   sim.events.on('margo.doubt', () => (tally.margo.doubt += 1));
   sim.events.on('margo.manner', (event) => event.why !== 'order' && (tally.margo.changes += 1));
   sim.events.on('watch.changed', () => (tally.watchChanges += 1));
+  sim.events.on('crew.died', (event) => (tally.died[event.cause] = (tally.died[event.cause] ?? 0) + 1));
   sim.events.on('cargo.seized', () => (tally.seized += 1));
   sim.events.on('port.refueled', (event) => {
     tally.fuelBought += event.bought;
@@ -600,6 +618,9 @@ function playCrossing(seed, index) {
   let lost = false;
   let crewDead = false;
   let settled = false;
+  // The tempo a player would get (H.8): every tick costs a tick of real time at normal speed, less in fast time.
+  const tempo = createTempo();
+  let rate = 1;
   while (!settled && sim.state.tick < end) {
     const view = eventView(sim);
     if (!ourCrew(sim).some(({ member }) => member.alive)) {
@@ -692,13 +713,18 @@ function playCrossing(seed, index) {
       const hands = ourCrew(sim).map(({ member }) => member).filter((member) => member.alive);
       const bound = (room) => hands.some((member) => member.room === room || member.goal === room);
       if (helm && !bound(helm) && hands.length) give({ type: 'crew.move', crew: hands[0].id, room: helm });
-      // A fire in the way stops the mending: whoever is idle and not flying goes to put it out.
+      // A fire in the way stops the mending: whoever is idle and not flying goes to put it out. A hole lets the air
+      // out of the ship, and on a long crossing that kills (H.8): whoever is free goes to patch it, suited.
       for (const [room, r] of Object.entries(sim.state.rooms)) {
         const free = hands.find((member) => member.room !== helm && member.goal === null && member.task === 'idle');
-        if (r.fire > 0 && !r.jettisoned && free && !bound(room)) give({ type: 'crew.move', crew: free.id, room });
+        if ((r.fire > 0 || r.breach > 0) && !r.jettisoned && free && !bound(room)) {
+          if (r.breach > 0 && !free.suit) give({ type: 'crew.suit', crew: free.id, on: true });
+          give({ type: 'crew.move', crew: free.id, room });
+        }
       }
       // The doors come first: nobody walks anywhere quickly without them.
-      for (const id of ['doors', 'ai_core', 'sensors', 'engines']) {
+      // Then the air (H.8: a crossing is long enough now for a broken scrubber to kill everyone aboard).
+      for (const id of ['doors', 'life_support', 'ai_core', 'sensors', 'engines']) {
         const system = sim.state.systems[id];
         if (sim.state.stations[id].down) give({ type: 'station.stand', station: id, down: false });
         if (running(sim, id)) continue;
@@ -712,6 +738,10 @@ function playCrossing(seed, index) {
         }
       }
     }
+    rate = tempo.step(sim, TICK_SECONDS / rate);
+    tally.real += TICK_SECONDS / rate;
+    if (rate > 1) tally.fastTicks += 1;
+    else if (run.crossing) tally.busy[tempo.reason ?? 'settling'] = (tally.busy[tempo.reason ?? 'settling'] ?? 0) + 1;
     sim.step();
     if (sim.state.tick % 20 === 0) {
       const problems = checkInvariants(sim);
@@ -779,11 +809,15 @@ function playCrossing(seed, index) {
     hours: run.hours,
     fuelLeft: run.fuel,
     minutes: sim.state.tick / TICK_RATE / 60,
+    clockMinutes: tally.real / 60,
+    ticks: sim.state.tick,
     hash: hashState(sim.snapshot()),
   };
 }
 
 const ENCOUNTER_MINUTES = 20;
+/** How far the deterrent gun reaches, in scope units (0 with no gun fitted). */
+const gunReach = (sim) => (gunSlot(sim) >= 0 ? sim.catalog.weapon(sim.state.weapons[gunSlot(sim)].id).range : 0);
 /** What the encounter bot can try. Each seed gives each kind of contact one of them, in turn. */
 const TACTICS = Object.freeze(['nothing', 'quiet', 'run', 'flare', 'crate', 'bluff', 'gun', 'pay']);
 
@@ -873,7 +907,9 @@ function playEncounter(seed, def, tactic) {
         // The lamps go off, and the guns and the shields are stood to.
         give({ type: 'lights.all', on: false });
         for (const station of ['weapons', 'shields']) stand(station, false);
-        if (view.state === 'closing' || view.state === 'alongside' || sim.state.scope.contacts.find((item) => item.id === view.id)?.tolled) give({ type: 'gun.target', contact: view.id });
+        // Laid on anything that has found us and come inside the gun's reach, shadowing or closing (H.8: waiting
+        // for it to close left one round, if that, before a skiff was alongside).
+        if (view.state !== 'unseen' && (view.range <= gunReach(sim) || view.state === 'alongside' || sim.state.scope.contacts.find((item) => item.id === view.id)?.tolled)) give({ type: 'gun.target', contact: view.id });
         const slot = gunSlot(sim);
         const hand = ourCrew(sim).map(({ member }) => member).find((member) => member.alive && !member.job && member.task === 'idle' && member.room !== 'bridge');
         if (slot >= 0 && sim.state.weapons[slot].rounds === 0 && hand) give({ type: 'weapon.load', crew: hand.id, slot });
@@ -990,9 +1026,8 @@ const encounters = [];
 const boardings = [];
 for (let i = 1; i <= runs; i++) {
   const seed = `${baseSeed}-${i}`;
-  try {
-    const first = playCrossing(seed, i - 1);
-    const second = playCrossing(seed, i - 1);
+  if (only.has('crossing')) try {
+    const [first, second] = twice(() => playCrossing(seed, i - 1));
     if (first.hash !== second.hash) failures.push({ seed, reason: `crossing replay mismatch (${first.hash} vs ${second.hash})` });
     crossings.push(first);
   } catch (err) {
@@ -1000,45 +1035,40 @@ for (let i = 1; i <= runs; i++) {
   }
   encounterDefs.forEach((def, index) => {
     const tactic = TACTICS[(i - 1 + index) % TACTICS.length];
-    try {
-      const first = playEncounter(seed, def, tactic);
-      const second = playEncounter(seed, def, tactic);
+    if (only.has('encounter')) try {
+      const [first, second] = twice(() => playEncounter(seed, def, tactic));
       if (first.hash !== second.hash) failures.push({ seed, reason: `encounter with ${def.id}: replay mismatch (${first.hash} vs ${second.hash})` });
       encounters.push(first);
     } catch (err) {
       failures.push({ seed, reason: `encounter with ${def.id} (${tactic}): ${err.message}` });
     }
-    if (!def.party) return;
+    if (!def.party || !only.has('boarding')) return;
     const answer = ANSWERS[(i - 1 + index) % ANSWERS.length];
     try {
-      const first = playBoarding(seed, def, answer);
-      const second = playBoarding(seed, def, answer);
+      const [first, second] = twice(() => playBoarding(seed, def, answer));
       if (first.hash !== second.hash) failures.push({ seed, reason: `boarding by ${def.id}: replay mismatch (${first.hash} vs ${second.hash})` });
       boardings.push(first);
     } catch (err) {
       failures.push({ seed, reason: `boarding by ${def.id} (${answer}): ${err.message}` });
     }
   });
-  try {
-    const first = playRun(seed);
-    const second = playRun(seed);
+  if (only.has('chaos')) try {
+    const [first, second] = twice(() => playRun(seed));
     if (first.hash !== second.hash) failures.push({ seed, reason: `chaos replay mismatch (${first.hash} vs ${second.hash})` });
     for (const key of Object.keys(totals)) totals[key] += first[key];
     for (const [outcome, n] of Object.entries(first.endings)) chaosEndings[outcome] = (chaosEndings[outcome] ?? 0) + n;
   } catch (err) {
     failures.push({ seed, reason: `chaos: ${err.message}` });
   }
-  try {
-    const first = playScenario(seed);
-    const second = playScenario(seed);
+  if (only.has('scenario')) try {
+    const [first, second] = twice(() => playScenario(seed));
     if (first.hash !== second.hash) failures.push({ seed, reason: `scenario replay mismatch (${first.hash} vs ${second.hash})` });
     scenarios.push(first);
   } catch (err) {
     failures.push({ seed, reason: `scenario: ${err.message}` });
   }
-  try {
-    const first = playScenario(seed, { incoming: true });
-    const second = playScenario(seed, { incoming: true });
+  if (only.has('fire')) try {
+    const [first, second] = twice(() => playScenario(seed, { incoming: true }));
     if (first.hash !== second.hash) failures.push({ seed, reason: `under fire replay mismatch (${first.hash} vs ${second.hash})` });
     underFire.push(first);
   } catch (err) {
@@ -1124,6 +1154,19 @@ out.push(`  routes:            ${mean(crossings.map((c) => c.routes)).toFixed(1)
 const time = crossings.reduce((sum, c) => Object.fromEntries(Object.entries(sum).map(([k, v]) => [k, v + c.time[k]])), { under: 0, coast: 0, held: 0, off: 0, port: 0, pace: 0 });
 const allTime = time.under + time.held + time.off + time.port;
 out.push(`  the clock:         under way ${pct(time.under, allTime)} of the time at ${(time.pace / Math.max(1, time.under)).toFixed(2)} of the lane's pace (coasting ${pct(time.coast, time.under)} of that), held ${pct(time.held, allTime)}, off a port working the fix ${pct(time.off, allTime)}, in port ${pct(time.port, allTime)}`);
+{
+  // The tempo (H.8): how long a crossing takes by hand, at the speed a player's clock would run it.
+  const fastShare = crossings.reduce((n, c) => n + c.fastTicks, 0) / Math.max(1, crossings.reduce((n, c) => n + c.ticks, 0));
+  const perRoute = crossings.map((c) => c.clockMinutes / Math.max(1, c.routes)).sort((a, b) => a - b);
+  const busy = {};
+  for (const c of crossings) for (const [k, n] of Object.entries(c.busy)) busy[k] = (busy[k] ?? 0) + n;
+  const busyAll = Object.values(busy).reduce((a, b) => a + b, 0);
+  out.push(`  by hand (H.8):     ${mean(crossings.map((c) => c.clockMinutes)).toFixed(1)} minutes of running clock a run with fast time (fast ${pct(fastShare, 1)} of ship time); a crossing port to port ${mean(perRoute).toFixed(1)} minutes (${perRoute.length ? perRoute[0].toFixed(1) : '-'} to ${perRoute.length ? perRoute.at(-1).toFixed(1) : '-'})`);
+  const died = {};
+  for (const c of crossings) for (const [k, n] of Object.entries(c.died)) died[k] = (died[k] ?? 0) + n;
+  out.push(`  crew lost:         ${mean(crossings.map((c) => c.dead)).toFixed(2)} a run; by cause ${Object.entries(died).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k} ${n}`).join(', ') || 'none'}`);
+  out.push(`  normal speed for:  ${Object.entries(busy).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k} ${pct(n, busyAll)}`).join(', ') || 'nothing'}`);
+}
 const byRisk = {};
 for (const c of crossings) for (const [k, n] of Object.entries(c.risks)) byRisk[k] = (byRisk[k] ?? 0) + n;
 out.push(`  lanes:             ships met by the lane that brought them: ${Object.entries(byRisk).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k} ${n}`).join(', ') || 'none'}; ${sumOf('strikes')} hull strikes in hazard lanes`);
@@ -1189,7 +1232,7 @@ for (const tactic of TACTICS) {
     const met = of.reduce((n, c) => n + Object.values(c.contacts).reduce((a, b) => a + b, 0), 0);
     const docked = of.reduce((n, c) => n + (c.contacts.docked ?? 0), 0);
     const label = { crew: 'crew at posts', margo: 'all to Margo', book: 'Margo, by book' }[mode];
-    out.push(`  ${label.padEnd(17)}  ${of.length} crossings: delivered ${pct(of.filter((c) => c.delivered).length, of.length)}, ship lost ${of.filter((c) => c.lost).length}; ${mean(of.map((c) => c.minutes)).toFixed(1)} min and ${mean(of.map((c) => c.hours)).toFixed(1)} ship hours; ${met} contacts, ${pct(docked, met)} docked with us; ${mean(of.map((c) => c.dead)).toFixed(1)} crew dead; trust ends at ${mean(of.map((c) => c.trust)).toFixed(0)}`);
+    out.push(`  ${label.padEnd(17)}  ${of.length} crossings: delivered ${pct(of.filter((c) => c.delivered).length, of.length)} (${of.filter((c) => c.late).length} late), ship lost ${of.filter((c) => c.lost).length}; ${mean(of.map((c) => c.minutes)).toFixed(1)} min and ${mean(of.map((c) => c.hours)).toFixed(1)} ship hours; ${met} contacts, ${pct(docked, met)} docked with us; ${mean(of.map((c) => c.dead)).toFixed(1)} crew dead; trust ends at ${mean(of.map((c) => c.trust)).toFixed(0)}`);
   }
   const her = crossings.reduce((sum, c) => {
     for (const key of Object.keys(sum)) sum[key] += c.margo[key];
@@ -1206,7 +1249,7 @@ for (const def of encounterDefs) {
   out.push(`  ${def.id.padEnd(18)} at us ${(sum('incoming') / Math.max(1, of.length)).toFixed(1)} a time (${pct(sum('hits'), sum('incoming'))} hit, ${pct(sum('braced'), sum('incoming'))} braced); hull lost ${mean(of.map((e) => ship.hullPoints - e.hull)).toFixed(1)}, wrecked ${of.filter((e) => e.wrecked).length}; our gun ${(sum('shots') / Math.max(1, of.length)).toFixed(1)} rounds, ${sum('struck')} struck; ${sum('downed')} drones and pods downed`);
 }
 const gunners = encounters.filter((e) => e.tactic === 'gun');
-out.push(`  the gun bot:       fired ${mean(gunners.map((e) => e.shots)).toFixed(1)} rounds an encounter and drove off ${pct(gunners.filter((e) => e.outcome === 'deterred').length, gunners.length)} of what it met; it never aims at a room`);
+out.push(`  the gun bot:       fired ${mean(gunners.map((e) => e.shots)).toFixed(1)} rounds an encounter and drove off ${pct(gunners.filter((e) => e.outcome === 'deterred').length, gunners.length)} of what it met (${pct(gunners.filter((e) => e.outcome === 'deterred').length, gunners.filter((e) => e.outcome !== 'passed').length)} of those that ever noticed us); it never aims at a room`);
 const crossContacts = {};
 const crossKinds = {};
 for (const c of crossings) {
