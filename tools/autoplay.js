@@ -651,9 +651,12 @@ function playCrossing(seed, index) {
       for (const contact of live) if (contact.tolled && !whyNoPay(sim, contact.id)) give({ type: 'contact.pay', contact: contact.id });
       const slot = gunSlot(sim);
       const threat = live.find((contact) => contact.state === 'closing' || contact.state === 'alongside' || contact.tolled);
-      // Something closing: lamps out, and the guns and the shields stood to.
+      // A careful captain (F.1): the lamps go out the moment a search beam brushes us, and stay out until the
+      // scope is clear again. Something closing: the guns and the shields stood to as well.
+      const hunted = live.some((contact) => contact.state !== 'unseen' || contact.aware > 0);
+      if (hunted) give({ type: 'lights.all', on: false });
+      else if (!live.length && sim.state.tick % (10 * TICK_RATE) === 0) give({ type: 'lights.all', on: true });
       if (threat) {
-        give({ type: 'lights.all', on: false });
         for (const station of ['weapons', 'shields']) if (sim.state.stations[station].down) give({ type: 'station.stand', station, down: false });
       }
       if (slot >= 0) {
@@ -677,7 +680,9 @@ function playCrossing(seed, index) {
         if (contract.claim && item.id === contract.claim.event && pick === 'leave') tally.claimLeft = true;
       } else if (sim.state.tick - (sent.get(item.n) ?? -1e9) > 30 * TICK_RATE) {
         // Never whoever is flying her: the bot keeps the helm held (below), and would only call them back.
-        const hand = nearestHand(sim, item.room, (member) => sim.layout.room(member.room)?.kind !== 'helm' && !item.about.includes(member.id));
+        // The last hand alive goes whoever they are: a ship standing by a claim with only her pilot left would wait for ever.
+        const alone = ourCrew(sim).filter(({ member }) => member.alive).length === 1;
+        const hand = nearestHand(sim, item.room, (member) => (alone || sim.layout.room(member.room)?.kind !== 'helm') && !item.about.includes(member.id));
         if (hand && give({ type: 'crew.move', crew: hand.id, room: item.room, ship: 'us' }) !== false) {
           sent.set(item.n, sim.state.tick);
           tally.sends += 1;
@@ -724,11 +729,15 @@ function playCrossing(seed, index) {
       const helm = sim.layout.rooms.find((room) => room.kind === 'helm')?.id;
       const hands = ourCrew(sim).map(({ member }) => member).filter((member) => member.alive);
       const bound = (room) => hands.some((member) => member.room === room || member.goal === room);
-      if (helm && !bound(helm) && hands.length) give({ type: 'crew.move', crew: hands[0].id, room: helm });
+      // The last hand alive does the mending too, and goes back to the helm when there is none to do.
+      const alone = hands.length === 1;
+      const spare = (member) => alone || member.room !== helm;
+      const toMend = alone && (Object.values(sim.state.rooms).some((r) => (r.fire > 0 || r.breach > 0) && !r.jettisoned) || ['ai_core', 'life_support', 'sensors', 'engines'].some((id) => sim.state.systems[id]?.damage > 0) || situationViews(sim).some((item) => item.state !== 'answered'));
+      if (helm && !bound(helm) && hands.length && !toMend && hands[0].goal === null) give({ type: 'crew.move', crew: hands[0].id, room: helm });
       // A fire in the way stops the mending: whoever is idle and not flying goes to put it out. A hole lets the air
       // out of the ship, and on a long crossing that kills (H.8): whoever is free goes to patch it, suited.
       for (const [room, r] of Object.entries(sim.state.rooms)) {
-        const free = hands.find((member) => member.room !== helm && member.goal === null && member.task === 'idle');
+        const free = hands.find((member) => spare(member) && member.goal === null && member.task === 'idle');
         if ((r.fire > 0 || r.breach > 0) && !r.jettisoned && free && !bound(room)) {
           if (r.breach > 0 && !free.suit) give({ type: 'crew.suit', crew: free.id, on: true });
           give({ type: 'crew.move', crew: free.id, room });
@@ -742,7 +751,7 @@ function playCrossing(seed, index) {
         if (running(sim, id)) continue;
         const room = sim.layout.rooms.find((item) => item.system === id)?.id;
         // Whoever is free, a different one every few seconds in case one refuses; suited if the air in there is thin.
-        const free = hands.filter((member) => member.room !== helm && member.goal === null && member.task === 'idle');
+        const free = hands.filter((member) => spare(member) && member.goal === null && member.task === 'idle');
         const hand = free.length ? free[Math.floor(sim.state.tick / (5 * TICK_RATE)) % free.length] : null;
         if (system.damage > 0 && room && hand && !bound(room)) {
           if (sim.state.rooms[room].oxygen < 0.5 && !hand.suit) give({ type: 'crew.suit', crew: hand.id, on: true });
