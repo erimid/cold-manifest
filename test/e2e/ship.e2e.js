@@ -94,7 +94,9 @@ const queued = (page) => game(page, () => window.coldManifest.sim.state.commands
 const down = (page, id) => game(page, (sid) => window.coldManifest.sim.state.stations[sid].down, id);
 const downIs = (page, id, value) => page.waitForFunction(([sid, v]) => window.coldManifest.sim.state.stations[sid].down === v, [id, value], { timeout: 2000 });
 const selectedCrew = (page) => game(page, () => window.coldManifest.shipView.debug.selectedCrew);
+/** A crew member's target, read once the layout has settled (see target()); x and y are where to tap them. */
 const crewTarget = async (page, id) => {
+  await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
   const t = await game(page, (cid) => window.coldManifest.shipView.debug.targets().find((x) => x.kind === 'crew' && x.id === cid), id);
   assert.ok(t, `no crew target ${id}`);
   return t;
@@ -140,8 +142,20 @@ const dump = async (page, label, extra = {}) =>
     })),
   }));
 
+/** Two animation frames: whatever the last tap changed (the dock's height, and so the ship's fit) has been laid out and drawn. */
+const settled = (page) => page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
+
 async function target(page, id) {
-  const all = await game(page, () => window.coldManifest.shipView.debug.targets());
+  // Read the targets only once the layout has stopped moving. Selecting a crew member grows the dock and the ship
+  // is fitted again on the next frame; on a slow CI runner that frame had not come yet, so the test tapped where
+  // the room used to be (H.8: the DIAG from the red runs showed a room's target 40 px above the room).
+  let all = null;
+  for (let i = 0; i < 10; i++) {
+    await settled(page);
+    const now = await game(page, () => window.coldManifest.shipView.debug.targets());
+    if (all && JSON.stringify(now) === JSON.stringify(all)) break;
+    all = now;
+  }
   const t = all.find((x) => x.id === id);
   assert.ok(t, `no target ${id}`);
   const mx = t.x + t.w / 2;
