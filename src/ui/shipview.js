@@ -1589,6 +1589,10 @@ export function createShipView({ canvas, root, input, sim, clock, tempo = null, 
       order({ type: 'decoy.flare' });
       return;
     }
+    if (action === 'skip') {
+      skipAhead();
+      return;
+    }
     if (action === 'breakers') {
       openBoard(!power.open);
       return;
@@ -1625,6 +1629,8 @@ export function createShipView({ canvas, root, input, sim, clock, tempo = null, 
       info: el('div', { class: 'ship-info', id: 'ship-info', hidden: true }),
       pauseLabel: el('span', {}, 'Pause'),
       pauseNote: el('small', { id: 'pause-note' }, 'Space bar'),
+      skipLabel: el('span', {}, 'Next'),
+      skipNote: el('small', { id: 'skip-note' }, 'N key'),
       aiText: el('span', { class: 'aibox__text', id: 'ai-text' }),
       sheet: el('div', { class: 'panel sheet', id: 'sheet', hidden: true }),
       intercom: el('div', { class: 'intercom', id: 'intercom', hidden: true, 'aria-live': 'polite' }),
@@ -1645,6 +1651,8 @@ export function createShipView({ canvas, root, input, sim, clock, tempo = null, 
       nodes.aiButtons,
     );
     nodes.pause = el('button', { class: 'btn btn--pause', type: 'button', id: 'btn-pause', press: () => clock.toggle() }, nodes.pauseLabel, nodes.pauseNote);
+    // On to the next thing (F.3): skip ahead on a quiet crossing until something turns up.
+    nodes.skip = el('button', { class: 'btn btn--skip', type: 'button', id: 'btn-skip', 'aria-label': 'On to the next thing', press: skipAhead }, nodes.skipLabel, nodes.skipNote);
     nodes.top = el(
       'div',
       { class: 'shipbar' },
@@ -1661,7 +1669,7 @@ export function createShipView({ canvas, root, input, sim, clock, tempo = null, 
         button('btn-back', 'Back', onBack),
       ),
     );
-    nodes.bottom = el('div', { class: 'shipdock' }, nodes.sheet, nodes.ai, buildCalls(), el('div', { class: 'shipdock__row' }, nodes.status, nodes.pause), buildPower());
+    nodes.bottom = el('div', { class: 'shipdock' }, nodes.sheet, nodes.ai, buildCalls(), el('div', { class: 'shipdock__row' }, nodes.status, tempo && sim.state.run ? el('div', { class: 'shipdock__clockbtns' }, nodes.pause, nodes.skip) : nodes.pause), buildPower());
     chart = sim.state.run ? createChart({ sim, order, onClose: () => openChart(false) }) : null;
     const hand = (member) => (member ? { id: member.id, name: member.name } : null);
     situations = createSituationCards({ sim, order, nearest: (room, about = []) => hand(nearestHand(sim, room, (member) => !about.includes(member.id))), selected: () => hand(selectedCrew && sim.state.crew[selectedCrew]?.alive && !sim.state.crew[selectedCrew].asleep ? sim.state.crew[selectedCrew] : null) });
@@ -1686,19 +1694,48 @@ export function createShipView({ canvas, root, input, sim, clock, tempo = null, 
     }
   }
 
+  /** On to the next thing (F.3): skip ahead while the crossing is quiet, or stop skipping. A paused clock starts again. */
+  function skipAhead() {
+    if (!tempo || !sim.state.run) return;
+    if (tempo.skipping) {
+      tempo.stopSkip();
+      return;
+    }
+    if (!tempo.canSkip(sim)) return;
+    clock.resume();
+    tempo.skip(sim);
+  }
+
+  let lastSkip = '';
+  /** The skip button: ready on a quiet crossing, lit while skipping, and otherwise saying what holds the clock. */
+  function updateSkip() {
+    if (!tempo || !nodes.skip.isConnected) return;
+    const on = tempo.skipping;
+    const can = on || tempo.canSkip(sim);
+    const note = on ? 'Skipping' : can ? 'N key' : 'Not now';
+    const key = `${on}|${can}|${note}`;
+    if (key === lastSkip) return;
+    lastSkip = key;
+    nodes.skip.disabled = !can;
+    nodes.skip.classList.toggle('is-on', on);
+    nodes.skip.setAttribute('aria-pressed', String(on));
+    nodes.skip.title = on ? 'Skipping ahead to the next thing: press to stop' : can ? 'On to the next thing: skip ahead until something turns up' : `Normal speed: ${tempo.reason ?? 'something is going on'}`;
+    setText(nodes.skipNote, note);
+  }
+
   let lastClock = '';
   function updateClock() {
     // The ship clock (H.8): the day and the hour, and the watch with the deck when one is kept. Fixed width, so
     // the bar beside it never reflows as the time ticks; the state word says paused, running or fast time.
     const fast = !clock.paused && clock.tempo > 1;
-    const state = clock.paused ? 'PAUSED ' : fast ? `FAST ${Math.round(clock.tempo)}x` : 'running';
+    const state = clock.paused ? 'PAUSED ' : tempo?.skipping ? 'SKIP >>' : fast ? `FAST ${Math.round(clock.tempo)}x` : 'running';
     const watch = sim.state.roster.watches > 1 ? ` · ${watchName(sim.state.roster.on)} watch` : '';
     const text = `${state} ${clockText(sim.state.tick)}${watch}`;
     if (text !== lastClock) {
       lastClock = text;
       nodes.clock.textContent = text;
       nodes.clock.classList.toggle('is-fast', fast);
-      nodes.clock.title = fast ? 'Fast time: nothing is happening' : clock.paused ? 'Paused' : tempo?.reason ? `Normal speed: ${tempo.reason}` : 'Normal speed';
+      nodes.clock.title = tempo?.skipping ? 'On to the next thing' : fast ? 'Fast time: nothing is happening' : clock.paused ? 'Paused' : tempo?.reason ? `Normal speed: ${tempo.reason}` : 'Normal speed';
     }
     const label = clock.paused ? 'Resume' : 'Pause';
     if (nodes.pauseLabel.textContent !== label) {
@@ -1787,6 +1824,7 @@ export function createShipView({ canvas, root, input, sim, clock, tempo = null, 
       situations.update({ boxOf: (room) => roomBox(layout, view, room), bounds: { x: monitor.x, y: monitor.y, w: monitor.w - (scopeBox ? scopeBox.w + 20 : 0), h: monitor.h }, hidden: chartOpen });
       drawScanlines();
       updateClock();
+      updateSkip();
       updatePanel();
       updatePower();
       updateRoster();

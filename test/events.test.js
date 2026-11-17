@@ -123,6 +123,9 @@ test('a point is only rolled for once, and an event is met once a run', () => {
   const before = met.length;
   const back = routeVia(run, first);
   if (back.slice(1, -1).every((id) => run.events.rolled.includes(id))) {
+    // Ports are further apart since F.3: fill the tank for the way back.
+    give(sim, { type: 'debug.run', fuel: run.fuelMax });
+    sim.step();
     fly(sim, back);
     assert.equal(met.length, before);
   }

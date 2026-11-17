@@ -163,7 +163,17 @@ async function target(page, id) {
   if (t.kind !== 'room') return { ...t, mx, my };
   const covered = (x, y) => all.some((o) => o.priority > t.priority && x >= o.x - 16 && x <= o.x + o.w + 16 && y >= o.y - 16 && y <= o.y + o.h + 16);
   for (let d = 0; d <= t.w / 2; d += 4) for (const x of [mx - d, mx + d]) if (!covered(x, my)) return { ...t, mx: x, my };
-  return { ...t, mx, my };
+  // A small room (the switch panel open shrinks the ship) can have a door's reach across its whole width at the
+  // middle: try lower and higher in the room too, and failing that the point furthest from anything over it.
+  for (let e = 4; e < t.h / 2; e += 4) for (const y of [my + e, my - e]) for (let d = 0; d <= t.w / 2; d += 4) for (const x of [mx - d, mx + d]) if (!covered(x, y)) return { ...t, mx: x, my: y };
+  let best = { mx, my, gap: -1 };
+  for (let y = t.y + 2; y <= t.y + t.h - 2; y += 2) {
+    for (let x = t.x + 2; x <= t.x + t.w - 2; x += 2) {
+      const gap = Math.min(...all.filter((o) => o.priority > t.priority).map((o) => Math.max(o.x - x, x - (o.x + o.w), o.y - y, y - (o.y + o.h))));
+      if (gap > best.gap) best = { mx: x, my: y, gap };
+    }
+  }
+  return { ...t, mx: best.mx, my: best.my };
 }
 
 /** Raw touch through the browser, so holds and drags are real pointer streams. */
@@ -1368,6 +1378,26 @@ async function chartTests(browser) {
     assert.equal(after.fuel, r.fuel - after.map.lanes.find((l) => (l.a === draft[0] && l.b === draft[1]) || (l.b === draft[0] && l.a === draft[1])).fuel, 'the first lane\'s fuel is spent');
   });
 
+  await check('On to the next thing (F.3): on a quiet crossing Next skips ahead at once, a tap stops it, and it is off while something holds the clock', async () => {
+    await game(page, () => window.coldManifest.sim.enqueue({ type: 'debug.contact', clear: true }));
+    await settleSituations(page);
+    if (await game(page, () => window.coldManifest.shipView.debug.chartOpen)) await page.tap('#btn-chart-close');
+    await page.waitForFunction(() => !document.querySelector('#btn-skip').disabled, null, { timeout: 10000 });
+    const box = await page.locator('#btn-skip').boundingBox();
+    assert.ok(box.width >= 44 && box.height >= 44, `${box.width}x${box.height}`);
+    await page.tap('#btn-skip');
+    await page.waitForFunction(() => window.coldManifest.tempo.skipping || window.coldManifest.tempo.skipped, null, { timeout: 2000 });
+    if (await game(page, () => window.coldManifest.tempo.skipping)) {
+      assert.match(await page.textContent('#ship-clock'), /SKIP/);
+      await page.tap('#btn-skip');
+      await page.waitForFunction(() => !window.coldManifest.tempo.skipping, null, { timeout: 2000 });
+    }
+    // A hit holds the clock for a few seconds, and the button with it.
+    await game(page, () => (window.coldManifest.sim.state.hull.points -= 1));
+    await page.waitForFunction(() => document.querySelector('#btn-skip').disabled, null, { timeout: 2000 });
+    if (!(await game(page, () => window.coldManifest.shipView.debug.chartOpen))) await page.tap('#btn-chart');
+  });
+
   await check('the follower finds us under way: it comes in on the scope, and the chart says we are followed', async () => {
     await page.tap('#btn-dbg-menu');
     await page.tap('#btn-dbg-caught');
@@ -1779,9 +1809,12 @@ async function loopTests(browser) {
     await page.tap(`#sit-choice-${n}-sweep`, { force: true }); // locked: nothing happens
     assert.equal(await page.locator(`#sit-result-${n}`).count(), 0);
     // The chip folds the card and opens it again.
+    // The cards are drawn on the next frame: wait for it rather than read the page the instant after the tap.
     await page.tap(`#sit-chip-${n}`);
+    await page.waitForSelector(`#sit-choices-${n}`, { state: 'detached', timeout: 2000 }).catch(() => {});
     assert.equal(await page.locator(`#sit-choices-${n}`).count(), 0, 'folded');
     await page.tap(`#sit-chip-${n}`);
+    await page.waitForSelector(`#sit-choice-${n}-thread`, { timeout: 2000 });
     await page.tap(`#sit-choice-${n}-thread`);
     await page.waitForSelector(`#sit-result-${n}`, { timeout: 3000 });
     assert.match(await page.textContent(`#sit-result-${n}`), /Ilse takes the helm/);
