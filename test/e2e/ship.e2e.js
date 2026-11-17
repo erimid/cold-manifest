@@ -1368,6 +1368,26 @@ async function chartTests(browser) {
     assert.equal(after.fuel, r.fuel - after.map.lanes.find((l) => (l.a === draft[0] && l.b === draft[1]) || (l.b === draft[0] && l.a === draft[1])).fuel, 'the first lane\'s fuel is spent');
   });
 
+  await check('On to the next thing (F.3): on a quiet crossing Next skips ahead at once, a tap stops it, and it is off while something holds the clock', async () => {
+    await game(page, () => window.coldManifest.sim.enqueue({ type: 'debug.contact', clear: true }));
+    await settleSituations(page);
+    if (await game(page, () => window.coldManifest.shipView.debug.chartOpen)) await page.tap('#btn-chart-close');
+    await page.waitForFunction(() => !document.querySelector('#btn-skip').disabled, null, { timeout: 10000 });
+    const box = await page.locator('#btn-skip').boundingBox();
+    assert.ok(box.width >= 44 && box.height >= 44, `${box.width}x${box.height}`);
+    await page.tap('#btn-skip');
+    await page.waitForFunction(() => window.coldManifest.tempo.skipping || window.coldManifest.tempo.skipped, null, { timeout: 2000 });
+    if (await game(page, () => window.coldManifest.tempo.skipping)) {
+      assert.match(await page.textContent('#ship-clock'), /SKIP/);
+      await page.tap('#btn-skip');
+      await page.waitForFunction(() => !window.coldManifest.tempo.skipping, null, { timeout: 2000 });
+    }
+    // A hit holds the clock for a few seconds, and the button with it.
+    await game(page, () => (window.coldManifest.sim.state.hull.points -= 1));
+    await page.waitForFunction(() => document.querySelector('#btn-skip').disabled, null, { timeout: 2000 });
+    if (!(await game(page, () => window.coldManifest.shipView.debug.chartOpen))) await page.tap('#btn-chart');
+  });
+
   await check('the follower finds us under way: it comes in on the scope, and the chart says we are followed', async () => {
     await page.tap('#btn-dbg-menu');
     await page.tap('#btn-dbg-caught');

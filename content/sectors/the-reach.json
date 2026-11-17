@@ -7,7 +7,7 @@
       "nodes": [15, 25],
       "columns": [7, 9],
       "kinds": {
-        "port": { "weight": 3, "minimum": 2 },
+        "port": { "weight": 0.5, "minimum": 1 },
         "empty": { "weight": 4, "minimum": 2 },
         "hazard": { "weight": 3, "minimum": 1 },
         "derelict": { "weight": 2, "minimum": 1 },
@@ -30,7 +30,7 @@
           "text": "Receivers' cutters work this line out of the checkpoint. They stop what they find and go through the hold.",
           "where": { "touches": "checkpoint" },
           "contacts": 0.16,
-          "aboard": 0.03,
+          "aboard": 0.045,
           "encounters": { "patrol-cutter": 6, "gunnery-drone": 2, "bulwark": 1 }
         },
         {
@@ -40,7 +40,7 @@
           "text": "Something died out here and is still being picked over. Whoever is picking does not want company.",
           "where": { "touches": "derelict" },
           "contacts": 0.12,
-          "aboard": 0.05,
+          "aboard": 0.075,
           "encounters": { "scrap-hauler": 4, "raider-skiff": 3, "drone-carrier": 2 }
         },
         {
@@ -50,7 +50,7 @@
           "text": "Bad space. Things in it hit the hull, and the helm has to see them coming. Few ships come this way.",
           "where": { "touches": "hazard" },
           "contacts": 0.04,
-          "aboard": 0.05,
+          "aboard": 0.075,
           "encounters": { "raider-skiff": 2, "scrap-hauler": 1 },
           "strikes": { "perHour": 0.5, "weapon": "debris" }
         },
@@ -61,7 +61,7 @@
           "text": "An old company beacon still calls the line. It is the quickest way through, and everyone listening knows a ship is on it.",
           "where": { "beacon": true },
           "contacts": 0.2,
-          "aboard": 0.03,
+          "aboard": 0.045,
           "encounters": { "raider-skiff": 4, "bounty-tender": 3, "patrol-cutter": 1 },
           "length": 0.7
         },
@@ -72,7 +72,7 @@
           "text": "The Outer Stations Union holds this side of the Reach. Its bulwarks charge for the lanes and its drones count who uses them.",
           "where": { "union": true },
           "contacts": 0.14,
-          "aboard": 0.03,
+          "aboard": 0.045,
           "encounters": { "bulwark": 4, "gunnery-drone": 3, "patrol-cutter": 1 }
         },
         {
@@ -82,7 +82,7 @@
           "text": "Nothing on the chart. That is not the same as nothing out there.",
           "where": { "default": true },
           "contacts": 0.06,
-          "aboard": 0.06,
+          "aboard": 0.09,
           "encounters": { "raider-skiff": 2, "patrol-cutter": 2, "scrap-hauler": 1, "bounty-tender": 1, "drone-carrier": 1 }
         }
       ],

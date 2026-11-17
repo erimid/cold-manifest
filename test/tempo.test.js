@@ -41,7 +41,7 @@ test('a quiet crossing runs fast after a few quiet seconds, and drops to normal 
   const sim = quietCrossing();
   const tempo = createTempo();
   assert.equal(busyReason(sim), null, 'nothing is happening');
-  assert.equal(tempo.step(sim, 1), 1, 'not at once');
+  assert.equal(tempo.step(sim, TEMPO.settle / 2), 1, 'not at once');
   tempo.step(sim, TEMPO.settle);
   assert.ok(tempo.rate > 1 && tempo.rate < TEMPO.fast, 'easing up');
   tempo.step(sim, TEMPO.ease);
@@ -71,7 +71,7 @@ test('a ship that has not noticed us does not hold the clock; the moment its bea
   assert.equal(busyReason(sim), 'a ship is hunting us', 'brushed: time slows');
 });
 
-test('time runs at normal speed in port, off the port, with something aboard and on a decision', () => {
+test('time runs at normal speed in port, with something aboard, on a fire, and off the port only when there is something to do (F.3)', () => {
   const port = createSim({ seed: 'port', ship: SHIP, crew: CREW, ...CATALOG, sector: REACH, run: { pursuit: false } });
   assert.equal(busyReason(port), 'in port');
   const sim = quietCrossing('aboard');
@@ -82,7 +82,75 @@ test('time runs at normal speed in port, off the port, with something aboard and
   assert.equal(busyReason(sim), 'fire or a hole aboard');
   sim.state.rooms.cargo.fire = 0;
   sim.state.run.crossing.phase = 'off port';
-  assert.equal(busyReason(sim), 'off the port');
+  sim.state.fix = 0.3;
+  assert.equal(busyReason(sim), null, 'the sensors working on the fix is only waiting');
+  sim.state.fix = 1;
+  assert.equal(busyReason(sim), 'the jump is ready', 'a fix in hand waits for the captain');
+  sim.state.fix = 0.3;
+  sim.enqueue({ type: 'station.stand', station: 'sensors', down: true });
+  sim.step();
+  assert.equal(busyReason(sim), 'nobody can take a fix', 'and so does a fix nobody can take');
+});
+
+test('bad space no longer holds the clock; a hit does, for a few real seconds (F.3)', () => {
+  const sim = quietCrossing('bad space');
+  const { run } = sim.state;
+  for (const id of Object.keys(run.risks)) run.risks[id] = { ...run.risks[id], strikes: { perHour: 0, weapon: 'slug-thrower' } };
+  assert.equal(busyReason(sim), null, 'a hazard lane with nothing hitting us is quiet');
+  const tempo = createTempo();
+  for (let i = 0; i < 5; i++) tempo.step(sim, 1);
+  assert.equal(tempo.rate, TEMPO.fast);
+  sim.state.hull.points -= 1;
+  assert.equal(tempo.step(sim, 0.016), 1, 'struck: straight back to normal');
+  assert.equal(tempo.reason, 'we have been hit');
+  tempo.step(sim, TEMPO.struck / 2);
+  assert.equal(tempo.reason, 'we have been hit', 'still holding');
+  tempo.step(sim, TEMPO.struck);
+  assert.equal(tempo.reason, null, 'and then quiet again');
+});
+
+test('fast time runs up to 8x, and "on to the next thing" skips ahead until a new sighting (F.3)', () => {
+  assert.equal(TEMPO.fast, 8);
+  assert.ok(TEMPO.skip > TEMPO.fast);
+  const sim = quietCrossing('skip');
+  const tempo = createTempo();
+  assert.equal(tempo.canSkip(sim), true);
+  assert.equal(tempo.skip(sim), true);
+  assert.equal(tempo.step(sim, 0.016), TEMPO.skip, 'at once, no easing');
+  assert.equal(tempo.skipping, true);
+  // The setting holds fast time off, but not a skip the captain asked for.
+  assert.equal(tempo.step(sim, 0.016, false), TEMPO.skip);
+  sim.enqueue({ type: 'debug.contact', encounter: 'raider-skiff', range: 50, bearing: 10, miss: 30 });
+  let frames = 0;
+  while (tempo.skipping && frames < 2000) {
+    tempo.step(sim, 0.016);
+    for (let i = 0; i < 5; i++) sim.step();
+    frames += 1;
+  }
+  assert.equal(tempo.skipping, false, 'it stopped');
+  assert.ok(sim.state.scope.contacts.some((contact) => contact.track.shown), 'at the sighting');
+  assert.ok(['a ship on the scope', 'a ship is hunting us'].includes(tempo.skipped), tempo.skipped);
+  assert.ok(tempo.rate <= TEMPO.fast);
+});
+
+test('a skip stops for anything that holds the clock, and cannot start while something does (F.3)', () => {
+  const sim = quietCrossing('skip aboard');
+  const tempo = createTempo();
+  tempo.skip(sim);
+  tempo.step(sim, 0.016);
+  sim.state.run.events.aboard.push({ n: 1 });
+  assert.equal(tempo.step(sim, 0.016), 1, 'something aboard: normal speed at once');
+  assert.equal(tempo.skipped, 'something is happening aboard');
+  assert.equal(tempo.canSkip(sim), false);
+  assert.equal(tempo.skip(sim), false);
+  sim.state.run.events.aboard.length = 0;
+  assert.equal(tempo.canSkip(sim), true);
+  tempo.skip(sim);
+  tempo.stopSkip();
+  assert.equal(tempo.skipping, false, 'the captain can stop it');
+  tempo.skip(sim);
+  tempo.reset();
+  assert.equal(tempo.skipping, false, 'a pause or a new run stops it');
 });
 
 test('fast time changes nothing that happens: the same ticks, the same ship, only sooner', () => {

@@ -26,7 +26,7 @@ import { createShipView } from './ui/shipview.js';
 import { renderContracts, renderEvent, renderHub, renderPort, renderScene, renderSummary } from './ui/screens.js';
 import { renderTitle } from './ui/title.js';
 
-const VERSION = '0.32.0';
+const VERSION = '0.33.0';
 
 const params = new URLSearchParams(window.location.search);
 const flags = {
@@ -405,6 +405,9 @@ window.coldManifest = {
   },
   get clock() {
     return clock;
+  },
+  get tempo() {
+    return tempo;
   },
   get shipView() {
     return shipView;

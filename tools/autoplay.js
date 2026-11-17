@@ -539,7 +539,7 @@ function playCrossing(seed, index) {
   const { run } = sim.state;
   const contract = run.contract;
   const end = CROSSING_MINUTES * 60 * TICK_RATE;
-  const tally = { caught: 0, escapes: 0, quick: 0, routes: 0, strikes: 0, risks: {}, time: { under: 0, coast: 0, held: 0, off: 0, port: 0, pace: 0 }, real: 0, fastTicks: 0, busy: {}, died: {}, sighted: 0, lines: 0, outcomes: {}, events: 0, lapsed: 0, placed: 0, attended: 0, sends: 0, eventContacts: 0, shots: 0, braces: 0, tolls: 0, hooks: 0, met: {}, picked: {}, locked: 0, offered: 0, inspections: 0, seized: 0, fuelBought: 0, fuelSpent: 0, fuelBurned: 0, repairSpent: 0, answers: {}, claimLeft: false, contacts: {}, contactKinds: {}, contactSeconds: [], stages: {}, pings: 0, pingsFound: 0, looks: { found: 0, blank: 0 }, boardings: {}, staff: { crew: 0, margo: 0, dark: 0, well: 0, samples: 0 }, tired: 0, watchChanges: 0, mode: crewMode, margo: { quiet: 0, book: 0, push: 0, rating: 0, held: 0, samples: 0, hunted: 0, found: 0, stretched: 0, ownWay: 0, doubt: 0, changes: 0 } };
+  const tally = { caught: 0, escapes: 0, quick: 0, routes: 0, strikes: 0, risks: {}, time: { under: 0, coast: 0, held: 0, off: 0, port: 0, pace: 0 }, real: 0, fastTicks: 0, busy: {}, idle: 0, underReal: 0, routeReal: [], routeHours: [], spans: 0, died: {}, sighted: 0, lines: 0, outcomes: {}, events: 0, lapsed: 0, placed: 0, attended: 0, sends: 0, eventContacts: 0, shots: 0, braces: 0, tolls: 0, hooks: 0, met: {}, picked: {}, locked: 0, offered: 0, inspections: 0, seized: 0, fuelBought: 0, fuelSpent: 0, fuelBurned: 0, repairSpent: 0, answers: {}, claimLeft: false, contacts: {}, contactKinds: {}, contactSeconds: [], stages: {}, pings: 0, pingsFound: 0, looks: { found: 0, blank: 0 }, boardings: {}, staff: { crew: 0, margo: 0, dark: 0, well: 0, samples: 0 }, tired: 0, watchChanges: 0, mode: crewMode, margo: { quiet: 0, book: 0, push: 0, rating: 0, held: 0, samples: 0, hunted: 0, found: 0, stretched: 0, ownWay: 0, doubt: 0, changes: 0 } };
   sim.events.on('margo.own_way', () => (tally.margo.ownWay += 1));
   sim.events.on('margo.doubt', () => (tally.margo.doubt += 1));
   sim.events.on('margo.manner', (event) => event.why !== 'order' && (tally.margo.changes += 1));
@@ -592,7 +592,10 @@ function playCrossing(seed, index) {
   sim.events.on('pursuit.caught', () => (tally.caught += 1));
   sim.events.on('pursuit.sighted', () => (tally.sighted += 1));
   sim.events.on('ai.line', (event) => event.trigger && ['route.sailed', 'route.passed', 'route.offport', 'sector.jumped', 'course.ready', 'pursuit.sighted', 'contract.late', 'sector.delivered', 'fuel.out', 'pursuit.ended'].includes(event.trigger) && (tally.lines += 1));
-  sim.events.on('route.sailed', () => (tally.routes += 1));
+  sim.events.on('route.sailed', (event) => {
+    tally.routes += 1;
+    tally.routeHours.push(event.hours);
+  });
   sim.events.on('shot.resolved', (event) => event.weapon === 'debris' && event.result === 'hit' && (tally.strikes += 1));
   // Ships met on the crossings, by the risk of the lane that brought them (H.6).
   sim.events.on('contact.spawned', (event) => {
@@ -779,7 +782,9 @@ function playCrossing(seed, index) {
       const alone = hands.length === 1;
       const spare = (member) => alone || member.room !== helm;
       const toMend = alone && (Object.values(sim.state.rooms).some((r) => (r.fire > 0 || r.breach > 0) && !r.jettisoned) || ['ai_core', 'life_support', 'sensors', 'engines'].some((id) => sim.state.systems[id]?.damage > 0) || situationViews(sim).some((item) => item.state !== 'answered'));
-      if (helm && !bound(helm) && hands.length && !toMend && hands[0].goal === null) give({ type: 'crew.move', crew: hands[0].id, room: helm });
+      // Someone awake (F.3): a sleeper sent to the helm never gets there, and the ship sits off the port for ever.
+      const pilot = hands.find((member) => !member.asleep) ?? hands[0];
+      if (helm && !bound(helm) && pilot && !toMend && pilot.goal === null) give({ type: 'crew.move', crew: pilot.id, room: helm });
       // A fire in the way stops the mending: whoever is idle and not flying goes to put it out. A hole lets the air
       // out of the ship, and on a long crossing that kills (H.8): whoever is free goes to patch it, suited.
       for (const [room, r] of Object.entries(sim.state.rooms)) {
@@ -805,10 +810,19 @@ function playCrossing(seed, index) {
         }
       }
     }
+    const wasQuiet = !tempo.reason;
     rate = tempo.step(sim, TICK_SECONDS / rate);
     tally.real += TICK_SECONDS / rate;
     if (rate > 1) tally.fastTicks += 1;
     else if (run.crossing) tally.busy[tempo.reason ?? 'settling'] = (tally.busy[tempo.reason ?? 'settling'] ?? 0) + 1;
+    // Pace (F.3): the running clock port to port, the part of it at normal speed with nothing to answer, and
+    // how often something new comes up that holds the clock.
+    if (run.crossing) {
+      tally.underReal += TICK_SECONDS / rate;
+      tally.routeReal[tally.routes - 1] = (tally.routeReal[tally.routes - 1] ?? 0) + TICK_SECONDS / rate;
+      if (rate === 1 && (!tempo.reason || tempo.reason === 'out of fuel')) tally.idle += TICK_SECONDS;
+      if (wasQuiet && tempo.reason) tally.spans += 1;
+    }
     sim.step();
     if (sim.state.tick % 20 === 0) {
       const problems = checkInvariants(sim);
@@ -1161,6 +1175,7 @@ for (let i = 1; i <= runs; i++) {
 const seconds = (performance.now() - started) / 1000;
 const per = (n) => (n / runs).toFixed(1);
 const mean = (values) => (values.length ? values.reduce((a, b) => a + b, 0) / values.length : 0);
+const median = (values) => (values.length ? [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)] : 0);
 const cleared = scenarios.filter((s) => s.cleared);
 const clearTimes = cleared.map((s) => s.clearSeconds).sort((a, b) => a - b);
 const pct = (n, of) => (of ? `${Math.round((100 * n) / of)}%` : 'n/a');
@@ -1247,6 +1262,12 @@ out.push(`  the clock:         under way ${pct(time.under, allTime)} of the time
   out.push(`  by hand (H.8):     ${mean(crossings.map((c) => c.clockMinutes)).toFixed(1)} minutes of running clock a run with fast time (fast ${pct(fastShare, 1)} of ship time); a crossing port to port ${mean(perRoute).toFixed(1)} minutes (${perRoute.length ? perRoute[0].toFixed(1) : '-'} to ${perRoute.length ? perRoute.at(-1).toFixed(1) : '-'})`);
   const died = {};
   for (const c of crossings) for (const [k, n] of Object.entries(c.died)) died[k] = (died[k] ?? 0) + n;
+  // Pace (F.3): a crossing port to port by the running clock, the dead time in it, and how often something comes up.
+  const legs = crossings.flatMap((c) => c.routeReal.filter((x) => x > 0)).map((x) => x / 60).sort((a, b) => a - b);
+  const under = crossings.reduce((n, c) => n + c.underReal, 0);
+  const idle = crossings.reduce((n, c) => n + c.idle, 0);
+  const spans = crossings.reduce((n, c) => n + c.spans, 0);
+  out.push(`  pace (F.3):        a crossing port to port takes ${median(legs).toFixed(1)} min by the running clock (median of ${legs.length}; ${legs.length ? legs[Math.floor(legs.length / 10)].toFixed(1) : '-'} to ${legs.length ? legs[Math.floor((legs.length * 9) / 10)].toFixed(1) : '-'} for the middle 80%); normal speed with nothing to answer ${pct(idle, under)} of it (target under 10%); something to answer every ${(under / Math.max(1, spans)).toFixed(0)} s`);
   out.push(`  crew lost:         ${mean(crossings.map((c) => c.dead)).toFixed(2)} a run; by cause ${Object.entries(died).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k} ${n}`).join(', ') || 'none'}`);
   out.push(`  normal speed for:  ${Object.entries(busy).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k} ${pct(n, busyAll)}`).join(', ') || 'nothing'}`);
 }
@@ -1311,7 +1332,7 @@ for (const tactic of TACTICS) {
   const staff = crossings.reduce((sum, c) => ({ crew: sum.crew + c.staff.crew, margo: sum.margo + c.staff.margo, dark: sum.dark + c.staff.dark, well: sum.well + c.staff.well, samples: sum.samples + c.staff.samples }), { crew: 0, margo: 0, dark: 0, well: 0, samples: 0 });
   {
   // Being hunted (F.1): how long a ship is on our hands, and whether the stages of its awareness all turn up.
-  const median = (values) => (values.length ? [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)] : 0);
+
   const alone = encounters.map((e) => e.seconds);
   const lanes = crossings.flatMap((c) => c.contactSeconds);
   const met = (ok) => (ok ? 'met' : 'NOT MET');

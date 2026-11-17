@@ -1319,6 +1319,43 @@ body {
   color: #3a2a12;
 }
 
+/* On to the next thing (F.3): beside the pause button, lit while it skips. */
+/* Pause with Next under it, in the one column: the status panel keeps its width. */
+.shipdock__clockbtns {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 210px;
+}
+
+.shipdock__clockbtns .btn--pause {
+  flex: 1;
+}
+
+.btn--skip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 48px;
+  padding: 4px 14px;
+  font-size: 1em;
+}
+
+.btn--skip.is-on {
+  color: var(--space);
+  background: linear-gradient(180deg, var(--amber), var(--sodium));
+  border-color: var(--amber);
+}
+
+.btn--skip.is-on small {
+  color: #3a2a12;
+}
+
+.btn--skip:disabled {
+  opacity: 0.45;
+}
+
 .ship-info {
   position: absolute;
   max-width: 290px;

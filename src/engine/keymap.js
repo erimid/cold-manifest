@@ -5,7 +5,7 @@
 // or folds the switch panel (S2.9, H.4), and G calls everyone to their stations. O overrides an order Margo is holding,
 // and Escape stands down from it (S2.10). M puts the route chart up or takes it
 // down, and J jumps down the plotted course (S3.1).
-// V lights the drive or cuts it, and X puts out a flare (H.1).
+// V lights the drive or cuts it, and X puts out a flare (H.1). N skips on to the next thing on a quiet crossing (F.3).
 
 export const KEYMAP = Object.freeze({
   Space: 'pause',
@@ -27,4 +27,5 @@ export const KEYMAP = Object.freeze({
   KeyJ: 'jump',
   KeyV: 'burn',
   KeyX: 'flare',
+  KeyN: 'skip',
 });
