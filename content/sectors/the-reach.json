@@ -1,5 +1,5 @@
 {
-  "note": "Sector definitions for the chart generator (S3.1, D-104; lanes and crossings since H.6, D-193 to D-199). A sector is a band of space crossed from an origin port on the left to a delivery port on the right, in columns. `nodes` is the range of points on the chart, `columns` the range of columns they sit in (origin and delivery are columns of their own). `kinds` weights what each point in between is; `minimum` makes sure each kind turns up at least that often. `hazards` are the names a hazard point is given. `designations` are the letter codes on Margo's company chart. `fuel` is the start and the tank; a lane costs 1 fuel, 2 for a long one. `hour` is how many seconds of ship time an hour on the ship clock takes (a stand-in until H.8's clock). `hours` is how long a lane is: `base`, plus `column` for each column it crosses, plus `climb` times how far it climbs up or down the chart (0 to 1), rounded, from `min` to `max`, then times its risk's `length`. `slack` is the spare time on the deadline, a share of the cheapest way across in hours (the deadline is that way's hours times one and the slack). `union` is how deep the band of Outer Stations Union space is, top or bottom of the chart (a share of its height). `risks` are what a lane can hold, in order: the first whose `where` fits a lane is its risk (`touches` a kind of point; `beacon` a lane to the old company beacon, set on one open-space point; `union` both ends in Union space; `default` anything left). A risk's `contacts` is the chance an hour that a ship turns up on the scope while we cross it, `encounters` the weights of which one (content/encounters/), `strikes` an hourly chance of being hit by `weapon` (a pilot at the helm sees most of it coming), `length` what it does to the lane's hours. `pursuit` is the chance a run's contract is followed, which encounter follows, how many hours `lead` it gives us before it can turn up, and `rate`, the chance an hour after that that it finds us; driven off by the gun it gives up, any other way it picks the trail up again after its lead. `events` is the chance that passing each kind of point for the first time brings a transit event, somewhere along the lane that runs to it (S3.3; H.7 makes these situations aboard).",
+  "note": "Sector definitions for the chart generator (S3.1, D-104; lanes and crossings since H.6, D-193 to D-199). A sector is a band of space crossed from an origin port on the left to a delivery port on the right, in columns. `nodes` is the range of points on the chart, `columns` the range of columns they sit in (origin and delivery are columns of their own). `kinds` weights what each point in between is; `minimum` makes sure each kind turns up at least that often. `hazards` are the names a hazard point is given. `designations` are the letter codes on Margo's company chart. `fuel` is the start and the tank; a lane costs 1 fuel, 2 for a long one. `hours` is how long a lane is: `base`, plus `column` for each column it crosses, plus `climb` times how far it climbs up or down the chart (0 to 1), rounded, from `min` to `max`, then times its risk's `length`. `slack` is the spare time on the deadline, a share of the cheapest way across in hours (the deadline is that way's hours times one and the slack). `union` is how deep the band of Outer Stations Union space is, top or bottom of the chart (a share of its height). `risks` are what a lane can hold, in order: the first whose `where` fits a lane is its risk (`touches` a kind of point; `beacon` a lane to the old company beacon, set on one open-space point; `union` both ends in Union space; `default` anything left). A risk's `contacts` is the chance an hour that a ship turns up on the scope while we cross it, `aboard` the chance an hour that something happens aboard (a situation from the events that fit the point the lane runs to, on top of that point's own dice; H.8), `encounters` the weights of which one (content/encounters/), `strikes` an hourly chance of being hit by `weapon` (a pilot at the helm sees most of it coming), `length` what it does to the lane's hours. `pursuit` is the chance a run's contract is followed, which encounter follows, how many hours `lead` it gives us before it can turn up, and `rate`, the chance an hour after that that it finds us; driven off by the gun it gives up, any other way it picks the trail up again after its lead. `events` is the chance that passing each kind of point for the first time brings a transit event, somewhere along the lane that runs to it (S3.3; H.7 makes these situations aboard).",
   "items": [
     {
       "id": "the-reach",
@@ -19,9 +19,8 @@
       "crossLanes": 0.35,
       "sideLanes": 0.25,
       "fuel": { "start": 10, "max": 12 },
-      "hour": 10,
       "hours": { "base": 2, "column": 1.5, "climb": 4, "min": 2, "max": 8 },
-      "slack": [0.8, 1],
+      "slack": [0.3, 0.5],
       "union": 0.3,
       "risks": [
         {
@@ -31,6 +30,7 @@
           "text": "Receivers' cutters work this line out of the checkpoint. They stop what they find and go through the hold.",
           "where": { "touches": "checkpoint" },
           "contacts": 0.16,
+          "aboard": 0.03,
           "encounters": { "patrol-cutter": 6, "gunnery-drone": 2, "bulwark": 1 }
         },
         {
@@ -40,6 +40,7 @@
           "text": "Something died out here and is still being picked over. Whoever is picking does not want company.",
           "where": { "touches": "derelict" },
           "contacts": 0.12,
+          "aboard": 0.05,
           "encounters": { "scrap-hauler": 4, "raider-skiff": 3, "drone-carrier": 2 }
         },
         {
@@ -49,6 +50,7 @@
           "text": "Bad space. Things in it hit the hull, and the helm has to see them coming. Few ships come this way.",
           "where": { "touches": "hazard" },
           "contacts": 0.04,
+          "aboard": 0.05,
           "encounters": { "raider-skiff": 2, "scrap-hauler": 1 },
           "strikes": { "perHour": 0.5, "weapon": "debris" }
         },
@@ -59,6 +61,7 @@
           "text": "An old company beacon still calls the line. It is the quickest way through, and everyone listening knows a ship is on it.",
           "where": { "beacon": true },
           "contacts": 0.2,
+          "aboard": 0.03,
           "encounters": { "raider-skiff": 4, "bounty-tender": 3, "patrol-cutter": 1 },
           "length": 0.7
         },
@@ -69,6 +72,7 @@
           "text": "The Outer Stations Union holds this side of the Reach. Its bulwarks charge for the lanes and its drones count who uses them.",
           "where": { "union": true },
           "contacts": 0.14,
+          "aboard": 0.03,
           "encounters": { "bulwark": 4, "gunnery-drone": 3, "patrol-cutter": 1 }
         },
         {
@@ -78,6 +82,7 @@
           "text": "Nothing on the chart. That is not the same as nothing out there.",
           "where": { "default": true },
           "contacts": 0.06,
+          "aboard": 0.06,
           "encounters": { "raider-skiff": 2, "patrol-cutter": 2, "scrap-hauler": 1, "bounty-tender": 1, "drone-carrier": 1 }
         }
       ],

@@ -197,7 +197,7 @@ test('a situation waits in its room until one of ours stands there; then its car
   assert.deepEqual([view.room, view.roomName, view.state, view.by, view.text], ['hold', 'Main hold', 'waiting', null, null]);
   assert.deepEqual(view.choices, [], 'nothing to choose until somebody is there');
   assert.match(view.sign, /Something moved in Main hold/);
-  assert.ok(view.left > 9.99 && view.left <= 10, 'the hours it will wait');
+  assert.ok(view.left > 5.99 && view.left <= 6, 'the hours it will wait');
   assert.match(whyNoChoice(sim, 'work', view.n), /nobody is in Main hold/);
   assert.throws(() => sim.enqueue({ type: 'event.choose', situation: view.n, choice: 'work' }), /nobody is in Main hold/);
   assert.throws(() => sim.enqueue({ type: 'event.choose', situation: 99, choice: 'work' }), /no situation 99/);

@@ -13,6 +13,7 @@
 export function createClock({ sim, tickSeconds, maxTicksPerFrame = 5 }) {
   let paused = false;
   let speed = 1;
+  let tempo = 1; // fast time on a quiet crossing (sim/tempo.js, H.8), on top of the debug speed
   let accumulator = 0;
   const listeners = new Set();
 
@@ -37,6 +38,14 @@ export function createClock({ sim, tickSeconds, maxTicksPerFrame = 5 }) {
     set speed(value) {
       if (!(value > 0)) throw new RangeError(`clock speed must be above 0, got ${value}`);
       speed = value;
+    },
+    get tempo() {
+      return tempo;
+    },
+    /** How many times normal speed a quiet crossing runs at this frame (H.8, D-207). 1 is normal speed. */
+    set tempo(value) {
+      if (!(value >= 1)) throw new RangeError(`clock tempo must be 1 or more, got ${value}`);
+      tempo = value;
     },
     pause(reason = 'player') {
       setPaused(true, reason);
@@ -65,8 +74,8 @@ export function createClock({ sim, tickSeconds, maxTicksPerFrame = 5 }) {
      */
     advance(realSeconds) {
       if (paused || !(realSeconds > 0)) return 0;
-      accumulator += realSeconds * speed;
-      const limit = Math.ceil(maxTicksPerFrame * Math.max(1, speed));
+      accumulator += realSeconds * speed * tempo;
+      const limit = Math.ceil(maxTicksPerFrame * Math.max(1, speed * tempo));
       let ran = 0;
       while (accumulator >= tickSeconds && ran < limit) {
         sim.step();

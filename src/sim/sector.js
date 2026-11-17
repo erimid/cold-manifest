@@ -33,6 +33,7 @@ import { THRUST, driveShare } from './senses.js';
 import { hasPilot, strike, stepFix, whyNoJump } from './combat.js';
 import { findContact, heldAlongside, liveContacts, SPAWN, spawnContact } from './encounters.js';
 import { rating } from './stations.js';
+import { SHIP_HOUR } from './shipclock.js';
 import { aboard, canMeet, heldBySituation, leaveEvents, openEvent, rollLaneEvent } from '../narrative/events.js';
 
 /** What a point on the chart can be, as the chart labels it. */
@@ -64,7 +65,12 @@ export const MAX_LANE_CONTACTS = 2;
 /** Where along its lane a passing point's event comes: between these shares of the lane. */
 const EVENT_ALONG = Object.freeze([0.25, 0.75]);
 /** How far out a follower turns up, in scope units, and how wide of dead astern. */
-const PURSUER = Object.freeze({ range: 90, spread: 40, aware: 0.5 });
+/**
+ * The follower on the scope: how far astern it turns up, how widely, and how well it has us. Each time we slip it
+ * (any way but the gun, letting it dock or the run into port) its lead before it can find us again grows by its first lead, and after
+ * `shake` slips it gives up for good (H.8, D-209).
+ */
+export const PURSUER = Object.freeze({ range: 90, spread: 40, aware: 0.5, shake: 3 });
 
 /** The most points a column in the middle of the chart may hold, and the fewest. */
 const COLUMN_MIN = 2;
@@ -359,7 +365,7 @@ export function newRunState(def, rng, { pursuit, slack: spare } = {}) {
     visited: [map.start],
     fuel: def.fuel.start,
     fuelMax: def.fuel.max,
-    hour: def.hour ?? 10, // seconds of ship time to an hour on the ship clock
+    hour: SHIP_HOUR, // seconds of ship time to an hour on the ship clock (shipclock.js, H.8)
     risks: Object.fromEntries((def.risks ?? []).map((risk) => [risk.id, risk])),
     hours: 0, // ship hours under way since the origin
     legs: 0, // lanes flown
@@ -383,7 +389,8 @@ export function newPursuit(rule) {
     contact: null, // its contact on the scope, while it is there
     seen: false, // its return has shown on the scope this time
     caught: 0, // times it has found us
-    done: false, // driven off for good
+    slipped: 0, // times we got away from it without the gun (H.8): after PURSUER.shake it gives up
+    done: false, // driven off for good, or shaken off
   };
 }
 
@@ -590,6 +597,12 @@ function laneRisks(sim, risk, hours) {
       }
     }
   }
+  // Something happens aboard (H.8, D-208): the lane's chance an hour of a situation, from the events that fit the
+  // point it runs to. On top of the point's own dice (startLeg); only under way, and never while two already wait.
+  if (risk.aboard > 0 && run.crossing.phase === 'under way' && canMeet(sim) && sim.rng.stream('events').chance(risk.aboard * hours)) {
+    const [from, to] = [run.crossing.path[run.crossing.leg], run.crossing.path[run.crossing.leg + 1]];
+    rollLaneEvent(sim, nodeOf(run.map, to)?.kind === 'port' ? from : to, { aboard: true });
+  }
   if (risk.strikes && run.crossing.phase === 'under way' && !heldReason(sim)) {
     const seen = hasPilot(sim) ? Math.min(DODGE.most, DODGE.perRating * rating(sim, 'helm')) : 0;
     if (sim.rng.stream('voyage').chance(risk.strikes.perHour * hours * (1 - seen))) strike(sim, risk.strikes.weapon);
@@ -639,16 +652,22 @@ function findUs(sim) {
   sim.events.emit('pursuit.caught', { contact: contact.id, encounter: chase.encounter, tick: sim.state.tick });
 }
 
-/** A follower's encounter ends: driven off by the gun, it gives up for good; any other way, it picks the trail up again. */
+/**
+ * A follower's encounter ends: driven off by the gun, it gives up for good; slipped, it picks the trail up again
+ * after a longer lead each time, and gives up after PURSUER.shake slips (H.8); having docked, after its lead.
+ */
 export function attachSector(sim) {
   sim.events.on('encounter.ended', (event) => {
     const run = sim.state.run;
     if (!event.pursuer || !run?.pursuit || run.pursuit.done) return;
-    run.pursuit.contact = null;
-    if (event.outcome === 'deterred') {
-      run.pursuit.done = true;
-      sim.events.emit('pursuit.ended', { outcome: event.outcome, tick: sim.state.tick });
-    } else run.pursuit.wait = run.pursuit.lead;
+    const chase = run.pursuit;
+    chase.contact = null;
+    // The run into port leaves it behind every time, so that is not a slip; letting it dock is not one either.
+    if (!['deterred', 'docked', 'jumped'].includes(event.outcome)) chase.slipped += 1;
+    if (event.outcome === 'deterred' || chase.slipped >= PURSUER.shake) {
+      chase.done = true;
+      sim.events.emit('pursuit.ended', { outcome: event.outcome === 'deterred' ? 'deterred' : 'shaken', tick: sim.state.tick });
+    } else chase.wait = chase.lead * (1 + chase.slipped);
   });
 }
 

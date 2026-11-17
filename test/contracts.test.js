@@ -1,6 +1,7 @@
 // Contracts (S3.4, D-113, D-115): the cargo, the advance, delivery, failure, standing, the inspection and the claim.
 // A full contract of each type is completed, and failed, by flying crossings over the chart (H.6).
 
+import { SHIP_HOUR } from '../src/sim/shipclock.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
@@ -133,7 +134,7 @@ test('late, opened or short cargo is paid for in part and moves no standing; a l
   // Cast off and dawdle off the port until the deadline is gone.
   run.deadline = 2;
   castOff(courier, routeVia(run, run.map.delivery));
-  for (let i = 0; i < 20 * REACH.hour * 4 && !run.late; i++) courier.step();
+  for (let i = 0; i < 20 * SHIP_HOUR * 4 && !run.late; i++) courier.step();
   assert.deepEqual(failed, ['late']);
   assert.equal(run.contract.status, 'failed');
   assert.equal(courier.state.reputation.collective, -2);

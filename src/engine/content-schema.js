@@ -169,7 +169,7 @@ function checkSectorDef(item) {
   if (!(Number.isInteger(item.fuel?.start) && Number.isInteger(item.fuel?.max) && item.fuel.start >= 1 && item.fuel.start <= item.fuel.max)) problems.push('fuel must be { start, max }, whole numbers, start at least 1 and no more than max');
   const shares = (v) => Array.isArray(v) && v.length === 2 && v.every((n) => typeof n === 'number' && n >= 0 && n <= 3) && v[0] <= v[1];
   if (!shares(item.slack)) problems.push('slack must be [least, most] spare time on the deadline, a share of the cheapest way across in hours (0 to 3)');
-  if (!(typeof item.hour === 'number' && item.hour > 0)) problems.push('hour must be the seconds of ship time to an hour, above 0');
+  if (item.hour !== undefined) problems.push('hour is retired (H.8, D-206): an hour on the ship clock is SHIP_HOUR seconds for every sector (src/sim/shipclock.js)');
   const h = item.hours;
   if (!h || !['base', 'column', 'climb', 'min', 'max'].every((key) => typeof h[key] === 'number' && h[key] >= 0) || !(h.min >= 1 && h.min <= h.max)) problems.push('hours must be { base, column, climb, min, max }, numbers, min at least 1 and no more than max');
   if (!(typeof item.union === 'number' && item.union >= 0 && item.union < 0.5)) problems.push('union must be the depth of the Union band, from 0 to under 0.5');
@@ -197,6 +197,7 @@ function checkSectorDef(item) {
       else if (keys[0] === 'touches' ? !NODE_KINDS[where.touches] || where.touches === 'port' : where[keys[0]] !== true) problems.push(`${at}: where.${keys[0]} is "${where[keys[0]]}"`);
       if (!share(risk?.contacts) || risk?.contacts === undefined) problems.push(`${at}: contacts must be a chance an hour, 0 to 1`);
       if (!risk?.encounters || typeof risk.encounters !== 'object' || Array.isArray(risk.encounters) || !Object.values(risk.encounters).every((w) => typeof w === 'number' && w >= 0)) problems.push(`${at}: encounters must be an object of encounter id: weight`);
+      if (risk?.aboard !== undefined && !share(risk.aboard)) problems.push(`${at}: aboard must be a chance an hour, 0 to 1`);
       if (risk?.length !== undefined && !(typeof risk.length === 'number' && risk.length > 0 && risk.length <= 2)) problems.push(`${at}: length must be a number above 0, at most 2`);
       if (risk?.strikes !== undefined && !(share(risk.strikes.perHour) && isNonEmptyString(risk.strikes.weapon))) problems.push(`${at}: strikes must be { perHour, weapon }`);
     });

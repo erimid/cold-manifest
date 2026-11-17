@@ -94,7 +94,9 @@ const queued = (page) => game(page, () => window.coldManifest.sim.state.commands
 const down = (page, id) => game(page, (sid) => window.coldManifest.sim.state.stations[sid].down, id);
 const downIs = (page, id, value) => page.waitForFunction(([sid, v]) => window.coldManifest.sim.state.stations[sid].down === v, [id, value], { timeout: 2000 });
 const selectedCrew = (page) => game(page, () => window.coldManifest.shipView.debug.selectedCrew);
+/** A crew member's target, read once the layout has settled (see target()); x and y are where to tap them. */
 const crewTarget = async (page, id) => {
+  await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
   const t = await game(page, (cid) => window.coldManifest.shipView.debug.targets().find((x) => x.kind === 'crew' && x.id === cid), id);
   assert.ok(t, `no crew target ${id}`);
   return t;
@@ -113,6 +115,12 @@ const doorIs = (page, id, state, openness) =>
  * point along its middle that no crew member's body covers (people stand in rooms, D-132).
  */
 /** What the ship looked like when a tap check went wrong (CI only fails where we cannot look). */
+/** E2E_CPU=6 slows the page's CPU that many times over (Chrome's own throttle), to look for checks that race the clock on a slow runner. */
+async function throttle(context, page) {
+  const rate = Number(process.env.E2E_CPU ?? 1);
+  if (rate > 1) await (await context.newCDPSession(page)).send('Emulation.setCPUThrottlingRate', { rate });
+}
+
 const dump = async (page, label, extra = {}) =>
   console.log(`        DIAG ${label}`, JSON.stringify({
     ...extra,
@@ -124,6 +132,7 @@ const dump = async (page, label, extra = {}) =>
         sel: c.shipView.debug.selected,
         selCrew: c.shipView.debug.selectedCrew,
         status: document.querySelector('#status')?.textContent.slice(0, 200),
+        info: document.querySelector('#info') && !document.querySelector('#info').hidden ? document.querySelector('#info').textContent.slice(0, 120) : null,
         vp: [window.innerWidth, window.innerHeight],
         crew: Object.values(c.sim.state.crew).map((m) => [m.id, m.room, m.task, m.goal, Math.round(m.x * 10) / 10, Math.round(m.y * 10) / 10]),
         doors: Object.entries(c.sim.state.doors).filter(([, d]) => d.state !== 'closed').map(([id, d]) => [id, d.state]),
@@ -133,8 +142,20 @@ const dump = async (page, label, extra = {}) =>
     })),
   }));
 
+/** Two animation frames: whatever the last tap changed (the dock's height, and so the ship's fit) has been laid out and drawn. */
+const settled = (page) => page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
+
 async function target(page, id) {
-  const all = await game(page, () => window.coldManifest.shipView.debug.targets());
+  // Read the targets only once the layout has stopped moving. Selecting a crew member grows the dock and the ship
+  // is fitted again on the next frame; on a slow CI runner that frame had not come yet, so the test tapped where
+  // the room used to be (H.8: the DIAG from the red runs showed a room's target 40 px above the room).
+  let all = null;
+  for (let i = 0; i < 10; i++) {
+    await settled(page);
+    const now = await game(page, () => window.coldManifest.shipView.debug.targets());
+    if (all && JSON.stringify(now) === JSON.stringify(all)) break;
+    all = now;
+  }
   const t = all.find((x) => x.id === id);
   assert.ok(t, `no target ${id}`);
   const mx = t.x + t.w / 2;
@@ -173,6 +194,7 @@ async function touchTests(browser) {
   console.log('iPad, landscape, touch');
   const context = await browser.newContext({ ...devices['iPad (gen 7) landscape'] });
   const page = await context.newPage();
+  await throttle(context, page);
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
   await openShip(page, (sel) => page.tap(sel));
@@ -749,7 +771,7 @@ async function voiceTests(browser) {
     await page.waitForFunction((text) => document.querySelector('#ai-text').textContent === text, line.text, { timeout: 4000 });
     assert.ok((await game(page, () => window.coldManifest.audio.stats.played.blip ?? 0)) > 0, 'her voice blips as it types');
     await page.tap('#btn-log');
-    assert.match(await page.textContent('#ailog'), new RegExp(`00:00\\s+${line.text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+    assert.match(await page.textContent('#ailog'), new RegExp(`Day 1 0800\\s+${line.text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
     await page.tap('#btn-log');
     assert.equal(await page.isHidden('#sheet'), true);
   });
@@ -1652,6 +1674,13 @@ async function loopTests(browser) {
     await page.tap('#btn-depart');
     await page.waitForFunction(() => window.coldManifest.machine.state === 'ship');
     // A leak in the cargo hold, where nobody is: the card says what is known and offers to send the nearest hand.
+    // Whoever the crossings left in the cargo hold walks out of it first (H.8: on a slow runner the way across
+    // ended with a hand in there, who attended the leak at once).
+    await game(page, () => {
+      const { sim } = window.coldManifest;
+      for (const member of Object.values(sim.state.crew)) if (member.alive && (member.room === 'cargo' || member.goal === 'cargo')) sim.enqueue({ type: 'crew.move', crew: member.id, room: 'quarters', ship: 'us' });
+    });
+    await page.waitForFunction(() => Object.values(window.coldManifest.sim.state.crew).every((m) => !m.alive || (m.room !== 'cargo' && m.goal !== 'cargo')), null, { timeout: 45000 });
     await game(page, () => {
       const { sim, shipView } = window.coldManifest;
       shipView.openChart(false);
@@ -1669,9 +1698,16 @@ async function loopTests(browser) {
     await shot('h7-situation-waiting-ipad');
     await big(`#sit-${leak} button`);
     // With one of the crew picked, the card sends them instead.
-    const pick = await crewTarget(page, 'vesna');
-    await page.touchscreen.tap(pick.x, pick.y);
-    await page.waitForFunction((n) => /^Send Vesna/.test(document.querySelector(`#sit-send-${n}`)?.textContent ?? ''), leak, { timeout: 2000 });
+    // She may still be walking (the hold was just cleared), so a tap read off one frame can land where she was:
+    // read her again and tap again until the pick takes.
+    let pick;
+    for (let tries = 0; ; tries++) {
+      pick = await crewTarget(page, 'vesna');
+      await page.touchscreen.tap(pick.x, pick.y);
+      const took = await page.waitForFunction((n) => /^Send Vesna/.test(document.querySelector(`#sit-send-${n}`)?.textContent ?? ''), leak, { timeout: 2000 }).then(() => true, () => false);
+      if (took) break;
+      assert.ok(tries < 4, 'a tap on Vesna picks her');
+    }
     await page.tap(`#sit-send-${leak}`);
     await page.waitForFunction((n) => document.querySelector(`#sit-${n}`)?.dataset.state === 'attended', leak, { timeout: 45000 });
     assert.equal(await game(page, () => window.coldManifest.sim.state.crew.vesna.room), 'cargo');
@@ -2075,7 +2111,7 @@ async function watchTests(browser) {
   await check('a new run keeps two watches: the watch on deck walks to its posts and the watch below turns in', async () => {
     assert.equal(await game(page, () => window.coldManifest.sim.state.roster.watches), 2);
     await page.tap('#btn-breakers');
-    assert.match(await page.textContent('#watch-note'), /First watch · \d:\d\d/);
+    assert.match(await page.textContent('#watch-note'), /First watch · \d+ h( \d+ min)? left/);
     await page.waitForFunction(() => {
       const s = window.coldManifest.sim.state;
       const crew = Object.values(s.crew).filter((m) => m.owner === 'player');

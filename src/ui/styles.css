@@ -363,6 +363,11 @@ body {
   color: var(--amber);
 }
 
+/* Fast time on a quiet crossing (H.8): the clock goes pale, so a glance says time is running away. */
+.shipbar__clock.is-fast {
+  color: var(--paper);
+}
+
 .shipbar__buttons {
   display: flex;
   gap: 10px;
@@ -1515,6 +1520,11 @@ body {
 
 .sheet--settings .sheet__pairs {
   grid-template-columns: 1fr 1fr 1fr;
+}
+
+/* H.8 added fast time to the first row: four across, so the sheet stays the height it was. */
+.sheet--settings .sheet__pairs--four {
+  grid-template-columns: repeat(4, 1fr);
 }
 
 /* The debug sheet has outgrown its box; it scrolls rather than spill over the controls. */
