@@ -858,11 +858,22 @@ async function hitTests(browser) {
 
   await check('auto-pause: a ship firing on us stops the clock and the pause button names it (H.3)', async () => {
     await resume();
-    await game(page, () => window.coldManifest.sim.enqueue({ type: 'debug.contact', encounter: 'raider-skiff', state: 'closing', range: 12, bearing: 90 }));
-    // Other pauses may come first (it closes on us); the bot captain waves each away until the shot.
-    for (let i = 0; i < 40; i++) {
-      if (/fires a warning shot/.test(await page.textContent('#pause-note'))) break;
-      if (await paused(page)) await page.tap('#btn-pause');
+    await game(page, () => window.coldManifest.sim.enqueue({ type: 'debug.contact', encounter: 'raider-skiff', state: 'closing', range: 9, bearing: 90 }));
+    // Other pauses may come first (it closes on us); the bot captain waves each away until the shot. A slow
+    // runner's ship time lags the wall clock, so the wait is a long one that ends the moment the shot is called.
+    for (let i = 0; i < 240; i++) {
+      // Read the pause and its note together, a frame after the pause so the note is the one for it: a shot
+      // called between two separate reads would be waved away with the rest.
+      const shot = await page.evaluate(async () => {
+        const { clock } = window.coldManifest;
+        const note = () => document.querySelector('#pause-note').textContent;
+        if (!clock.paused) return /fires a warning shot/.test(note());
+        await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
+        if (/fires a warning shot/.test(note())) return true;
+        if (clock.paused) clock.toggle();
+        return false;
+      });
+      if (shot) break;
       await sleep(250);
     }
     assert.equal(await page.textContent('#pause-note'), 'Raider skiff fires a warning shot');
@@ -1455,13 +1466,15 @@ async function loopTests(browser) {
   const page = await context.newPage();
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
+  await throttle(context, page);
   await page.goto(`http://localhost:${PORT}/?seed=E2E-LOOP&watches=0&autopause=0`);
   await page.waitForFunction(() => window.coldManifest?.machine.state === 'title');
   const shots = process.env.E2E_SHOTS;
   const state = () => game(page, () => window.coldManifest.machine.state);
   const shot = async (name) => shots && page.screenshot({ path: `${shots}/${name}.png` });
   const big = async (selector) => {
-    const sizes = await page.$$eval(selector, (list) => list.map((b) => ({ id: b.id, w: b.getBoundingClientRect().width, h: b.getBoundingClientRect().height })));
+    // Read in one go inside the page: a card rebuilt between finding its buttons and measuring them measures as nothing.
+    const sizes = await page.evaluate((sel) => [...document.querySelectorAll(sel)].map((b) => ({ id: b.id, w: b.getBoundingClientRect().width, h: b.getBoundingClientRect().height })), selector);
     for (const size of sizes) assert.ok(size.w >= 44 && size.h >= 44, `${size.id} is ${size.w}x${size.h}`);
   };
 
@@ -1551,16 +1564,6 @@ async function loopTests(browser) {
   let sawEvent = false;
   let sawSituation = false;
   const metKinds = new Set();
-  /** Where an element sits on the screen. */
-  const boxOf = (selector) => page.$eval(selector, (node) => (({ x, y, width, height }) => ({ x, y, w: width, h: height }))(node.getBoundingClientRect()));
-  /** A room's rectangle on the screen, from the ship view's own fit. */
-  const roomOnScreen = (id) =>
-    game(page, (rid) => {
-      const { sim, shipView } = window.coldManifest;
-      const v = shipView.debug.view;
-      const room = sim.layout.room(rid);
-      return { x: v.ox + room.x * v.scale, y: v.oy + room.y * v.scale, w: room.w * v.scale, h: room.h * v.scale };
-    }, id);
   /**
    * The first situation the crossing brings is played on its card, the way a captain would: the chip sits on its
    * room, the card says what is known and offers to send somebody, they walk there, and then it offers its choices.
@@ -1568,10 +1571,29 @@ async function loopTests(browser) {
   const playSituation = async (one) => {
     assert.equal(await game(page, () => window.coldManifest.shipView.debug.chartOpen), false, 'the chart came down for it');
     await page.waitForSelector(`#sit-chip-${one.n}`, { timeout: 2000 });
-    const chip = await boxOf(`#sit-chip-${one.n}`);
-    const room = await roomOnScreen(one.room);
+    // The chip and its room are read in the same frame, and given a moment: the monitor is still settling as the
+    // chart comes down, and a chip read in one frame against a room read in the next is not where it will sit.
+    const where = () =>
+      game(page, ([n, rid]) => {
+        const { sim, shipView } = window.coldManifest;
+        const v = shipView.debug.view;
+        const r = sim.layout.room(rid);
+        const room = { x: v.ox + r.x * v.scale, y: v.oy + r.y * v.scale, w: r.w * v.scale, h: r.h * v.scale };
+        const node = document.querySelector(`#sit-chip-${n}`);
+        if (!node) return { room, chip: null, on: false };
+        const { x, y, width, height } = node.getBoundingClientRect();
+        const chip = { x, y, w: width, h: height };
+        return { room, chip, on: chip.x >= room.x - 2 && chip.x <= room.x + room.w && chip.y >= room.y - 2 && chip.y <= room.y + room.h };
+      }, [one.n, one.room]);
+    let seen = await where();
+    for (let tries = 0; !seen.on && tries < 20; tries++) {
+      await sleep(150);
+      seen = await where();
+    }
+    const { chip, room } = seen;
+    assert.ok(chip, 'the chip is on the screen');
     assert.ok(chip.h >= 44 && chip.w >= 44, `the chip is ${chip.w}x${chip.h}`);
-    assert.ok(chip.x >= room.x - 2 && chip.x <= room.x + room.w && chip.y >= room.y - 2 && chip.y <= room.y + room.h, `the chip (${Math.round(chip.x)}, ${Math.round(chip.y)}) is on its room ${JSON.stringify(room)}`);
+    assert.ok(seen.on, `the chip (${Math.round(chip.x)}, ${Math.round(chip.y)}) is on its room ${JSON.stringify(room)}`);
     assert.equal(/[{}]/.test(await page.textContent(`#sit-${one.n}`)), false, 'every name on the card is filled in');
     if ((await page.getAttribute(`#sit-${one.n}`, 'data-state')) === 'waiting') {
       if ((await game(page, () => window.coldManifest.shipView.debug.situationOpen)) !== one.n) await page.tap(`#sit-chip-${one.n}`);
