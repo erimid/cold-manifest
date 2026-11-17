@@ -1698,9 +1698,16 @@ async function loopTests(browser) {
     await shot('h7-situation-waiting-ipad');
     await big(`#sit-${leak} button`);
     // With one of the crew picked, the card sends them instead.
-    const pick = await crewTarget(page, 'vesna');
-    await page.touchscreen.tap(pick.x, pick.y);
-    await page.waitForFunction((n) => /^Send Vesna/.test(document.querySelector(`#sit-send-${n}`)?.textContent ?? ''), leak, { timeout: 2000 });
+    // She may still be walking (the hold was just cleared), so a tap read off one frame can land where she was:
+    // read her again and tap again until the pick takes.
+    let pick;
+    for (let tries = 0; ; tries++) {
+      pick = await crewTarget(page, 'vesna');
+      await page.touchscreen.tap(pick.x, pick.y);
+      const took = await page.waitForFunction((n) => /^Send Vesna/.test(document.querySelector(`#sit-send-${n}`)?.textContent ?? ''), leak, { timeout: 2000 }).then(() => true, () => false);
+      if (took) break;
+      assert.ok(tries < 4, 'a tap on Vesna picks her');
+    }
     await page.tap(`#sit-send-${leak}`);
     await page.waitForFunction((n) => document.querySelector(`#sit-${n}`)?.dataset.state === 'attended', leak, { timeout: 45000 });
     assert.equal(await game(page, () => window.coldManifest.sim.state.crew.vesna.room), 'cargo');
