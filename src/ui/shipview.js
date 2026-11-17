@@ -1722,6 +1722,8 @@ export function createShipView({ canvas, root, input, sim, clock, onBack, audio 
         }),
         // And they put lamps back on when the dark gets too much.
         sim.events.on('crew.lit', (event) => hear({ ...event, lamp: true }, event.room)),
+        // Something aboard wants dealing with (H.7): the chart comes down so the room and its card are what the captain sees.
+        sim.events.on('situation.placed', () => chartOpen && openChart(false)),
         sim.events.on('shot.resolved', (event) => {
           if (event.at !== 'us') return;
           impacts.push({ room: event.room, result: event.result, damage: event.damage, effects: event.effects, tick: event.tick });

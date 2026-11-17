@@ -128,14 +128,16 @@ export function createSituationCards({ sim, order, nearest, selected }) {
         const box = boxOf(view.room);
         const same = views.slice(0, i).filter((other) => other.room === view.room).length;
         const width = Math.min(380, bounds.w - 16);
-        const left = Math.max(bounds.x + 8, Math.min(box.x + 4, bounds.x + bounds.w - width - 8));
+        // The chip stays on its room; the card under it slides left when it would run off the monitor.
+        const left = Math.max(bounds.x + 8, Math.min(box.x + 4, bounds.x + bounds.w - 180));
+        const shift = Math.max(0, left + width - (bounds.x + bounds.w - 8));
         const top = Math.max(bounds.y + 8, Math.min(box.y + 4 + same * 50, bounds.y + bounds.h - 52));
         // The open card hangs under its chip, over whatever is below the monitor while it is read; only a room at
         // the very foot of the screen has its card stand on the chip instead.
         const below = window.innerHeight - top - 64;
         const up = below < 200;
         const room = up ? top - 16 : below;
-        const style = `left:${Math.round(left)}px;top:${Math.round(top)}px;width:${Math.round(width)}px;--sit-room:${Math.max(120, Math.round(room))}px;z-index:${isOpen ? 5 : 4}`;
+        const style = `left:${Math.round(left)}px;top:${Math.round(top)}px;width:${Math.round(width)}px;--sit-shift:${Math.round(shift)}px;--sit-room:${Math.max(120, Math.round(room))}px;z-index:${isOpen ? 5 : 4}`;
         if (card.style !== style) {
           card.style = style;
           card.node.setAttribute('style', style);
