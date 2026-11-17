@@ -38,7 +38,8 @@
 //              nothing, going quiet, running, a flare, a crate out of the airlock, a
 //              bluff, the deterrent gun, or paying what is asked (H.3). The duels of
 //              Stage 2 are gone with the enemy ship sim (H.3): this mode replaces them.
-//              An encounter still going after ENCOUNTER_MINUTES is a failure
+//              An encounter still going after ENCOUNTER_MINUTES is a failure. F.1: a contact is over in
+//              about a minute and a half; the report gives the median and the longest, alone and on the crossings
 //   boardings  every kind of party from content/encounters/ at our lock in turn (H.2),
 //              against a bot with one answer: nothing, a bribe at the lock, handing over
 //              what they want, everyone hiding, everyone fighting at the lock, or venting
@@ -65,7 +66,7 @@ import { roundsInHold } from '../src/sim/hold.js';
 import { MANUAL_DOOR_SECONDS, TICK_RATE, TICK_SECONDS, checkInvariants, createSim } from '../src/sim/sim.js';
 import { COAST, bestRoute, cheapestRoute, heldReason, laneBetween, nodeOf, paceOf, routeTotals, whyNoRunIn } from '../src/sim/sector.js';
 import { contractCrates } from '../src/sim/contracts.js';
-import { BLUFFS, ENDINGS, SPAWN, bluffChance, scopeView, whyNoPay } from '../src/sim/encounters.js';
+import { BLUFFS, ENDINGS, SPAWN, STAGES_OF_AWARENESS, bluffChance, scopeView, whyNoPay } from '../src/sim/encounters.js';
 import { BOARD, GOALS, OUTCOMES as BOARD_OUTCOMES, REASONS, whyNoBribe } from '../src/sim/boarders.js';
 import { hidingSpot, lockersFree } from '../src/sim/agents.js';
 import { boardOffers } from '../src/sim/runflow.js';
@@ -534,7 +535,7 @@ function playCrossing(seed, index) {
   const { run } = sim.state;
   const contract = run.contract;
   const end = CROSSING_MINUTES * 60 * TICK_RATE;
-  const tally = { caught: 0, escapes: 0, quick: 0, routes: 0, strikes: 0, risks: {}, time: { under: 0, coast: 0, held: 0, off: 0, port: 0, pace: 0 }, real: 0, fastTicks: 0, busy: {}, died: {}, sighted: 0, lines: 0, outcomes: {}, events: 0, lapsed: 0, placed: 0, attended: 0, sends: 0, eventContacts: 0, shots: 0, braces: 0, tolls: 0, hooks: 0, met: {}, picked: {}, locked: 0, offered: 0, inspections: 0, seized: 0, fuelBought: 0, fuelSpent: 0, repairSpent: 0, claimLeft: false, contacts: {}, contactKinds: {}, boardings: {}, staff: { crew: 0, margo: 0, dark: 0, well: 0, samples: 0 }, tired: 0, watchChanges: 0, mode: crewMode, margo: { quiet: 0, book: 0, push: 0, rating: 0, held: 0, samples: 0, hunted: 0, found: 0, stretched: 0, ownWay: 0, doubt: 0, changes: 0 } };
+  const tally = { caught: 0, escapes: 0, quick: 0, routes: 0, strikes: 0, risks: {}, time: { under: 0, coast: 0, held: 0, off: 0, port: 0, pace: 0 }, real: 0, fastTicks: 0, busy: {}, died: {}, sighted: 0, lines: 0, outcomes: {}, events: 0, lapsed: 0, placed: 0, attended: 0, sends: 0, eventContacts: 0, shots: 0, braces: 0, tolls: 0, hooks: 0, met: {}, picked: {}, locked: 0, offered: 0, inspections: 0, seized: 0, fuelBought: 0, fuelSpent: 0, repairSpent: 0, claimLeft: false, contacts: {}, contactKinds: {}, contactSeconds: [], stages: {}, pings: 0, pingsFound: 0, looks: { found: 0, blank: 0 }, boardings: {}, staff: { crew: 0, margo: 0, dark: 0, well: 0, samples: 0 }, tired: 0, watchChanges: 0, mode: crewMode, margo: { quiet: 0, book: 0, push: 0, rating: 0, held: 0, samples: 0, hunted: 0, found: 0, stretched: 0, ownWay: 0, doubt: 0, changes: 0 } };
   sim.events.on('margo.own_way', () => (tally.margo.ownWay += 1));
   sim.events.on('margo.doubt', () => (tally.margo.doubt += 1));
   sim.events.on('margo.manner', (event) => event.why !== 'order' && (tally.margo.changes += 1));
@@ -561,7 +562,17 @@ function playCrossing(seed, index) {
     if (event.effect === 'scene' || event.effect === 'threat') tally.hooks += 1;
   });
   sim.events.on('boarding.ended', (event) => (tally.boardings[event.outcome] = (tally.boardings[event.outcome] ?? 0) + 1));
+  // How long each ship was on our hands, by the clock a player would have (F.1): from turning up to its ending.
+  const turnedUp = new Map();
+  sim.events.on('contact.stage', (event) => (tally.stages[event.stage] = (tally.stages[event.stage] ?? 0) + 1));
+  sim.events.on('contact.pinged', (event) => {
+    tally.pings += 1;
+    tally.pingsFound += event.found ? 1 : 0;
+  });
+  sim.events.on('contact.swept', (event) => !event.ping && (tally.looks[event.found ? 'found' : 'blank'] += 1));
   sim.events.on('encounter.ended', (event) => {
+    if (turnedUp.has(event.contact)) tally.contactSeconds.push(tally.real - turnedUp.get(event.contact));
+    turnedUp.delete(event.contact);
     tally.contacts[event.outcome] = (tally.contacts[event.outcome] ?? 0) + 1;
     tally.contactKinds[event.encounter] = (tally.contactKinds[event.encounter] ?? 0) + 1;
     // The pursuer is a contact now (H.3): how it ended is how the chase went this time.
@@ -580,6 +591,7 @@ function playCrossing(seed, index) {
   sim.events.on('shot.resolved', (event) => event.weapon === 'debris' && event.result === 'hit' && (tally.strikes += 1));
   // Ships met on the crossings, by the risk of the lane that brought them (H.6).
   sim.events.on('contact.spawned', (event) => {
+    turnedUp.set(event.contact, tally.real);
     const risk = run.crossing ? (laneBetween(run.map, run.crossing.path[run.crossing.leg], run.crossing.path[run.crossing.leg + 1])?.risk ?? 'none') : 'none';
     tally.risks[risk] = (tally.risks[risk] ?? 0) + 1;
   });
@@ -639,9 +651,12 @@ function playCrossing(seed, index) {
       for (const contact of live) if (contact.tolled && !whyNoPay(sim, contact.id)) give({ type: 'contact.pay', contact: contact.id });
       const slot = gunSlot(sim);
       const threat = live.find((contact) => contact.state === 'closing' || contact.state === 'alongside' || contact.tolled);
-      // Something closing: lamps out, and the guns and the shields stood to.
+      // A careful captain (F.1): the lamps go out the moment a search beam brushes us, and stay out until the
+      // scope is clear again. Something closing: the guns and the shields stood to as well.
+      const hunted = live.some((contact) => contact.state !== 'unseen' || contact.aware > 0);
+      if (hunted) give({ type: 'lights.all', on: false });
+      else if (!live.length && sim.state.tick % (10 * TICK_RATE) === 0) give({ type: 'lights.all', on: true });
       if (threat) {
-        give({ type: 'lights.all', on: false });
         for (const station of ['weapons', 'shields']) if (sim.state.stations[station].down) give({ type: 'station.stand', station, down: false });
       }
       if (slot >= 0) {
@@ -665,7 +680,9 @@ function playCrossing(seed, index) {
         if (contract.claim && item.id === contract.claim.event && pick === 'leave') tally.claimLeft = true;
       } else if (sim.state.tick - (sent.get(item.n) ?? -1e9) > 30 * TICK_RATE) {
         // Never whoever is flying her: the bot keeps the helm held (below), and would only call them back.
-        const hand = nearestHand(sim, item.room, (member) => sim.layout.room(member.room)?.kind !== 'helm' && !item.about.includes(member.id));
+        // The last hand alive goes whoever they are: a ship standing by a claim with only her pilot left would wait for ever.
+        const alone = ourCrew(sim).filter(({ member }) => member.alive).length === 1;
+        const hand = nearestHand(sim, item.room, (member) => (alone || sim.layout.room(member.room)?.kind !== 'helm') && !item.about.includes(member.id));
         if (hand && give({ type: 'crew.move', crew: hand.id, room: item.room, ship: 'us' }) !== false) {
           sent.set(item.n, sim.state.tick);
           tally.sends += 1;
@@ -712,11 +729,15 @@ function playCrossing(seed, index) {
       const helm = sim.layout.rooms.find((room) => room.kind === 'helm')?.id;
       const hands = ourCrew(sim).map(({ member }) => member).filter((member) => member.alive);
       const bound = (room) => hands.some((member) => member.room === room || member.goal === room);
-      if (helm && !bound(helm) && hands.length) give({ type: 'crew.move', crew: hands[0].id, room: helm });
+      // The last hand alive does the mending too, and goes back to the helm when there is none to do.
+      const alone = hands.length === 1;
+      const spare = (member) => alone || member.room !== helm;
+      const toMend = alone && (Object.values(sim.state.rooms).some((r) => (r.fire > 0 || r.breach > 0) && !r.jettisoned) || ['ai_core', 'life_support', 'sensors', 'engines'].some((id) => sim.state.systems[id]?.damage > 0) || situationViews(sim).some((item) => item.state !== 'answered'));
+      if (helm && !bound(helm) && hands.length && !toMend && hands[0].goal === null) give({ type: 'crew.move', crew: hands[0].id, room: helm });
       // A fire in the way stops the mending: whoever is idle and not flying goes to put it out. A hole lets the air
       // out of the ship, and on a long crossing that kills (H.8): whoever is free goes to patch it, suited.
       for (const [room, r] of Object.entries(sim.state.rooms)) {
-        const free = hands.find((member) => member.room !== helm && member.goal === null && member.task === 'idle');
+        const free = hands.find((member) => spare(member) && member.goal === null && member.task === 'idle');
         if ((r.fire > 0 || r.breach > 0) && !r.jettisoned && free && !bound(room)) {
           if (r.breach > 0 && !free.suit) give({ type: 'crew.suit', crew: free.id, on: true });
           give({ type: 'crew.move', crew: free.id, room });
@@ -730,7 +751,7 @@ function playCrossing(seed, index) {
         if (running(sim, id)) continue;
         const room = sim.layout.rooms.find((item) => item.system === id)?.id;
         // Whoever is free, a different one every few seconds in case one refuses; suited if the air in there is thin.
-        const free = hands.filter((member) => member.room !== helm && member.goal === null && member.task === 'idle');
+        const free = hands.filter((member) => spare(member) && member.goal === null && member.task === 'idle');
         const hand = free.length ? free[Math.floor(sim.state.tick / (5 * TICK_RATE)) % free.length] : null;
         if (system.damage > 0 && room && hand && !bound(room)) {
           if (sim.state.rooms[room].oxygen < 0.5 && !hand.suit) give({ type: 'crew.suit', crew: hand.id, on: true });
@@ -780,6 +801,7 @@ function playCrossing(seed, index) {
   if (!settled && !lost && !crewDead && sim.state.tick >= end) throw new Error(`still crossing after ${CROSSING_MINUTES} minutes, at ${run.at} with ${run.fuel} fuel (${run.crossing ? `${run.crossing.phase}, lane ${run.crossing.leg}: ${whyNoRunIn(sim)}` : `in port: ${sim.whyNot({ type: 'route.plot', path: nextRoute() })}`})`);
   const bad = findBadNumbers(sim.state);
   if (bad.length) throw new Error(`non-finite numbers at ${bad.join(', ')}`);
+  if (Math.max(0, ...tally.contactSeconds) > CONTACT_MOST_SECONDS) throw new Error(`a ship was on our hands for ${Math.max(...tally.contactSeconds).toFixed(0)} s of the clock: the most is ${CONTACT_MOST_SECONDS}`);
   return {
     ...tally,
     nodes: run.map.nodes.length,
@@ -811,11 +833,15 @@ function playCrossing(seed, index) {
     minutes: sim.state.tick / TICK_RATE / 60,
     clockMinutes: tally.real / 60,
     ticks: sim.state.tick,
+
     hash: hashState(sim.snapshot()),
   };
 }
 
-const ENCOUNTER_MINUTES = 20;
+// A contact is over in about a minute and a half (F.1): one still going after three is a failure.
+const ENCOUNTER_MINUTES = 3;
+/** The longest a contact may last by the bot's clock, in seconds (PLAN F.1: "longest under 3 min"). */
+const CONTACT_MOST_SECONDS = 180;
 /** How far the deterrent gun reaches, in scope units (0 with no gun fitted). */
 const gunReach = (sim) => (gunSlot(sim) >= 0 ? sim.catalog.weapon(sim.state.weapons[gunSlot(sim)].id).range : 0);
 /** What the encounter bot can try. Each seed gives each kind of contact one of them, in turn. */
@@ -834,7 +860,7 @@ function playEncounter(seed, def, tactic) {
   const bot = createRng(`encounter:${def.id}:${tactic}:${seed}`);
   const end = ENCOUNTER_MINUTES * 60 * TICK_RATE;
   const give = (command) => !sim.whyNot(command) && sim.enqueue(command);
-  const tally = { encounter: def.id, tactic, outcome: null, seconds: 0, sighted: null, named: false, noticed: false, fooled: 0, hails: 0, flares: 0, crates: 0, shots: 0, struck: 0, incoming: 0, hits: 0, braced: 0, downed: 0, hull: 0, wrecked: false };
+  const tally = { encounter: def.id, tactic, outcome: null, seconds: 0, stages: [], pings: 0, sighted: null, named: false, noticed: false, fooled: 0, hails: 0, flares: 0, crates: 0, shots: 0, struck: 0, incoming: 0, hits: 0, braced: 0, downed: 0, hull: 0, wrecked: false };
   sim.state.money = 200; // enough for a toll or a bribe, so paying is a real answer
   sim.events.on('weapon.fired', () => (tally.shots += 1));
   sim.events.on('pod.downed', () => (tally.downed += 1));
@@ -849,6 +875,8 @@ function playEncounter(seed, def, tactic) {
     }
   });
   sim.events.on('contact.sighted', () => (tally.sighted ??= sim.state.tick / TICK_RATE));
+  sim.events.on('contact.stage', (event) => tally.stages.push(event.stage));
+  sim.events.on('contact.pinged', () => (tally.pings += 1));
   sim.events.on('contact.identified', () => (tally.named = true));
   sim.events.on('contact.noticed', () => (tally.noticed = true));
   sim.events.on('contact.fooled', () => (tally.fooled += 1));
@@ -1219,7 +1247,22 @@ for (const tactic of TACTICS) {
 {
   // Stations and shifts (H.4): who ran the ship on the crossings.
   const staff = crossings.reduce((sum, c) => ({ crew: sum.crew + c.staff.crew, margo: sum.margo + c.staff.margo, dark: sum.dark + c.staff.dark, well: sum.well + c.staff.well, samples: sum.samples + c.staff.samples }), { crew: 0, margo: 0, dark: 0, well: 0, samples: 0 });
-  out.push(`Stations and shifts (H.4): two watches on the crossings, ${POSTS.length} stations for ${roster.length} crew`);
+  {
+  // Being hunted (F.1): how long a ship is on our hands, and whether the stages of its awareness all turn up.
+  const median = (values) => (values.length ? [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)] : 0);
+  const alone = encounters.map((e) => e.seconds);
+  const lanes = crossings.flatMap((c) => c.contactSeconds);
+  const met = (ok) => (ok ? 'met' : 'NOT MET');
+  out.push(`Being hunted (F.1): how long a contact lasts, from turning up to its ending (target: median under 90 s, longest under ${CONTACT_MOST_SECONDS} s)`);
+  out.push(`  one at a time:     median ${median(alone).toFixed(0)} s, mean ${mean(alone).toFixed(0)} s, longest ${Math.max(0, ...alone).toFixed(0)} s over ${alone.length} encounters at normal speed: ${alone.length ? met(median(alone) < 90 && Math.max(...alone) < CONTACT_MOST_SECONDS) : 'none played'}`);
+  out.push(`  on the crossings:  median ${median(lanes).toFixed(0)} s, mean ${mean(lanes).toFixed(0)} s, longest ${Math.max(0, ...lanes).toFixed(0)} s over ${lanes.length} contacts by the bot's clock (fast time while nothing has noticed us): ${lanes.length ? met(median(lanes) < 90 && Math.max(...lanes) < CONTACT_MOST_SECONDS) : 'none met'}`);
+  const stages = {};
+  for (const e of encounters) for (const stage of new Set(e.stages)) stages[stage] = (stages[stage] ?? 0) + 1;
+  out.push(`  its awareness:     of ${encounters.length} encounters, ${Object.keys(STAGES_OF_AWARENESS).filter((k) => k !== 'passing').map((k) => `${STAGES_OF_AWARENESS[k].toLowerCase()} in ${stages[k] ?? 0}`).join(', ')}; ${encounters.reduce((n, e) => n + e.pings, 0)} pings`);
+  const looks = crossings.reduce((n, c) => ({ found: n.found + c.looks.found, blank: n.blank + c.looks.blank }), { found: 0, blank: 0 });
+  out.push(`  its sweep:         on the crossings a search beam crossed us ${looks.found + looks.blank} times and read something ${pct(looks.found, looks.found + looks.blank)} of them; ${crossings.reduce((n, c) => n + c.pings, 0)} pings, ${crossings.reduce((n, c) => n + c.pingsFound, 0)} of which found us`);
+}
+out.push(`Stations and shifts (H.4): two watches on the crossings, ${POSTS.length} stations for ${roster.length} crew`);
   out.push(`  who had them:      crew ${pct(staff.crew, staff.samples)}, Margo ${pct(staff.margo, staff.samples)}, dark ${pct(staff.dark, staff.samples)} of station time; run better than the book ${pct(staff.well, staff.samples)}`);
   out.push(`  the watch:         ${mean(crossings.map((c) => c.watchChanges)).toFixed(1)} changes a crossing; the most tired hand reached ${Math.round(100 * mean(crossings.map((c) => c.tired)))}% on average (worst ${Math.round(100 * Math.max(...crossings.map((c) => c.tired)))}%)`);
 }

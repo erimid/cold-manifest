@@ -31,8 +31,30 @@ export const PATCHES = Object.freeze({
   flatline: { gain: 0.12, duration: 1.2, env: { attack: 0.01, release: 0.6 }, voices: [{ wave: 'sine', freq: 440 }], filter: { type: 'lowpass', freq: 1200 } },
   shot: { gain: 0.14, duration: 0.09, env: { attack: 0.002, release: 0.16 }, voices: [{ wave: 'sawtooth', freq: 1400, to: 220 }], noise: 0.25, filter: { type: 'lowpass', freq: 3200, to: 600 } },
   shield: { gain: 0.12, duration: 0.22, env: { attack: 0.005, release: 0.35 }, voices: [{ wave: 'sine', freq: 520, to: 780 }, { wave: 'sine', freq: 527, to: 790 }], filter: { type: 'bandpass', freq: 900, q: 3 } },
+  // Being hunted (F.1, D-215): what a search beam sounds like on a passive scope. A beam that crosses us and reads
+  // nothing is a low tick; one that reads something is a tone that climbs with how sure it is (tone1 to tone5);
+  // a ping is a ping; and each stage of its awareness has a call of its own (STAGE_SOUNDS).
+  sweep: { gain: 0.05, duration: 0.03, env: { attack: 0.004, release: 0.09 }, voices: [{ wave: 'sine', freq: 196 }] },
+  brush: { gain: 0.08, duration: 0.07, env: { attack: 0.005, release: 0.14 }, voices: [{ wave: 'triangle', freq: 262, to: 294 }] },
+  tone1: { gain: 0.09, duration: 0.09, env: { attack: 0.005, release: 0.12 }, voices: [{ wave: 'triangle', freq: 330 }] },
+  tone2: { gain: 0.1, duration: 0.09, env: { attack: 0.005, release: 0.12 }, voices: [{ wave: 'triangle', freq: 415 }] },
+  tone3: { gain: 0.11, duration: 0.09, env: { attack: 0.005, release: 0.12 }, voices: [{ wave: 'triangle', freq: 523 }] },
+  tone4: { gain: 0.12, duration: 0.09, env: { attack: 0.005, release: 0.12 }, voices: [{ wave: 'triangle', freq: 659 }] },
+  tone5: { gain: 0.13, duration: 0.09, env: { attack: 0.005, release: 0.12 }, voices: [{ wave: 'triangle', freq: 831 }] },
+  sniff: { gain: 0.12, duration: 0.1, env: { attack: 0.005, release: 0.1 }, voices: [{ wave: 'square', freq: 392 }], filter: { type: 'lowpass', freq: 1800 }, repeat: { count: 2, gap: 0.16 } },
+  sure: { gain: 0.15, duration: 0.07, env: { attack: 0.004, release: 0.05 }, voices: [{ wave: 'square', freq: 988 }], filter: { type: 'lowpass', freq: 3000 }, repeat: { count: 4, gap: 0.11 } },
+  searching: { gain: 0.1, duration: 0.35, env: { attack: 0.01, release: 0.2 }, voices: [{ wave: 'triangle', freq: 523, to: 262 }] },
+  clear: { gain: 0.09, duration: 0.12, env: { attack: 0.01, release: 0.25 }, voices: [{ wave: 'sine', freq: 392, to: 523 }], repeat: { count: 2, gap: 0.2 } },
+  ping: { gain: 0.16, duration: 0.05, env: { attack: 0.003, release: 0.9 }, voices: [{ wave: 'sine', freq: 1245 }, { wave: 'sine', freq: 1250 }] },
   pause: { gain: 0.08, duration: 0.05, env: { attack: 0.004, release: 0.1 }, voices: [{ wave: 'sine', freq: 330, to: 262 }] },
 });
+
+/** The call of each stage of a contact's awareness of us (F.1): the keys are STAGES_OF_AWARENESS in sim/encounters.js. */
+export const STAGE_SOUNDS = Object.freeze({ passing: 'sweep', brushed: 'brush', sniff: 'sniff', sure: 'sure', searching: 'searching', gone: 'clear' });
+/** The tone of a look that reads something, by how sure it leaves the contact: lowest to highest. */
+export const HUNT_TONES = Object.freeze(['tone1', 'tone2', 'tone3', 'tone4', 'tone5']);
+/** The patch for a look at this certainty, 0 to 1. */
+export const huntTone = (certainty) => HUNT_TONES[Math.max(0, Math.min(HUNT_TONES.length - 1, Math.floor(certainty * HUNT_TONES.length)))];
 
 /** Which patch a game event plays. An entry may be a name, or a function of the event returning a name or null. */
 export const EVENT_SOUNDS = Object.freeze({
@@ -59,6 +81,10 @@ export const EVENT_SOUNDS = Object.freeze({
   // The scope (H.1): a new return, and a ship coming alongside.
   'contact.sighted': 'chirp',
   'contact.alongside': 'klaxon',
+  // Being hunted (F.1): only what is on our scope is heard. A beam crossing us, a ping, and each change in how sure it is.
+  'contact.swept': (event) => (!event.shown || event.ping ? null : event.found ? huntTone(event.certainty) : 'sweep'),
+  'contact.pinged': () => 'ping',
+  'contact.stage': (event) => (event.shown && event.stage !== 'passing' ? STAGE_SOUNDS[event.stage] : null),
   'weapon.ready': 'chirp',
   'weapon.fired': 'shot',
   'shot.resolved': (event) => (event.result === 'hit' ? 'thunk' : event.result === 'shield' ? 'shield' : null),

@@ -62,6 +62,7 @@ export const ENDINGS = Object.freeze({
   paid: 'Paid the toll',
   scanned: 'Scanned us and called it in',
   swarmed: 'Spent its drones on us',
+  recalled: 'Ran out of time on us',
 });
 /** What a contact can be looking for. The first four send a boarding party with that goal (H.2); the rest never dock (H.3). */
 export const WANTS = Object.freeze(['inspect', 'cargo', 'crew', 'salvage', 'toll', 'hull', 'scan']);
@@ -78,7 +79,7 @@ export const DECOY_KINDS = Object.freeze(['flare', 'crate']);
 export const KM_PER_UNIT = 10;
 
 /** The helm: degrees a second she turns with the helm run by the book, speed and acceleration at the drive's full push, and flares carried. */
-export const HELM = Object.freeze({ turn: 15, accel: 0.06, speed: 1, flares: 2 });
+export const HELM = Object.freeze({ turn: 15, accel: 0.24, speed: 2, flares: 2 });
 
 /**
  * The scope. `range` is the edge of the display. A return's quality, 0 to 1, is the contact's signature
@@ -96,6 +97,59 @@ export const SCOPE = Object.freeze({ range: 120, reach: 150, clear: 0.45, show: 
  */
 export const AWARE = Object.freeze({ notice: 0.25, close: 0.7, drop: 0.2, gain: 0.08, loss: 0.06, track: 0.5 });
 
+/**
+ * The hunt (F.1, D-214). A contact looks for us with a search beam, and only learns anything when the beam
+ * crosses us (a look). On its own course the beam goes right round at `spin` degrees a second; with a sniff it
+ * doubles back over a patch `arc` degrees either side of where it thinks we are, at `comb` degrees a second;
+ * sure of us, it holds the beam on us. A look moves its certainty toward what it reads of us: up by
+ * `look.wide` or `look.narrow` at most (times the encounter's `keen`), down by `miss` when it reads less
+ * than it believed. Between looks certainty fades by `fade` a second. After `ping.after` looks running that
+ * find nothing (`ping.patrol` on its own course), or on reaching the place a lost ship should be, it pings,
+ * as many times as the encounter's `pings`: one loud pulse that reads us `ping.boost` times better, can add
+ * `ping.gain` at once, and shows us exactly where it is. So a dark ship is safe from a beam, and from a ping
+ * only at a distance.
+ *
+ * Every contact is over in about a minute and a half: one that has not noticed us goes on its way after
+ * `pass` seconds (`linger` if its beam has brushed us), one that is looking gives up after `search` seconds
+ * of looking, a chase is as long as the encounter's `chase`, and nothing stays past `most` seconds.
+ */
+export const HUNT = Object.freeze({
+  spin: 40,
+  comb: 28,
+  arc: 35,
+  beam: 7,
+  look: Object.freeze({ wide: 0.2, narrow: 0.12 }),
+  miss: 0.15,
+  fade: 0.01,
+  fix: 0.5,
+  ping: Object.freeze({ after: 2, patrol: 3, boost: 2.2, gain: 0.3 }),
+  pass: 45,
+  linger: 60,
+  search: 30,
+  most: 150,
+});
+
+/**
+ * The stages of a contact's awareness of us, as the scope marks and sounds them (F.1): what each is called.
+ * The marks are drawn in ui/scope.js (STAGE_MARKS) and the sounds are in audio/patches.js (STAGE_SOUNDS).
+ */
+export const STAGES_OF_AWARENESS = Object.freeze({
+  passing: 'Has not noticed us',
+  brushed: 'Its sweep has brushed us',
+  sniff: 'Has a sniff of us',
+  sure: 'Sure of us',
+  searching: 'Lost us, and searching',
+  gone: 'Leaving',
+});
+
+/** The stage of a contact's awareness of us: a key of STAGES_OF_AWARENESS. */
+export function stageOf(contact) {
+  if (contact.state === 'lost') return 'gone';
+  if (contact.state === 'shadowing') return contact.searching ? 'searching' : 'sniff';
+  if (contact.state === 'unseen') return contact.aware > 0 ? 'brushed' : 'passing';
+  return 'sure';
+}
+
 /** Inside this range a ship is seen by eye, however dark it runs: added to what the sensors read. */
 export const EYES = Object.freeze({ range: 6, strength: 0.3 });
 
@@ -103,8 +157,8 @@ export const EYES = Object.freeze({ range: 6, strength: 0.3 });
 export const ALONGSIDE = 3;
 /** What a decoy gives off, how long it lasts and how fast it leaves us. A flare also lights us up for a moment. */
 export const DECOYS = Object.freeze({
-  flare: Object.freeze({ strength: 0.9, seconds: 40, kick: 0.5, flash: 0.3 }),
-  crate: Object.freeze({ strength: 0.3, seconds: 180, kick: 0.12, flash: 0 }),
+  flare: Object.freeze({ strength: 0.9, seconds: 25, kick: 1, flash: 0.3 }),
+  crate: Object.freeze({ strength: 0.3, seconds: 90, kick: 0.24, flash: 0 }),
 });
 const DECOY_REACH = 4;
 /** A drone takes `flight` seconds to cross to our hull, its zaps miss `miss` of the time, and its cell is flat `life` seconds after it lands. */
@@ -113,15 +167,13 @@ export const DRONE = Object.freeze({ flight: 6, miss: 0.25, life: 24 });
 const SCAN_DECAY = 0.5;
 /** A searching contact is 'there' within this of where it thinks we are; on the way its patience runs at this share. */
 const SEARCH_RADIUS = 8;
-const SEARCH_ON_THE_WAY = 0.25;
+const SEARCH_ON_THE_WAY = 0.5;
 /** How far out its idea of where we are is when it loses us: a share of the range, and the least. */
 const SEARCH_ERROR = Object.freeze({ ofRange: 0.3, least: 6 });
-/** A contact that has not noticed us goes on its way after this long, wherever it is. */
-const PASS_SECONDS = 900;
 /** Where a contact turns up when a lane brings one (sector.js): how far out, and how wide of us its course may pass. */
-export const SPAWN = Object.freeze({ near: 105, far: 125, miss: 40 });
+export const SPAWN = Object.freeze({ near: 40, far: 55, miss: 25 });
 /** A contact that has given up is taken off the scope this long after, or once it is well off the edge. */
-const LEAVE_SECONDS = 90;
+const LEAVE_SECONDS = 30;
 /** The most ended encounters kept on record. */
 const RECORD_MAX = 40;
 /** Each point of negotiation above the first adds this to a bluff's chance. */
@@ -142,7 +194,7 @@ const turnBetween = (from, to) => ((to - from + 540) % 360) - 180;
 /** Problems with an encounter definition (content/encounters/), as readable strings. `refs` holds weapons, encounters, factions and node kinds by id. */
 export function validateEncounter(item, refs = {}) {
   const problems = [];
-  const allowed = ['id', 'note', 'name', 'class', 'blurb', 'wants', 'at', 'weight', 'signature', 'sensors', 'reach', 'keen', 'notice', 'sure', 'speed', 'accel', 'standoff', 'shadow', 'patience', 'chase', 'decoys', 'bluffs', 'alongside', 'party', 'nerve', 'guns', 'drones', 'pods', 'toll', 'scan'];
+  const allowed = ['id', 'note', 'name', 'class', 'blurb', 'wants', 'at', 'weight', 'signature', 'sensors', 'reach', 'keen', 'notice', 'sure', 'speed', 'accel', 'standoff', 'shadow', 'patience', 'chase', 'decoys', 'bluffs', 'alongside', 'party', 'nerve', 'guns', 'drones', 'pods', 'toll', 'scan', 'pings'];
   for (const key of Object.keys(item)) if (!allowed.includes(key) && key !== '_file') problems.push(`unknown key "${key}"`);
   const text = (v) => typeof v === 'string' && v.trim().length > 0;
   const positive = (v) => typeof v === 'number' && Number.isFinite(v) && v > 0;
@@ -187,6 +239,7 @@ export function validateEncounter(item, refs = {}) {
     if (!positive(item.standoff)) problems.push('a ship that never docks needs a standoff: how far off it holds once it has us');
   }
   if (item.party?.faction && refs.factions && !refs.factions.has(item.party.faction)) problems.push(`party.faction: no faction "${item.party.faction}"`);
+  if (item.pings !== undefined && !(Number.isInteger(item.pings) && item.pings >= 0)) problems.push('pings must be a whole number, 0 or more: how many times it will ping for a ship it cannot find');
   if (item.nerve !== undefined && !(typeof item.nerve === 'number' && item.nerve >= 0)) problems.push('nerve must be a number, 0 or more: how much of our gun it takes to break off (0: it never does)');
   const guns = item.guns;
   if (guns !== undefined) {
@@ -292,6 +345,9 @@ export function spawnContact(sim, def, { range = 80, bearing = 0, miss = 20, sid
   const course = { vx: (aim.x / length) * def.speed.cruise, vy: (aim.y / length) * def.speed.cruise };
   const sure = state === 'closing' || state === 'shadowing';
   const rng = sim.rng.stream('encounters');
+  // Its search beam (F.1): it starts well off us and comes round, so there is a moment to see it coming.
+  const turns = rng.chance(0.5) ? 1 : -1;
+  const sweep = { at: norm360(bearingOf(-x, -y) + turns * rng.range(30, 240)), dir: turns, mode: state === 'closing' ? 'locked' : state === 'shadowing' ? 'narrow' : 'wide', looked: null, found: false, blanks: 0, pings: def.pings ?? 1, pinged: null };
   const contact = {
     id: scope.next++,
     encounter: def.id,
@@ -310,6 +366,8 @@ export function spawnContact(sim, def, { range = 80, bearing = 0, miss = 20, sid
     burnFor: 0, // of those, seconds we were burning
     watch: 0, // seconds it has shadowed us
     searching: false, // it is looking for us with nothing to go on
+    combed: false, // it has reached the place it thought we were, this search
+    sought: 0, // seconds of this search
     sprint: false, // it had us firmly and lost us: it runs to where we were
     chased: 0, // seconds it has spent closing
     held: 0, // seconds alongside
@@ -327,10 +385,13 @@ export function spawnContact(sim, def, { range = 80, bearing = 0, miss = 20, sid
     tollEnds: null, // the tick its patience with an unpaid toll runs out
     scan: 0, // seconds of a scan it has built up
     lastLaunch: null, // the tick it last put a drone out
+    sweep, // its search beam: where it points (degrees from the top of the scope), which way it is turning, how it is searching, and its last look and ping
+    stage: null, // the stage of its awareness as the scope last marked it (stageOf)
     born: tick,
     // Margo's return on it: quality 0 to 1, and the slow wander of the reading inside its error.
     track: { q: 0, shown: false, known: false, jb: 0, jr: 0, nb: rng.range(-1, 1), nr: rng.range(-1, 1), t: 0, ghost: null },
   };
+  contact.stage = stageOf(contact);
   scope.contacts.push(contact);
   sim.events.emit('contact.spawned', { contact: contact.id, encounter: def.id, tick });
   return contact;
@@ -388,7 +449,7 @@ export function contactView(sim, contact) {
   if (!track.shown) {
     if (!track.ghost) return null;
     const { ghost } = track;
-    return { id: contact.id, label, name: ghost.name, known: ghost.known, intent: 'Lost in the clutter', state: null, bearing: ghost.bearing, range: ghost.range, bearingError: ghost.bearingError, rangeError: ghost.rangeError, quality: 0, stale: true, age: sim.state.tick - ghost.tick };
+    return { id: contact.id, label, name: ghost.name, known: ghost.known, intent: 'Lost in the clutter', stage: null, stageText: 'Lost in the clutter', certainty: 0, sweep: null, state: null, bearing: ghost.bearing, range: ghost.range, bearingError: ghost.bearingError, rangeError: ghost.rangeError, quality: 0, stale: true, age: sim.state.tick - ghost.tick };
   }
   const def = defOf(sim, contact);
   const error = errorOf(track.q);
@@ -407,6 +468,29 @@ export function contactView(sim, contact) {
     quality: track.q,
     stale: false,
     age: 0,
+    ...awarenessView(sim, contact),
+  };
+}
+
+/**
+ * How close a contact is to finding us, for the scope (F.1): its `stage` (a key of STAGES_OF_AWARENESS) in
+ * words, its `certainty` 0 to 1, and its `sweep`: how many degrees off us the beam points (`off`, 0 is on us),
+ * how it is searching (`mode`: wide, narrow or locked), where the patch it is combing is centred (`centre`,
+ * degrees off us) and how wide (`arc`), and the seconds since its last look (`sinceLook`, with whether it
+ * `found` anything) and its last ping (`sincePing`). A search beam is something a passive scope hears however
+ * poor the return, so none of this waits on the quality of the fix.
+ */
+function awarenessView(sim, contact) {
+  const { sweep, est } = contact;
+  const { tick } = sim.state;
+  const stage = stageOf(contact);
+  const toUs = bearingOf(-contact.x, -contact.y);
+  const since = (then) => (then === null ? null : (tick - then) / 20);
+  return {
+    stage,
+    stageText: contact.state === 'alongside' ? 'Alongside' : STAGES_OF_AWARENESS[stage],
+    certainty: stage === 'gone' ? 0 : contact.aware,
+    sweep: stage === 'gone' ? null : { off: turnBetween(toUs, sweep.at), mode: sweep.mode, centre: sweep.mode === 'narrow' ? turnBetween(toUs, bearingOf(est.x - contact.x, est.y - contact.y)) : 0, arc: HUNT.arc, beam: HUNT.beam, sinceLook: since(sweep.looked), found: sweep.found, sincePing: since(sweep.pinged), pings: sweep.pings },
   };
 }
 
@@ -416,6 +500,8 @@ export function scopeView(sim) {
   const speed = speedOf(sim);
   return {
     range: SCOPE.range,
+    notice: AWARE.notice,
+    sure: AWARE.close,
     heading: helm.heading,
     wanted: helm.wanted,
     speed,
@@ -515,7 +601,7 @@ function steer(contact, def, vx, vy, dt) {
   const dx = vx - contact.vx;
   const dy = vy - contact.vy;
   const gap = Math.hypot(dx, dy);
-  const step = (def.accel ?? 0.12) * dt;
+  const step = (def.accel ?? 0.48) * dt;
   if (gap <= step) {
     contact.vx = vx;
     contact.vy = vy;
@@ -531,9 +617,11 @@ function headFor(contact, def, x, y, speed, dt, helm, stopAt = 0) {
   const dy = y - contact.y;
   const gap = Math.hypot(dx, dy);
   if (gap <= stopAt + 1e-6) return steer(contact, def, helm.vx, helm.vy, dt);
-  // The point moves with us, so it leads it by our own velocity, as far as its drive can keep that up.
-  let vx = helm.vx + (dx / gap) * speed;
-  let vy = helm.vy + (dy / gap) * speed;
+  // The point moves with us, so it leads it by our own velocity, as far as its drive can keep that up; and it
+  // comes in no faster than it can stop from.
+  const closing = Math.min(speed, Math.sqrt(2 * (def.accel ?? 0.48) * Math.max(0, gap - stopAt)) + 0.1);
+  let vx = helm.vx + (dx / gap) * closing;
+  let vy = helm.vy + (dy / gap) * closing;
   const fast = Math.hypot(vx, vy);
   if (fast > speed) {
     vx *= speed / fast;
@@ -556,6 +644,9 @@ function stepContact(sim, contact, dt, loud) {
     return;
   }
 
+  // Nothing stays for ever (F.1): past its time it is called away, whatever it was doing. Pods in the air land first.
+  if ((tick - contact.born) / 20 >= HUNT.most && !contact.podsOut) return lose(sim, contact, 'recalled');
+
   // What it reads: us, or a decoy it likes better.
   const ours = readingOf(sim, contact, loud);
   const drawn = contact.state === 'unseen' || contact.state === 'alongside' ? null : lure(sim, contact, def, ours);
@@ -563,23 +654,30 @@ function stepContact(sim, contact, dt, loud) {
     contact.target = drawn.decoy.id;
     sim.events.emit('contact.fooled', { ...info, decoy: drawn.decoy.id, kind: drawn.decoy.kind });
   } else if (!drawn) contact.target = null;
-  const reading = drawn ? drawn.pull : ours;
-  const goal = clamp01((reading - def.notice) / (def.sure - def.notice));
-  contact.aware = goal > contact.aware ? Math.min(goal, contact.aware + AWARE.gain * (def.keen ?? 1) * dt) : Math.max(goal, contact.aware - AWARE.loss * dt);
+  // Chasing something (us, or a decoy) it holds its beam on it and reads it all the time. Looking for
+  // something, it only learns anything when its beam crosses us (stepSweep), and forgets a little between looks.
+  const held = contact.state === 'closing' || contact.state === 'alongside';
+  if (drawn || held) {
+    const goal = clamp01(((drawn ? drawn.pull : ours) - def.notice) / (def.sure - def.notice));
+    contact.aware = goal > contact.aware ? Math.min(goal, contact.aware + AWARE.gain * (def.keen ?? 1) * dt) : Math.max(goal, contact.aware - AWARE.loss * dt);
+  } else contact.aware = Math.max(0, contact.aware - HUNT.fade * dt);
 
-  // Where it thinks we are. With a track it follows us; without one it can only carry on along the
-  // way we were going: a ship that drifts on in a straight line is found where it was expected.
+  // Where it thinks we are. Holding us in its beam it follows us; between looks it can only carry on along
+  // the way we were going: a ship that drifts on in a straight line is found where it was expected.
   const { est } = contact;
   if (drawn) Object.assign(est, { x: drawn.decoy.x, y: drawn.decoy.y, vx: drawn.decoy.vx, vy: drawn.decoy.vy });
   else {
-    const pull = Math.min(1, contact.aware * AWARE.track * dt);
-    est.x -= est.x * pull;
-    est.y -= est.y * pull;
-    est.vx += (helm.vx - est.vx) * pull;
-    est.vy += (helm.vy - est.vy) * pull;
+    if (held) {
+      const pull = Math.min(1, contact.aware * AWARE.track * dt);
+      est.x -= est.x * pull;
+      est.y -= est.y * pull;
+      est.vx += (helm.vx - est.vx) * pull;
+      est.vy += (helm.vy - est.vy) * pull;
+    }
     est.x += (est.vx - helm.vx) * dt;
     est.y += (est.vy - helm.vy) * dt;
   }
+  stepSweep(sim, contact, def, dt, loud, Boolean(drawn) || held);
 
   // A decoy reached: it knows what it is now. A crate is what a ship after cargo came for.
   if (drawn && Math.hypot(drawn.decoy.x - contact.x, drawn.decoy.y - contact.y) <= DECOY_REACH) {
@@ -600,11 +698,17 @@ function stepContact(sim, contact, dt, loud) {
     if (contact.aware >= AWARE.notice) {
       contact.state = 'shadowing';
       sim.events.emit('contact.noticed', info);
-    } else if ((range > SCOPE.range && contact.x * (contact.vx - helm.vx) + contact.y * (contact.vy - helm.vy) > 0) || (tick - contact.born) / 20 > PASS_SECONDS) {
+    } else if (range > SCOPE.range && contact.x * (contact.vx - helm.vx) + contact.y * (contact.vy - helm.vy) > 0) {
       // Off the edge of the scope and still opening: it never knew we were here.
       sim.events.emit('contact.passed', info);
       record(sim, contact, 'passed');
       remove(sim, contact);
+    } else if ((tick - contact.born) / 20 > (contact.aware > 0 ? HUNT.linger : HUNT.pass)) {
+      // It has looked this stretch of the lane over and seen nothing worth stopping for (F.1): it goes on its way.
+      sim.events.emit('contact.passed', info);
+      record(sim, contact, 'passed');
+      contact.state = 'lost';
+      contact.left = 0;
     }
     return;
   }
@@ -620,23 +724,24 @@ function stepContact(sim, contact, dt, loud) {
       // Nothing to go on: it goes to where we ought to be (at a run, if it had us a moment ago) and looks
       // around. Its patience is mostly spent there, a little on the way. Its fix on a ship it has just lost
       // is only so good, and worse from far off.
-      if (!contact.searching) {
-        contact.searching = true;
-        const off = unit(sim.rng.stream('encounters').range(0, 360));
-        const by = Math.max(SEARCH_ERROR.least, SEARCH_ERROR.ofRange * range) * sim.rng.stream('encounters').range(0.5, 1);
-        est.x += off.x * by;
-        est.y += off.y * by;
-      }
+      if (!contact.searching) beginSearch(sim, contact, range);
+      contact.sought += dt;
       headFor(contact, def, est.x, est.y, contact.sprint ? def.speed.chase : def.speed.cruise, dt, helm, 1);
       const there = Math.hypot(est.x - contact.x, est.y - contact.y) <= SEARCH_RADIUS;
       const spent = there ? dt : dt * SEARCH_ON_THE_WAY;
       contact.lostFor += spent;
       if (burning(sim)) contact.burnFor += spent;
+      // Where we ought to be, and nothing there: it pings for us, if it has one left.
+      if (there && !contact.combed) {
+        contact.combed = true;
+        if (contact.sweep.pings > 0) ping(sim, contact, def, loud);
+      }
     }
-    if (contact.lostFor >= def.patience) return lose(sim, contact, contact.fooled ? 'decoy' : contact.burnFor > contact.lostFor / 2 ? 'outrun' : 'quiet');
+    if (contact.lostFor >= def.patience || (contact.searching && contact.sought >= HUNT.search)) return lose(sim, contact, contact.fooled ? 'decoy' : contact.burnFor > contact.lostFor / 2 ? 'outrun' : 'quiet');
     // Sure of us, or it has looked long enough and comes in anyway.
     if (contact.aware >= AWARE.close || (contact.aware >= AWARE.notice && contact.watch >= (def.shadow ?? 40))) {
       contact.state = 'closing';
+      contact.searching = false;
       sim.events.emit('contact.closing', info);
     }
     return;
@@ -652,12 +757,13 @@ function stepContact(sim, contact, dt, loud) {
       contact.held = 0;
       sim.events.emit('contact.alongside', { ...info, hail: def.alongside.hail, seconds: def.alongside.seconds });
     } else if (contact.chased >= def.chase) {
-      lose(sim, contact, contact.fooled ? 'decoy' : burning(sim) || speedOf(sim) > 0.2 ? 'outrun' : 'quiet'); // a long chase is not worth the fuel
+      lose(sim, contact, contact.fooled ? 'decoy' : burning(sim) || speedOf(sim) > 0.2 ? 'outrun' : contact.aware >= AWARE.notice ? 'recalled' : 'quiet'); // a long chase is not worth the fuel
     } else if (contact.aware < AWARE.drop) {
       contact.state = 'shadowing';
       contact.sprint = true;
       contact.lostFor = 0;
       contact.burnFor = 0;
+      beginSearch(sim, contact, range);
       sim.events.emit('contact.searching', info);
     }
     return;
@@ -683,6 +789,85 @@ function stepContact(sim, contact, dt, loud) {
     // The clamp goes on and its party comes to our lock (H.2, boarders.js).
     startBoarding(sim, def, { contact: contact.id });
   }
+}
+
+/** It has lost us and starts a search: its fix on a ship it has just lost is only so good, and worse from far off. */
+function beginSearch(sim, contact, range) {
+  const rng = sim.rng.stream('encounters');
+  contact.searching = true;
+  contact.combed = false;
+  contact.sought = 0;
+  const off = unit(rng.range(0, 360));
+  const by = Math.max(SEARCH_ERROR.least, SEARCH_ERROR.ofRange * range) * rng.range(0.5, 1);
+  contact.est.x += off.x * by;
+  contact.est.y += off.y * by;
+}
+
+/**
+ * A contact's search beam (F.1): right round on its own course, back and forth over the patch it thinks we are
+ * in once it has a sniff, held on what it is chasing (`fixed`). When the beam crosses us, it gets a look.
+ */
+function stepSweep(sim, contact, def, dt, loud, fixed) {
+  const { sweep, est } = contact;
+  const aim = bearingOf(est.x - contact.x, est.y - contact.y);
+  if (fixed) {
+    sweep.mode = 'locked';
+    sweep.at = aim;
+    return;
+  }
+  const toUs = bearingOf(-contact.x, -contact.y);
+  const before = turnBetween(sweep.at, toUs);
+  if (contact.state === 'shadowing') {
+    sweep.mode = 'narrow';
+    const off = turnBetween(aim, sweep.at);
+    if (off > HUNT.arc) sweep.dir = -1;
+    else if (off < -HUNT.arc) sweep.dir = 1;
+    sweep.at = norm360(sweep.at + sweep.dir * HUNT.comb * dt);
+  } else {
+    sweep.mode = 'wide';
+    sweep.at = norm360(sweep.at + sweep.dir * HUNT.spin * dt);
+  }
+  const after = turnBetween(sweep.at, toUs);
+  if (before !== 0 && Math.sign(before) !== Math.sign(after) && Math.abs(before) < 90 && Math.abs(after) < 90) look(sim, contact, def, loud);
+}
+
+/**
+ * Its beam crosses us (or it pings): its certainty moves toward what it reads of us, and if it reads anything
+ * its idea of where we are is that much better. Enough looks running that find nothing, and it pings.
+ */
+function look(sim, contact, def, loud, pinging = false) {
+  const { sweep, est } = contact;
+  const { helm, tick } = sim.state;
+  const reading = readingOf(sim, contact, loud) * (pinging ? HUNT.ping.boost : 1);
+  const goal = clamp01((reading - def.notice) / (def.sure - def.notice));
+  const was = contact.aware;
+  const most = (pinging ? HUNT.ping.gain : contact.state === 'unseen' ? HUNT.look.wide : HUNT.look.narrow) * (def.keen ?? 1);
+  contact.aware = goal > was ? Math.min(goal, was + most) : pinging ? was : Math.max(goal, was - HUNT.miss);
+  const found = goal > 0;
+  if (found) {
+    const fix = HUNT.fix + (1 - HUNT.fix) * contact.aware;
+    est.x -= est.x * fix;
+    est.y -= est.y * fix;
+    est.vx += (helm.vx - est.vx) * fix;
+    est.vy += (helm.vy - est.vy) * fix;
+  }
+  sweep.looked = tick;
+  sweep.found = found;
+  sweep.blanks = found ? 0 : sweep.blanks + 1;
+  sim.events.emit('contact.swept', { contact: contact.id, label: `C${contact.id}`, found, ping: pinging, certainty: contact.aware, was, shown: contact.track.shown, tick });
+  if (!pinging && !found && sweep.pings > 0 && sweep.blanks >= (contact.state === 'shadowing' ? HUNT.ping.after : HUNT.ping.patrol)) ping(sim, contact, def, loud);
+}
+
+/** One loud pulse: it reads us better than its beam does, and for a moment we know exactly where it is, and what. */
+function ping(sim, contact, def, loud) {
+  const { sweep } = contact;
+  sweep.pings -= 1;
+  sweep.pinged = sim.state.tick;
+  sweep.blanks = 0;
+  contact.track.q = 1;
+  look(sim, contact, def, loud, true);
+  sweep.blanks = 0;
+  sim.events.emit('contact.pinged', { contact: contact.id, label: `C${contact.id}`, encounter: def.id, name: def.name, found: sweep.found, left: sweep.pings, shown: contact.track.shown, tick: sim.state.tick });
 }
 
 /** How close a boarding ship has to be to put its party across: alongside for a clamp, further off for pods. */
@@ -876,6 +1061,7 @@ export function shotAt(sim, contact) {
   contact.aware = 1;
   contact.target = null;
   Object.assign(contact.est, { x: 0, y: 0, vx: sim.state.helm.vx, vy: sim.state.helm.vy });
+  contact.searching = false;
   if (contact.state === 'unseen' || contact.state === 'shadowing') {
     contact.state = 'closing';
     sim.events.emit('contact.closing', { contact: contact.id, encounter: def.id, name: def.name, tick: sim.state.tick });
@@ -967,6 +1153,13 @@ export function stepEncounters(sim, dt) {
     contact.x += (contact.vx - helm.vx) * dt;
     contact.y += (contact.vy - helm.vy) * dt;
     stepTrack(sim, contact, dt, rng);
+    // The stage of its awareness, as the scope marks and sounds it (F.1).
+    const stage = stageOf(contact);
+    if (stage !== contact.stage) {
+      const was = contact.stage;
+      contact.stage = stage;
+      sim.events.emit('contact.stage', { contact: contact.id, label: `C${contact.id}`, stage, was, certainty: contact.aware, shown: contact.track.shown, tick: sim.state.tick });
+    }
   }
   stepDrones(sim);
   stepPods(sim);
@@ -1097,6 +1290,7 @@ export const ENCOUNTER_COMMANDS = {
       contact.wary = true;
       contact.aware = 1;
       contact.target = null;
+      contact.searching = false;
       Object.assign(contact.est, { x: 0, y: 0, vx: sim.state.helm.vx, vy: sim.state.helm.vy });
       if (contact.state === 'unseen' || contact.state === 'shadowing') {
         contact.state = 'closing';
@@ -1152,6 +1346,8 @@ export function checkEncounterInvariants(sim) {
     if (!finite(contact.x, contact.y, contact.vx, contact.vy, contact.est.x, contact.est.y, contact.est.vx, contact.est.vy)) problems.push(`${where}: its position is not a number`);
     if (!(contact.aware >= 0 && contact.aware <= 1)) problems.push(`${where}: awareness is ${contact.aware}`);
     if (!(contact.track.q >= 0 && contact.track.q <= 1)) problems.push(`${where}: return quality is ${contact.track.q}`);
+    if (!finite(contact.sweep?.at) || !(contact.sweep.at >= 0 && contact.sweep.at < 360) || !(Number.isInteger(contact.sweep.pings) && contact.sweep.pings >= 0)) problems.push(`${where}: its search beam is ${JSON.stringify(contact.sweep)}`);
+    if (contact.state !== 'lost' && (sim.state.tick - contact.born) / 20 > HUNT.most + 60) problems.push(`${where}: still ${contact.state} after ${Math.round((sim.state.tick - contact.born) / 20)} s`);
     if (contact.target !== null && !scope.decoys.some((decoy) => decoy.id === contact.target)) problems.push(`${where}: chasing a decoy that is not there`);
   }
   for (const drone of scope.drones) {

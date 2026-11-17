@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import { validateContent } from '../src/engine/content-schema.js';
-import { ALONGSIDE, ENDINGS, HELM, SCOPE, STATES, bluffChance, contactView, errorOf, returnQuality, scopeView, speedOf, validateEncounter } from '../src/sim/encounters.js';
+import { ALONGSIDE, ENDINGS, HELM, HUNT, SCOPE, STATES, bluffChance, contactView, errorOf, returnQuality, scopeView, speedOf, validateEncounter } from '../src/sim/encounters.js';
 import { spotIn } from '../src/sim/crew.js';
 import { THRUST, signature } from '../src/sim/senses.js';
 import { operatorOf } from '../src/sim/stations.js';
@@ -188,11 +188,11 @@ test('the scope shows a contact as a bearing and a range with an error the truth
     assert.ok(off <= view.bearingError + 1e-6, `bearing out by ${off}, error ${view.bearingError}`);
     assert.ok(Math.abs(view.range - range) <= view.rangeError * range + 1e-6, `range ${view.range} against ${range}`);
     if (!view.known) assert.equal(view.name, 'Unknown return');
-    else named ??= view.name;
+    else if (contact.sweep.pinged === null) named ??= view.name;
   }
   assert.ok(shown > 100, 'it was on the scope');
   assert.deepEqual(heard[0], ['contact.sighted', 'C1']);
-  assert.equal(named, null, 'on passive sensors, in the dark, a far contact is never made out');
+  assert.equal(named, null, 'on passive sensors, in the dark, a far contact is never made out (until it pings, F.1)');
 
   // Sensors up: the same kind of contact, closer, is named.
   const lit = quietSim('scope-view-2');
@@ -423,7 +423,7 @@ test('slipped by a bluff: a lie that works turns it away, one that does not brin
 
 // ---------- every encounter ends, and replays ----------
 
-test('every kind of contact, left alone or run from, ends in a named way within a quarter of an hour', () => {
+test('every kind of contact, left alone or run from, ends in a named way within three minutes (F.1)', () => {
   for (const def of ENCOUNTERS) {
     for (const tactic of ['nothing', 'dark', 'burn']) {
       const sim = quietSim(`ends:${def.id}:${tactic}`);
@@ -434,8 +434,9 @@ test('every kind of contact, left alone or run from, ends in a named way within 
         go(sim, { type: 'helm.heading', heading: 300 });
         go(sim, { type: 'helm.burn', on: true });
       }
-      const { outcome } = play(sim, 15 * 60);
+      const { outcome, seconds: took } = play(sim, 3 * 60);
       assert.ok(ENDINGS[outcome], `${def.id}, ${tactic}: ended "${outcome}"`);
+      assert.ok(took <= HUNT.most + 10, `${def.id}, ${tactic}: took ${took} s`);
     }
   }
 });

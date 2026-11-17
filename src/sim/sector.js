@@ -70,7 +70,7 @@ const EVENT_ALONG = Object.freeze([0.25, 0.75]);
  * (any way but the gun, letting it dock or the run into port) its lead before it can find us again grows by its first lead, and after
  * `shake` slips it gives up for good (H.8, D-209).
  */
-export const PURSUER = Object.freeze({ range: 90, spread: 40, aware: 0.5, shake: 3 });
+export const PURSUER = Object.freeze({ range: 50, spread: 40, aware: 0.5, shake: 3 });
 
 /** The most points a column in the middle of the chart may hold, and the fewest. */
 const COLUMN_MIN = 2;

@@ -51,9 +51,24 @@ test('a quiet crossing runs fast after a few quiet seconds, and drops to normal 
   sim.enqueue({ type: 'debug.contact', encounter: 'raider-skiff', state: 'closing', range: 40 });
   // Fast until its return shows on the scope: what nobody has seen does not slow the clock.
   for (let i = 0; i < 20 * TICK_RATE && !busyReason(sim); i++) sim.step();
-  assert.match(busyReason(sim) ?? 'quiet', /scope/);
+  assert.match(busyReason(sim) ?? 'quiet', /hunting/);
   assert.equal(tempo.step(sim, 0.016), 1, 'straight back to normal');
-  assert.equal(tempo.reason, 'a ship is on the scope');
+  assert.equal(tempo.reason, 'a ship is hunting us');
+});
+
+test('a ship that has not noticed us does not hold the clock; the moment its beam brushes us it does (F.1)', () => {
+  const sim = quietCrossing('unnoticed');
+  sim.enqueue({ type: 'lights.all', on: false });
+  for (const station of ['sensors', 'engines']) sim.enqueue({ type: 'station.stand', station, down: true });
+  sim.step();
+  sim.enqueue({ type: 'debug.contact', encounter: 'raider-skiff', range: 50, bearing: 10, miss: 30 });
+  for (let i = 0; i < 6 * TICK_RATE; i++) sim.step();
+  const contact = sim.state.scope.contacts[0];
+  assert.equal(contact.state, 'unseen');
+  assert.equal(contact.track.shown, true, 'it is on our scope');
+  assert.equal(busyReason(sim), null, 'and time may still run fast');
+  contact.aware = 0.1;
+  assert.equal(busyReason(sim), 'a ship is hunting us', 'brushed: time slows');
 });
 
 test('time runs at normal speed in port, off the port, with something aboard and on a decision', () => {

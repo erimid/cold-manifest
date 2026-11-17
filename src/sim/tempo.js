@@ -3,8 +3,8 @@
 // more fixed ticks a real second, and every tick is the same tick it would be
 // at normal speed, so a seed plays out the same whatever the tempo was.
 //
-// Time runs at normal speed whenever something is going on: a ship on the
-// scope, a situation aboard, a decision on the table, a boarding, rounds or
+// Time runs at normal speed whenever something is going on: a ship that has
+// noticed us or brushed us with its beam (F.1), a situation aboard, a decision on the table, a boarding, rounds or
 // drones in the air, a fire or a hole we know about, bad space that strikes the
 // hull, the run into port, or being in port at all. Once all of that has been
 // quiet for TEMPO.settle real seconds it eases up to TEMPO.fast over
@@ -40,7 +40,8 @@ export function busyReason(sim) {
   if (run.events?.open) return 'a decision is on the table';
   if (run.events?.aboard.length) return 'something is happening aboard';
   if (sim.state.boarding) return 'a ship is clamped to our airlock';
-  if (liveContacts(sim).some((contact) => contact.track?.shown || contact.state === 'alongside')) return 'a ship is on the scope';
+  // A ship that has not noticed us does not hold the clock (F.1, D-216): time slows the moment its beam brushes us.
+  if (liveContacts(sim).some((contact) => (contact.track?.shown || contact.state === 'alongside') && (contact.state !== 'unseen' || contact.aware > 0))) return 'a ship is hunting us';
   if (sim.state.shots.some((shot) => shot.at === 'us') || sim.state.scope.drones.length || sim.state.scope.pods?.length) return 'we are under fire';
   if (sim.layout.rooms.some((room) => known(sim, room.id))) return 'fire or a hole aboard';
   if (riskOf(run, laneNow(run))?.strikes) return 'bad space';
