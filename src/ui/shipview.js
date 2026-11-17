@@ -1669,7 +1669,7 @@ export function createShipView({ canvas, root, input, sim, clock, tempo = null, 
         button('btn-back', 'Back', onBack),
       ),
     );
-    nodes.bottom = el('div', { class: 'shipdock' }, nodes.sheet, nodes.ai, buildCalls(), el('div', { class: 'shipdock__row' }, nodes.status, el('div', { class: 'shipdock__clockbtns' }, nodes.pause, tempo && sim.state.run && nodes.skip)), buildPower());
+    nodes.bottom = el('div', { class: 'shipdock' }, nodes.sheet, nodes.ai, buildCalls(), el('div', { class: 'shipdock__row' }, nodes.status, tempo && sim.state.run ? el('div', { class: 'shipdock__clockbtns' }, nodes.pause, nodes.skip) : nodes.pause), buildPower());
     chart = sim.state.run ? createChart({ sim, order, onClose: () => openChart(false) }) : null;
     const hand = (member) => (member ? { id: member.id, name: member.name } : null);
     situations = createSituationCards({ sim, order, nearest: (room, about = []) => hand(nearestHand(sim, room, (member) => !about.includes(member.id))), selected: () => hand(selectedCrew && sim.state.crew[selectedCrew]?.alive && !sim.state.crew[selectedCrew].asleep ? sim.state.crew[selectedCrew] : null) });

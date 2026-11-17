@@ -1324,12 +1324,14 @@ body {
 .shipdock__clockbtns {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 4px;
   min-width: 210px;
 }
 
+/* Together no taller than Pause alone was (88 px), so the ship keeps its size. */
 .shipdock__clockbtns .btn--pause {
   flex: 1;
+  min-height: 40px;
 }
 
 .btn--skip {
@@ -1337,8 +1339,8 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  min-height: 48px;
-  padding: 4px 14px;
+  min-height: 44px;
+  padding: 2px 14px;
   font-size: 1em;
 }
 

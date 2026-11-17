@@ -163,7 +163,17 @@ async function target(page, id) {
   if (t.kind !== 'room') return { ...t, mx, my };
   const covered = (x, y) => all.some((o) => o.priority > t.priority && x >= o.x - 16 && x <= o.x + o.w + 16 && y >= o.y - 16 && y <= o.y + o.h + 16);
   for (let d = 0; d <= t.w / 2; d += 4) for (const x of [mx - d, mx + d]) if (!covered(x, my)) return { ...t, mx: x, my };
-  return { ...t, mx, my };
+  // A small room (the switch panel open shrinks the ship) can have a door's reach across its whole width at the
+  // middle: try lower and higher in the room too, and failing that the point furthest from anything over it.
+  for (let e = 4; e < t.h / 2; e += 4) for (const y of [my + e, my - e]) for (let d = 0; d <= t.w / 2; d += 4) for (const x of [mx - d, mx + d]) if (!covered(x, y)) return { ...t, mx: x, my: y };
+  let best = { mx, my, gap: -1 };
+  for (let y = t.y + 2; y <= t.y + t.h - 2; y += 2) {
+    for (let x = t.x + 2; x <= t.x + t.w - 2; x += 2) {
+      const gap = Math.min(...all.filter((o) => o.priority > t.priority).map((o) => Math.max(o.x - x, x - (o.x + o.w), o.y - y, y - (o.y + o.h))));
+      if (gap > best.gap) best = { mx: x, my: y, gap };
+    }
+  }
+  return { ...t, mx: best.mx, my: best.my };
 }
 
 /** Raw touch through the browser, so holds and drags are real pointer streams. */
