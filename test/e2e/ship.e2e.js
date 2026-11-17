@@ -2081,7 +2081,7 @@ async function watchTests(browser) {
     await page.tap('#btn-post-sensors');
     await page.waitForFunction(() => window.coldManifest.sim.state.crew.vesna.post === 'sensors', null, { timeout: 2000 });
     assert.match(await page.textContent('#status'), /Post\s*Sensors/);
-    await page.waitForFunction(() => window.coldManifest.sim.state.crew.vesna.room === 'sensors' && !window.coldManifest.sim.state.crew.vesna.path.length, null, { timeout: 45000 });
+    await page.waitForFunction(() => window.coldManifest.sim.state.crew.vesna.room === 'sensors' && !window.coldManifest.sim.state.crew.vesna.path.length, null, { timeout: 45000 }).catch(async (e) => { console.log('DIAG', JSON.stringify(await game(page, () => { const c = window.coldManifest; const v = c.sim.state.crew.vesna; return { v: { room: v.room, task: v.task, asleep: v.asleep, path: v.path, goal: v.goal, post: v.post, watch: v.watch, x: v.x, y: v.y }, paused: c.sim.state.paused, tick: c.sim.state.tick, machine: c.machine.state, aboard: c.sim.state.run?.events?.aboard, roster: c.sim.state.roster }; }))); throw e; });
     await page.waitForFunction(() => /Vesna/.test(document.querySelector('#station-sensors').textContent), null, { timeout: 4000 });
     const was = await game(page, () => window.coldManifest.sim.state.crew.vesna.watch);
     await page.tap('#btn-watch');
