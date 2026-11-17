@@ -1674,6 +1674,13 @@ async function loopTests(browser) {
     await page.tap('#btn-depart');
     await page.waitForFunction(() => window.coldManifest.machine.state === 'ship');
     // A leak in the cargo hold, where nobody is: the card says what is known and offers to send the nearest hand.
+    // Whoever the crossings left in the cargo hold walks out of it first (H.8: on a slow runner the way across
+    // ended with a hand in there, who attended the leak at once).
+    await game(page, () => {
+      const { sim } = window.coldManifest;
+      for (const member of Object.values(sim.state.crew)) if (member.alive && (member.room === 'cargo' || member.goal === 'cargo')) sim.enqueue({ type: 'crew.move', crew: member.id, room: 'quarters', ship: 'us' });
+    });
+    await page.waitForFunction(() => Object.values(window.coldManifest.sim.state.crew).every((m) => !m.alive || (m.room !== 'cargo' && m.goal !== 'cargo')), null, { timeout: 45000 });
     await game(page, () => {
       const { sim, shipView } = window.coldManifest;
       shipView.openChart(false);
