@@ -134,8 +134,9 @@ export function createSituationCards({ sim, order, nearest, selected }) {
         const box = boxOf(view.room);
         const same = views.slice(0, i).filter((other) => other.room === view.room).length;
         const width = Math.min(380, bounds.w - 16);
-        // The chip stays on its room; the card under it slides left when it would run off the monitor.
-        const left = Math.max(bounds.x + 8, Math.min(box.x + 4, bounds.x + bounds.w - 180));
+        // The chip stays on its room, even a narrow one at the monitor's edge (it is cut narrower there, never less
+        // than 112 px); the card under it slides left when it would run off the monitor.
+        const left = Math.max(bounds.x + 8, Math.min(box.x + 4, bounds.x + bounds.w - 120));
         const shift = Math.max(0, left + width - (bounds.x + bounds.w - 8));
         const top = Math.max(bounds.y + 8, Math.min(box.y + 4 + same * 50, bounds.y + bounds.h - 52));
         // The open card hangs under its chip, over whatever is below the monitor while it is read; only a room at
