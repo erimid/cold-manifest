@@ -28,12 +28,12 @@
 // The run keeps its progress in `run.contract`. The crates are real crates in the hold (hold.js),
 // marked `contract: true`, so they can be opened, carried, jettisoned, lost with a room, seized at
 // an inspection or sold at a port, and the fee at the drop counts what is left of them:
-//   earned = pay × (sealed crates + half of opened ones) ÷ the crates the contract is for, × latePay if late
+//   earned = pay × (sealed crates + half of opened ones, nothing for spoiled ones (F.5)) ÷ the crates the contract is for, × latePay if late
 // and what is paid there is what was earned less the advance. Every crate gone, a courier late, the
 // cargo sold or the contract walked away from: it fails, the client's standing drops and the client
 // takes its penalty. A failed contract does not end the run (brief §5).
 
-import { addCrate } from './hold.js';
+import { addCrate, spoilCrate } from './hold.js';
 import { cheapestRoute, nodeOf } from './sector.js';
 
 /** The kinds of contract, and what the board calls each. Prisoner transport, specimen haul and rescue come later (D-010). */
@@ -184,6 +184,15 @@ export function checkCargo(sim, reason = 'lost') {
   if (contract?.status === 'active' && contract.loaded > 0 && contractCrates(sim).length === 0) failContract(sim, reason);
 }
 
+/** Spoil up to `count` of the contract's crates (F.5), those in `room` first. Returns how many were spoiled. */
+export function spoilCargo(sim, { count = 1, room = null, cause = 'event' } = {}) {
+  const fresh = contractCrates(sim).filter((crate) => !crate.spoiled);
+  fresh.sort((a, b) => (b.room === room) - (a.room === room) || a.id.localeCompare(b.id));
+  let done = 0;
+  for (const crate of fresh.slice(0, count)) if (spoilCrate(sim, crate, cause)) done += 1;
+  return done;
+}
+
 /** Take contraband (or, with `all`, every crate of the contract) off the ship. Returns how many went. */
 export function seizeCargo(sim, { all = false } = {}) {
   const taken = Object.values(sim.state.crates).filter((crate) => (all ? crate.contract : crate.contraband));
@@ -199,7 +208,7 @@ export function seizeCargo(sim, { all = false } = {}) {
 }
 
 /**
- * What the drop would pay right now: { aboard, sealed, opened, share, late, earned, due, clean, standing }.
+ * What the drop would pay right now: { aboard, sealed, opened, spoiled, share, late, earned, due, clean, standing }.
  * `due` is what changes hands at the drop: what was earned, less the advance.
  */
 export function settlement(sim) {
@@ -207,13 +216,15 @@ export function settlement(sim) {
   const template = sim.contract;
   const run = sim.state.run;
   const crates = contractCrates(sim);
-  const opened = crates.filter((crate) => crate.kind === 'cargo' && !crate.sealed).length;
-  const sealed = crates.length - opened;
+  // A spoiled crate (F.5) is worth nothing; an opened one half.
+  const spoiled = crates.filter((crate) => crate.spoiled).length;
+  const opened = crates.filter((crate) => !crate.spoiled && crate.kind === 'cargo' && !crate.sealed).length;
+  const sealed = crates.length - opened - spoiled;
   const share = contract.expected ? Math.min(1, (sealed + opened * OPENED_SHARE) / contract.expected) : 0;
   const late = Boolean(run.late);
   const earned = Math.round(contract.pay * share * (late ? (template.latePay ?? 0.5) : 1));
   const clean = sealed === contract.expected && !late;
-  return { aboard: crates.length, sealed, opened, share, late, earned, due: Math.max(0, earned - contract.advance), clean, standing: clean ? (template.reputation?.deliver ?? 0) : 0 };
+  return { aboard: crates.length, sealed, opened, spoiled, share, late, earned, due: Math.max(0, earned - contract.advance), clean, standing: clean ? (template.reputation?.deliver ?? 0) : 0 };
 }
 
 /** Why the cargo cannot be handed over right now, or null. */

@@ -16,7 +16,7 @@
 import { harmCrew } from '../sim/atmosphere.js';
 import { startBoarding } from '../sim/boarders.js';
 import { spawnContact } from '../sim/encounters.js';
-import { changeReputation, contractActive, contractOf, failContract, FAILURES, loadCargo, seizeCargo } from '../sim/contracts.js';
+import { changeReputation, contractActive, contractOf, failContract, FAILURES, loadCargo, seizeCargo, spoilCargo } from '../sim/contracts.js';
 import { CRATE_KINDS, addCrate } from '../sim/hold.js';
 import { remember } from '../sim/memory.js';
 import { newPursuit } from '../sim/sector.js';
@@ -252,6 +252,12 @@ export const EFFECTS = Object.freeze({
     args: { all: typed('boolean') },
     optional: ['all'],
     run: (sim, a) => seizeCargo(sim, { all: a.all ?? false }),
+  },
+  // Some of the contract's cargo is ruined (F.5): worth nothing at the drop. Those in `room` go first.
+  'contract.spoil': {
+    args: { count, room: checkRoomTarget },
+    optional: ['count', 'room'],
+    run: (sim, a, ctx) => spoilCargo(sim, { count: a.count ?? 1, room: a.room === undefined ? null : roomOf(a.room, ctx) ?? null }),
   },
   // The contract fails outright, for one of the reasons in contracts.js.
   'contract.fail': {

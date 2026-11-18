@@ -41,7 +41,7 @@ import { HOLD_COMMANDS, checkHoldInvariants, newHoldState, stepHold } from './ho
 import { attachMemory, checkMemoryInvariants, lampHolder, memoryTypes, remember, stepNerve, whyKeepLamp } from './memory.js';
 import { attachSector, checkRunInvariants, newRunState, sectorCommands, stepSector } from './sector.js';
 import { CONTRACT_COMMANDS, attachContracts, checkContractInvariants, setUpContract } from './contracts.js';
-import { PORT_COMMANDS } from './port.js';
+import { PORT_COMMANDS, attachPort } from './port.js';
 import { ENCOUNTER_COMMANDS, attachEncounters, buildEncounters, checkEncounterInvariants, newHelmState, newScopeState, stepEncounters } from './encounters.js';
 import { BOARDING_COMMANDS, checkBoarderInvariants, roomsOnDeck, stepBoarders } from './boarders.js';
 import { buildLayout } from './ship.js';
@@ -500,6 +500,7 @@ export function createSim({ seed, ship, crew = [], lines = [], weapons = [], sec
   attachSector(sim);
   attachEvents(sim);
   attachContracts(sim);
+  attachPort(sim);
   attachEncounters(sim);
   return sim;
 }

@@ -11,7 +11,7 @@ import { COMMAND_TYPES } from '../sim/sim.js';
 import { SYSTEM_IDS } from '../sim/systems.js';
 import { NODE_KINDS, RISK_WHERE, checkSector, generateSector } from '../sim/sector.js';
 import { CONTRACT_TYPES } from '../sim/contracts.js';
-import { SERVICES } from '../sim/port.js';
+import { SERVICES, checkNotices } from '../sim/port.js';
 import { CRATE_KINDS } from '../sim/hold.js';
 import { validateLayout } from '../sim/ship.js';
 import { validateEncounter } from '../sim/encounters.js';
@@ -257,8 +257,8 @@ function checkContract(item, refs = {}) {
 }
 
 /** Rules for one port definition (S3.4; described in content/ports/). */
-function checkPort(item) {
-  const problems = [];
+function checkPort(item, refs) {
+  const problems = [...checkNotices(item.notices, refs)];
   if (!isNonEmptyString(item.name)) problems.push('missing name');
   if (!isNonEmptyString(item.text)) problems.push('missing text: what the port screen says about it');
   for (const key of ['fuel', 'hull', 'system', 'salvage']) if (!(Number.isInteger(item[key]) && item[key] >= 0)) problems.push(`${key} must be a whole number of credits, 0 or more`);
@@ -288,7 +288,7 @@ const ITEM_RULES = {
   refusals: (item, refs) => checkRule('refusal', item, refs),
   risks: (item, refs) => checkRule('risk', item, refs),
   contracts: checkContract,
-  ports: (item) => checkPort(item),
+  ports: (item, refs) => checkPort(item, refs),
   factions: (item) => checkFaction(item),
   encounters: (item, refs) => validateEncounter(item, { weapons: refs.weapons, encounters: refs.encounters, factions: refs.factions, nodeKinds: new Set(Object.keys(NODE_KINDS)) }),
 };
@@ -341,6 +341,8 @@ export function validateContent(files) {
   const refs = gatherRefs(files);
   const followed = new Set(); // events another event leads on to
   const unplaced = []; // [label, id] for events with no `at`
+  const flagsSet = new Map(); // flag name -> the first item that sets it (F.5: every flag an effect sets is read somewhere)
+  const flagsRead = new Map(); // flag name -> the first item whose condition reads it
 
   for (const file of [...files].sort((a, b) => a.path.localeCompare(b.path))) {
     const { path, data, error } = file;
@@ -380,6 +382,10 @@ export function validateContent(files) {
       const rule = ITEM_RULES[type];
       if (rule) for (const problem of rule(item, refs)) errors.push(`${label}: ${problem}`);
 
+      for (const [name, how] of flagsIn(item)) {
+        const into = how === 'set' ? flagsSet : flagsRead;
+        if (!into.has(name)) into.set(name, label);
+      }
       if (type === 'contracts' && typeof item.claim?.event === 'string') followed.add(item.claim.event); // a claim opens it
       if (type === 'events') {
         for (const id of followUps(item)) followed.add(id);
@@ -416,9 +422,28 @@ export function validateContent(files) {
   for (const [label, id] of laneContacts) if (!refs.encounters.has(id)) errors.push(`${label}: can bring "${id}", which is not an encounter`);
   for (const [label, id] of strikeWeapons) if (!seenIds.get('weapons').has(id)) errors.push(`${label}: strikes with "${id}", which is not a weapon`);
 
+  // Choices come back (F.5, D-230): a note an event leaves that nothing reads is a choice that never comes back,
+  // and a note read that nothing leaves is a condition that never holds.
+  for (const [name, label] of flagsSet) if (!flagsRead.has(name)) errors.push(`${label}: sets the flag "${name}", which nothing reads (an event, a line, a rule or a port notice)`);
+  for (const [name, label] of flagsRead) if (!flagsSet.has(name)) errors.push(`${label}: reads the flag "${name}", which nothing sets`);
+
   for (const [label, id] of unplaced) if (!followed.has(id)) errors.push(`${label}: has no "at", no "jolt" and no other event leads on to it, so it can never be met`);
 
   return { errors, warnings };
+}
+
+/** Every flag an item sets (a "flag" effect) or reads (the "flag" fact), anywhere inside it: [name, 'set' | 'read']. */
+export function flagsIn(item) {
+  const found = [];
+  const walk = (node) => {
+    if (Array.isArray(node)) return node.forEach(walk);
+    if (!node || typeof node !== 'object') return;
+    if (node.do === 'flag' && typeof node.name === 'string') found.push([node.name, 'set']);
+    if (node.fact === 'flag' && typeof node.name === 'string') found.push([node.name, 'read']);
+    for (const value of Object.values(node)) walk(value);
+  };
+  walk(item);
+  return found;
 }
 
 /** Counts for the coverage report. Placeholder lines are counted separately and never toward targets. */

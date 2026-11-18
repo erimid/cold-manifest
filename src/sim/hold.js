@@ -80,6 +80,8 @@ function makeCrate(id, { kind, room, label, contents, rounds, contract = false, 
     contract: Boolean(contract), // part of the run's contract cargo (contracts.js, S3.4)
     contraband: Boolean(contraband), // what an inspection looks for
     hidden: false, // stashed in a compartment (H.2): a search has to find it
+    spoiled: false, // ruined by fire, a leak or a load adrift (F.5): worth nothing at the drop
+    scorch: 0, // seconds it has stood in a fire hot enough to spoil it (SPOIL)
   };
 }
 
@@ -428,13 +430,30 @@ export function stepHold(ship, seconds) {
     if (hostilesBeside(ship, member).length) continue; // fighting first (crew.js); the job waits
     stepJob(ship, member, seconds);
   }
-  // A room cut loose takes its crates with it.
+  // A room cut loose takes its crates with it; a fire left to burn ruins what is stacked in it (F.5).
   for (const crate of Object.values(ship.state.crates)) {
+    const fire = crate.room !== null ? ship.state.rooms[crate.room]?.fire ?? 0 : 0;
+    if (!crate.spoiled && crate.kind !== 'ammo' && fire >= SPOIL.fire) {
+      crate.scorch = (crate.scorch ?? 0) + seconds;
+      if (crate.scorch >= SPOIL.seconds) spoilCrate(ship, crate, 'fire');
+    }
     if (crate.room !== null && ship.state.rooms[crate.room]?.jettisoned) {
       delete ship.state.crates[crate.id];
       ship.events.emit('crate.lost', { crate: crate.id, kind: crate.kind, label: crate.label, room: crate.room, tick: ship.state.tick });
     }
   }
+}
+
+/** A crate standing in a fire at least this big for this many seconds is spoiled (F.5, D-232). */
+export const SPOIL = Object.freeze({ fire: 0.4, seconds: 20 });
+
+/** Spoil a crate: its contents are ruined, and the drop pays nothing for it (F.5). */
+export function spoilCrate(ship, crate, cause) {
+  if (crate.spoiled) return false;
+  crate.spoiled = true;
+  if (crate.kind === 'cargo') crate.sealed = false;
+  ship.events.emit('crate.spoiled', { crate: crate.id, kind: crate.kind, label: crate.label, room: crate.room, contract: crate.contract, cause, tick: ship.state.tick });
+  return true;
 }
 
 /** A line for the UI about someone's job, or null. */

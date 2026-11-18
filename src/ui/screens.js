@@ -87,6 +87,7 @@ export function renderPort(root, { view, onService, onHandOver, onBar, onDepart,
       tag(view.isDrop ? 'The drop' : 'Port'),
       el('h2', {}, view.name),
       el('p', {}, view.text),
+      (view.notes ?? []).map((note) => el('p', { class: 'port__note' }, note)),
       table(view.facts, 'port-facts'),
       el(
         'div',

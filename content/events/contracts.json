@@ -18,7 +18,7 @@
             {
               "weight": 1,
               "text": "The cutter comes alongside and the clamp bangs onto the hull. Whatever is in the hold, there is a minute to decide where it ought to be.",
-              "effects": [{"do": "board", "encounter": "patrol-cutter"}]
+              "effects": [{ "do": "board", "encounter": "patrol-cutter" }]
             }
           ]
         },
@@ -34,10 +34,13 @@
             {
               "weight": 1,
               "text": "{voice} talks well, and the officer listens, and runs the clamp out anyway.",
-              "effects": [
-                { "do": "board", "encounter": "patrol-cutter" },
-                { "do": "reputation", "faction": "receivers", "add": -1 }
-              ]
+              "effects": [{ "do": "board", "encounter": "patrol-cutter" }, { "do": "reputation", "faction": "receivers", "add": -1 }]
+            },
+            {
+              "when": { "fact": "flag", "name": "crate_resealed" },
+              "weight": 3,
+              "text": "{voice} talks well, and the officer listens, and then asks about the new bead of sealant on one of the manifest crates, which nobody at the company dock laid. The clamp runs out.",
+              "effects": [{ "do": "board", "encounter": "patrol-cutter" }]
             }
           ]
         },
@@ -48,15 +51,12 @@
             {
               "weight": 1,
               "text": "The cutter is slow to turn. By the time it has, you are a heat trace and a name on a list.",
-              "effects": [{"do": "reputation", "faction": "receivers", "add": -1}]
+              "effects": [{ "do": "reputation", "faction": "receivers", "add": -1 }]
             },
             {
               "weight": 2,
               "text": "The cutter was waiting for exactly that. It is on the scope and coming after us.",
-              "effects": [
-                { "do": "reputation", "faction": "receivers", "add": -1 },
-                { "do": "contact", "encounter": "patrol-cutter", "range": 25 }
-              ]
+              "effects": [{ "do": "reputation", "faction": "receivers", "add": -1 }, { "do": "contact", "encounter": "patrol-cutter", "range": 25 }]
             }
           ]
         }
