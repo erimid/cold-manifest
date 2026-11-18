@@ -48,7 +48,8 @@
 
 import { LIFT_LOAD, POWERED, OUTPUT, OUTPUT_LEVELS, aiCoreStatus, live, liftRuns, litRooms, outputLimit, outputOf, reactorUp, setOutput, usable } from './power.js';
 import { ROLES, skillOf } from './roles.js';
-import { tiredness } from './watches.js';
+import { worn } from './watches.js';
+import { slipping } from './slips.js';
 import { chill } from './cold.js';
 
 export const STATIONS = Object.freeze({
@@ -71,9 +72,10 @@ export const POSTS = Object.freeze(STATION_IDS.filter((id) => STATIONS[id].skill
 export const MARGO_RATING = 1;
 /**
  * Margo's attention (H.5, D-188): how many stations she can run at the book figure at once with a sound core,
- * what a station she has no attention left for runs at, and the share of her attention a wrecked core loses.
+ * what a station she has no attention left for runs at (0.6 until F.7), the share of her attention a wrecked
+ * core loses, and what each station she holds past her attention takes off all of hers (F.7, D-243: spread thin).
  */
-export const MARGO = Object.freeze({ attention: 4, floor: 0.6, damage: 0.5 });
+export const MARGO = Object.freeze({ attention: 4, floor: 0.5, damage: 0.5, spread: 0.06 });
 /** Her priorities when two jobs need her as much (her personality file: the crew first, then the route, the guns last). */
 export const PRIORITY = Object.freeze(['life_support', 'medbay', 'helm', 'sensors', 'engines', 'doors', 'shields', 'weapons']);
 /** How she can run a station (D-189): what it does to the rating, and to the heat and hum it gives off. */
@@ -141,8 +143,8 @@ export function stationLive(sim, id) {
   return Boolean(room) && !sim.state.rooms[room.id].jettisoned && !sim.state.stations[id].down && reactorUp(sim);
 }
 
-/** What a crew member is worth on a station that uses `skill`, tiredness and all. */
-export const crewRating = (member, skill) => (CREW_RATING.base + CREW_RATING.perLevel * Math.max(0, Math.min(5, skillOf(member, skill)))) * tiredness(member);
+/** What a crew member is worth on a station that uses `skill`, tiredness and hunger and all: nothing while they have fumbled it (slips.js, F.7). */
+export const crewRating = (member, skill) => (slipping(member) ? 0 : (CREW_RATING.base + CREW_RATING.perLevel * Math.max(0, Math.min(5, skillOf(member, skill)))) * worn(member));
 
 /**
  * Below this much health a hand is too badly hurt to work a station (F.5, D-233): the station falls to Margo,
@@ -355,12 +357,14 @@ function buildTable(sim) {
     }
     hers.sort((x, y) => need[y] - need[x] || (stations[y].cover === 'hers') - (stations[x].cover === 'hers') || PRIORITY.indexOf(x) - PRIORITY.indexOf(y));
   }
+  // Spread thin (F.7, D-243): every station she holds past her attention takes a little off all of them.
+  const spread = attention === Infinity ? 1 : Math.max(0, 1 - MARGO.spread * Math.max(0, hers.length - attention));
   let left = attention;
   for (const id of hers) {
     const part = left >= 1 ? 1 : left > 0 ? left : 0;
     left -= 1;
     share[id] = part;
-    value[id] = MARGO_RATING * MANNERS[stations[id].runs ?? 'book'].rating * (MARGO.floor + (1 - MARGO.floor) * part) * pace;
+    value[id] = MARGO_RATING * MANNERS[stations[id].runs ?? 'book'].rating * (MARGO.floor + (1 - MARGO.floor) * part) * spread * pace;
   }
   return { tick: sim.state.tick, operator, holder, rating: value, share, attention, jobs, hers };
 }

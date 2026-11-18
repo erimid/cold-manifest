@@ -104,6 +104,16 @@
       "toward": 2,
       "text": "{who} seeing them right",
       "shadow": "never"
+    },
+    {
+      "id": "hunger",
+      "note": "F.7 (D-241): written when a hand goes past starving, which the watch bill let happen.",
+      "seconds": 1200,
+      "captain": -1,
+      "text": "going hungry in {room}",
+      "bare": "going hungry",
+      "shadow": "never",
+      "on": [{ "event": "crew.starving", "to": "subject" }]
     }
   ]
 }

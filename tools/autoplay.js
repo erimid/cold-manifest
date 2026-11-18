@@ -15,6 +15,7 @@
 //   --only LIST    play only these modes, comma separated (chaos, scenario, fire, crossing, encounter,
 //                  boarding); for tuning, the gate plays them all (H.8)
 //   --once         play each seed once, with no replay check; for tuning only (H.8)
+//   --staff MODE   fly every crossing one way: crew, margo, book or hands (all hands); for tuning only (F.7)
 //
 // Autoplay v1 (end of Stage 1) plays every seed twice over (S2.1 and S2.2 add modes below):
 //   chaos      a bot that does everything at random, to find crashes
@@ -61,8 +62,10 @@ import { createContent } from '../src/engine/content.js';
 import { eventView, nearestHand, situationViews } from '../src/narrative/events.js';
 import { findBadNumbers, hashState } from '../src/engine/hash.js';
 import { createRng } from '../src/engine/rng.js';
-import { OUTPUT_LEVELS } from '../src/sim/power.js';
-import { COVER_IDS, MANNER_IDS, MANNER_STATIONS, POSTS, STATION_IDS, injured, rating, running } from '../src/sim/stations.js';
+import { OUTPUT_LEVELS, reactorUp } from '../src/sim/power.js';
+import { COVER_IDS, CREW_RATING, MANNER_IDS, MANNER_STATIONS, POSTS, STATIONS, STATION_IDS, crewRating, injured, margoLoad, rating, running } from '../src/sim/stations.js';
+import { onWatch, worn } from '../src/sim/watches.js';
+import { skillOf } from '../src/sim/roles.js';
 import { gunSlot, ourCrew } from '../src/sim/combat.js';
 import { roundsInHold } from '../src/sim/hold.js';
 import { MANUAL_DOOR_SECONDS, TICK_RATE, TICK_SECONDS, checkInvariants, createSim } from '../src/sim/sim.js';
@@ -92,6 +95,12 @@ const baseSeed = String(option('seed', 'auto'));
 const MODES = ['chaos', 'scenario', 'fire', 'crossing', 'encounter', 'boarding'];
 const only = new Set(String(option('only', MODES.join(','))).split(','));
 const once = process.argv.includes('--once');
+/** For tuning (F.7): every crossing run by the crew at posts, all to Margo, or Margo by the book, in place of taking turns. */
+const staffOnly = option('staff', null);
+if (staffOnly !== null && !['crew', 'margo', 'book', 'hands'].includes(staffOnly)) {
+  console.error(`Unknown --staff "${staffOnly}": use crew, margo, book or hands`);
+  process.exit(2);
+}
 for (const mode of only) if (!MODES.includes(mode)) {
   console.error(`Unknown mode "${mode}": use ${MODES.join(', ')}`);
   process.exit(2);
@@ -516,8 +525,17 @@ function playScenario(seed, { incoming = false } = {}) {
 }
 
 const CROSSING_MINUTES = 150;
-/** Who runs the ship on a crossing, in turn (H.5): the crew; Margo, her way; the crew again; Margo, ordered by the book. */
-const MARGO_MODES = Object.freeze(['crew', 'margo', 'crew', 'book']);
+/** Game minutes the reactor may lie dead before the crossing bot calls the ship adrift and lost (F.7). */
+const ADRIFT_MINUTES = 60;
+/**
+ * Who runs the ship on a crossing, in turn (H.5): the crew; Margo, her way; the crew again; Margo, ordered by the
+ * book; the crew; and all hands (F.7): the crew at their posts on a watch bill of one, so nobody goes below to
+ * sleep or eat.
+ */
+const MARGO_MODES = Object.freeze(['crew', 'margo', 'crew', 'book', 'crew', 'hands']);
+const STAFF_MODES = Object.freeze(['crew', 'margo', 'book', 'hands']);
+/** How many points crew at posts must beat Margo with everything by, at reaching the drop and coming good (PLAN F.7: "clearly less"). */
+const STAFF_GAP = 10;
 /**
  * Every fifth crossing a careless captain has the ship (F.5): the lamps stay on, no hunting ship is answered,
  * nobody is sent to a situation aboard (they lapse unless someone happens to be there), and the hull is never
@@ -531,7 +549,7 @@ const QUICK_CHANCE = 0.3;
  * A crossing: the sector chart from the origin to the drop. Throws on any failure, including a chart
  * with no way across, a bot that cannot get a fix, or a crossing still going after CROSSING_MINUTES.
  */
-function playCrossing(seed, index) {
+function playCrossing(seed, index, force = {}) {
   // The board for this seed, and the contract of the type whose turn it is (S3.4).
   const offers = boardOffers(contractTemplates, { seed });
   const offer = offers[index % offers.length];
@@ -539,9 +557,10 @@ function playCrossing(seed, index) {
   const bot = createRng(`crossing:${seed}`);
   // Who runs the ship (H.5): the crew at their posts on half the crossings; on the other half every station is
   // handed to Margo, left to her own way on one quarter and ordered run by the book on the last.
-  const crewMode = MARGO_MODES[index % MARGO_MODES.length];
-  const careless = isCareless(index);
-  if (crewMode !== 'crew') {
+  const crewMode = force.mode ?? staffOnly ?? MARGO_MODES[index % MARGO_MODES.length];
+  const careless = force.mode ? false : isCareless(index);
+  if (crewMode === 'hands') sim.enqueue({ type: 'roster.watches', count: 1 });
+  else if (crewMode !== 'crew') {
     for (const station of POSTS) sim.enqueue({ type: 'station.cover', station, cover: 'hers' });
     if (crewMode === 'book') for (const station of MANNER_STATIONS) sim.enqueue({ type: 'station.order', station, manner: 'book' });
     // Every other by-the-book crossing starts with her trust low, to see her run things her own way.
@@ -555,6 +574,15 @@ function playCrossing(seed, index) {
   tally.stakes = { notices: {}, spoiled: 0, injuredSeconds: 0, reads: 0 };
   sim.events.on('port.notice', (event) => (tally.stakes.notices[event.notice] = (tally.stakes.notices[event.notice] ?? 0) + 1));
   sim.events.on('crate.spoiled', (event) => event.contract && (tally.stakes.spoiled += 1));
+  // Staffing matters (F.7): slips and meals, how worn hands did on their stations, and how Margo did stretched.
+  tally.needs = { slips: 0, onStation: 0, atJob: 0, why: {}, meals: 0, starving: 0, hunger: 0, fresh: [0, 0], worn: [0, 0], few: [0, 0], many: [0, 0] };
+  sim.events.on('crew.slipped', (event) => {
+    tally.needs.slips += 1;
+    tally.needs[event.station ? 'onStation' : 'atJob'] += 1;
+    tally.needs.why[event.why] = (tally.needs.why[event.why] ?? 0) + 1;
+  });
+  sim.events.on('crew.eating', () => (tally.needs.meals += 1));
+  sim.events.on('crew.starving', () => (tally.needs.starving += 1));
   sim.events.on('margo.own_way', () => (tally.margo.ownWay += 1));
   sim.events.on('margo.doubt', () => (tally.margo.doubt += 1));
   sim.events.on('margo.manner', (event) => event.why !== 'order' && (tally.margo.changes += 1));
@@ -602,8 +630,14 @@ function playCrossing(seed, index) {
     memo.seen[from] = (memo.seen[from] ?? 0) + 1;
     memo.example ??= `after ${from}, ${sim.state.crew[event.crew].name} answered an order to ${sim.layout.room(event.room)?.name}: "${intercom.reply(event, sim.layout.room(event.room)?.name).text}"`;
   });
+  // A refusal counts once per hand, rule and room in half a minute (F.7): the bot asks again every second or so.
+  const lastRefused = new Map();
   sim.events.on('crew.refused', (event) => {
     const memo = tally.remember;
+    const key = `${event.crew}:${event.rule}:${event.room}`;
+    const again = sim.state.tick - (lastRefused.get(key) ?? -1e9) < 30 * TICK_RATE;
+    lastRefused.set(key, sim.state.tick);
+    if (again) return;
     memo.refused[event.rule] = (memo.refused[event.rule] ?? 0) + 1;
     if (['sour', 'feud'].includes(event.rule)) memo.refusal ??= `${event.reason} (after ${whyOf.get(event.crew) ?? 'something else'})`;
   });
@@ -734,6 +768,7 @@ function playCrossing(seed, index) {
   let lost = false;
   let crewDead = false;
   let settled = false;
+  let deadFor = 0;
   // The tempo a player would get (H.8): every tick costs a tick of real time at normal speed, less in fast time.
   const tempo = createTempo();
   let rate = 1;
@@ -745,6 +780,14 @@ function playCrossing(seed, index) {
     }
     if (sim.state.hull.points === 0) {
       lost = true;
+      break;
+    }
+    // Adrift (F.7): the reactor dead an hour of game time with nobody left who will mend it (a last hand soured on
+    // the captain will not go into a burning or airless reactor room). The ship is as good as lost.
+    deadFor = reactorUp(sim) ? 0 : deadFor + 1;
+    if (deadFor > ADRIFT_MINUTES * 60 * TICK_RATE) {
+      lost = true;
+      tally.adrift = true;
       break;
     }
     // Ships on the scope (H.3), alongside whatever else is going on: brace into rounds in the air, pay a toll
@@ -842,9 +885,10 @@ function playCrossing(seed, index) {
       // The last hand alive does the mending too, and goes back to the helm when there is none to do.
       const alone = hands.length === 1;
       const spare = (member) => alone || member.room !== helm;
-      const toMend = alone && (Object.values(sim.state.rooms).some((r) => (r.fire > 0 || r.breach > 0) && !r.jettisoned) || ['ai_core', 'life_support', 'sensors', 'engines'].some((id) => sim.state.systems[id]?.damage > 0) || situationViews(sim).some((item) => item.state !== 'answered'));
+      const toMend = alone && (Object.values(sim.state.rooms).some((r) => (r.fire > 0 || r.breach > 0) && !r.jettisoned) || ['reactor', 'ai_core', 'life_support', 'sensors', 'engines'].some((id) => sim.state.systems[id]?.damage > 0) || situationViews(sim).some((item) => item.state !== 'answered'));
       // Someone awake (F.3): a sleeper sent to the helm never gets there, and the ship sits off the port for ever.
-      const pilot = hands.find((member) => !member.asleep) ?? hands[0];
+      // Someone on watch first (F.7): pulling a hand off watch up to the bridge keeps them from their sleep and their meal.
+      const pilot = hands.find((member) => !member.asleep && onWatch(sim, member)) ?? hands.find((member) => !member.asleep) ?? hands[0];
       if (helm && !bound(helm) && pilot && !toMend && pilot.goal === null) give({ type: 'crew.move', crew: pilot.id, room: helm });
       // A fire in the way stops the mending: whoever is idle and not flying goes to put it out. A hole lets the air
       // out of the ship, and on a long crossing that kills (H.8): whoever is free goes to patch it, suited.
@@ -857,7 +901,8 @@ function playCrossing(seed, index) {
       }
       // The doors come first: nobody walks anywhere quickly without them.
       // Then the air (H.8: a crossing is long enough now for a broken scrubber to kill everyone aboard).
-      for (const id of ['doors', 'life_support', 'ai_core', 'sensors', 'engines']) {
+      // The reactor before all (F.7): with it dead nothing runs, and a last hand left idle beside it never jumps.
+      for (const id of ['reactor', 'doors', 'life_support', 'ai_core', 'sensors', 'engines']) {
         const system = sim.state.systems[id];
         if (sim.state.stations[id].down) give({ type: 'station.stand', station: id, down: false });
         if (running(sim, id)) continue;
@@ -903,8 +948,20 @@ function playCrossing(seed, index) {
         tally.staff[by === null ? 'dark' : by === 'margo' ? 'margo' : 'crew'] += 1;
         if (rating(sim, id) > 1) tally.staff.well += 1;
         tally.staff.samples += 1;
-        // How Margo ran what she held (H.5).
+        // How a hand did on their station against what they are worth fresh (F.7).
+        if (by && by !== 'margo' && sim.state.crew[by]) {
+          const member = sim.state.crew[by];
+          const share = crewRating(member, STATIONS[id].skill) / (CREW_RATING.base + CREW_RATING.perLevel * Math.max(0, Math.min(5, skillOf(member, STATIONS[id].skill))));
+          const band = worn(member) < 1 ? tally.needs.worn : tally.needs.fresh;
+          band[0] += share;
+          band[1] += 1;
+        }
+        // How Margo ran what she held (H.5), and whether she held more than she could watch (F.7).
         if (by === 'margo' && MANNER_STATIONS.includes(id)) {
+          const load = margoLoad(sim);
+          const band = load.held > load.attention ? tally.needs.many : tally.needs.few;
+          band[0] += rating(sim, id);
+          band[1] += 1;
           tally.margo[sim.state.stations[id].runs] += 1;
           tally.margo.rating += rating(sim, id);
           tally.margo.held += 1;
@@ -917,6 +974,7 @@ function playCrossing(seed, index) {
       if (ai.stretched) tally.margo.stretched += 1;
       tally.stakes.injuredSeconds += ourCrew(sim).filter(({ member }) => member.alive && member.post && injured(member)).length;
       tally.tired = Math.max(tally.tired, ...ourCrew(sim).map(({ member }) => (member.alive ? member.fatigue : 0)));
+      tally.needs.hunger = Math.max(tally.needs.hunger, ...ourCrew(sim).map(({ member }) => (member.alive ? member.hunger ?? 0 : 0)));
       // Where the ship hours went (H.6): under way (and at what pace), held, off a port, or in port.
       const t = tally.time;
       if (!run.crossing) t.port += 1;
@@ -1200,6 +1258,10 @@ const scenarios = [];
 const chaosEndings = {};
 const underFire = [];
 const crossings = [];
+// Staffing matters (F.7): the same seeds flown twice by a careful captain, once with the crew at their posts and once
+// with every station handed to Margo, so the gap between them is not the luck of the draw.
+const paired = [];
+const PAIRED = Math.min(runs, 40);
 const encounters = [];
 const boardings = [];
 for (let i = 1; i <= runs; i++) {
@@ -1210,6 +1272,11 @@ for (let i = 1; i <= runs; i++) {
     crossings.push(first);
   } catch (err) {
     failures.push({ seed, reason: `crossing: ${err.message}` });
+  }
+  if (only.has('crossing') && !staffOnly && i <= PAIRED) try {
+    paired.push({ crew: playCrossing(seed, i - 1, { mode: 'crew' }), margo: playCrossing(seed, i - 1, { mode: 'margo' }) });
+  } catch (err) {
+    failures.push({ seed, reason: `paired crossing: ${err.message}` });
   }
   encounterDefs.forEach((def, index) => {
     const tactic = TACTICS[(i - 1 + index) % TACTICS.length];
@@ -1502,6 +1569,41 @@ out.push(`Stations and shifts (H.4): two watches on the crossings, ${POSTS.lengt
   out.push(`  her choices:       of the station time she held, quiet ${pct(her.quiet, her.held)}, by the book ${pct(her.book, her.held)}, pushed ${pct(her.push, her.held)}; her stations ran at ${(her.rating / Math.max(1, her.held)).toFixed(2)} on average`);
   out.push(`  her picture:       something hunting us ${pct(her.hunted, her.samples)} and on us ${pct(her.found, her.samples)} of the time; more to watch than she could ${pct(her.stretched, her.samples)}; ${(her.changes / Math.max(1, crossings.length)).toFixed(1)} changes of her own a crossing`);
   out.push(`  her orders:        on the by-the-book crossings (half of them begun at trust 30) she ran a station her own way ${crossings.reduce((n, c) => n + c.margo.ownWay, 0)} times and said she would not ${crossings.reduce((n, c) => n + c.margo.doubt, 0)} times`);
+}
+{
+  // Staffing matters (F.7): the crossings by who ran the ship, what tiredness and hunger cost, and Margo stretched.
+  out.push(`Staffing matters (F.7): the crossings by who ran the ship (target: all to Margo clearly worse than crew at posts; tired crew slower and making mistakes)`);
+  const came = (of) => of.filter((c) => c.status === 'delivered' && c.earned >= c.pay / 2).length;
+  const line = (of) => `${String(of.length).padStart(3)} crossings: reached the drop ${pct(of.filter((c) => c.delivered).length, of.length)}, came good ${pct(came(of), of.length)}; ${pct(of.reduce((n, c) => n + (c.contacts.docked ?? 0), 0), of.reduce((n, c) => n + Object.values(c.contacts).reduce((a, b) => a + b, 0), 0))} of ships docked with us; ${mean(of.map((c) => c.dead)).toFixed(1)} crew dead; ${mean(of.map((c) => c.needs.slips)).toFixed(1)} slips, ${mean(of.map((c) => c.needs.meals)).toFixed(1)} meals and ${mean(of.map((c) => c.needs.starving)).toFixed(1)} hands starving a crossing; most tired ${Math.round(100 * mean(of.map((c) => c.tired)))}%, most hungry ${Math.round(100 * mean(of.map((c) => c.needs.hunger)))}%`;
+  for (const mode of STAFF_MODES) {
+    const of = crossings.filter((c) => c.mode === mode);
+    if (of.length) out.push(`  ${{ crew: 'crew at posts', margo: 'all to Margo', book: 'Margo, by book', hands: 'all hands' }[mode].padEnd(17)}${line(of)}`);
+  }
+  if (paired.length) {
+    const crew = paired.map((pair) => pair.crew);
+    const hers = paired.map((pair) => pair.margo);
+    out.push(`  the same ${paired.length} seeds flown twice by a careful captain:`);
+    out.push(`    crew at posts   ${line(crew)}`);
+    out.push(`    all to Margo    ${line(hers)}`);
+    const share = (of, fn) => (100 * fn(of)) / Math.max(1, of.length);
+    const reached = (of) => of.filter((c) => c.delivered).length;
+    const drop = share(crew, reached) - share(hers, reached);
+    const good = share(crew, came) - share(hers, came);
+    const better = paired.filter((pair) => Number(pair.crew.delivered) + Number(pair.crew.status === 'delivered' && pair.crew.earned >= pair.crew.pay / 2) > Number(pair.margo.delivered) + Number(pair.margo.status === 'delivered' && pair.margo.earned >= pair.margo.pay / 2)).length;
+    const worse = paired.filter((pair) => Number(pair.crew.delivered) + Number(pair.crew.status === 'delivered' && pair.crew.earned >= pair.crew.pay / 2) < Number(pair.margo.delivered) + Number(pair.margo.status === 'delivered' && pair.margo.earned >= pair.margo.pay / 2)).length;
+    out.push(`  the gap:           crew at posts over all to Margo: reached the drop ${drop >= 0 ? '+' : ''}${drop.toFixed(0)} points, came good ${good >= 0 ? '+' : ''}${good.toFixed(0)} points; the crew did better on ${better} seeds and Margo on ${worse}: ${drop >= STAFF_GAP && good >= STAFF_GAP ? 'met' : 'NOT MET'} (target: both at least ${STAFF_GAP} points)`);
+  }
+  const sum = crossings.reduce((acc, c) => {
+    for (const key of ['fresh', 'worn', 'few', 'many']) for (const i of [0, 1]) acc[key][i] += c.needs[key][i];
+    acc.slips += c.needs.slips;
+    acc.onStation += c.needs.onStation;
+    acc.atJob += c.needs.atJob;
+    for (const [why, n] of Object.entries(c.needs.why)) acc.why[why] = (acc.why[why] ?? 0) + n;
+    return acc;
+  }, { fresh: [0, 0], worn: [0, 0], few: [0, 0], many: [0, 0], slips: 0, onStation: 0, atJob: 0, why: {} });
+  const avg = ([total, n]) => (n ? (total / n).toFixed(2) : '-');
+  out.push(`  tired and hungry:  a hand on station ran at ${avg(sum.fresh)} of their fresh rating while fresh and fed, ${avg(sum.worn)} while worn (${pct(sum.worn[1], sum.worn[1] + sum.fresh[1])} of crew station time); ${sum.slips} slips (${sum.onStation} on a station, ${sum.atJob} at a job): ${Object.entries(sum.why).map(([why, n]) => `${why} ${n}`).join(', ') || 'none'}; a fresh, fed hand never slips`);
+  out.push(`  Margo stretched:   her stations ran at ${avg(sum.few)} with no more than her attention to watch, ${avg(sum.many)} with more (${pct(sum.many[1], sum.many[1] + sum.few[1])} of her station time)`);
 }
 {
   // Every escape costs (F.2): which answer gets away from which kind of contact, and what it cost.

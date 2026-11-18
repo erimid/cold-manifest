@@ -24,7 +24,8 @@ import { moodOf, refusalOf } from './memory.js';
 import { skillFactor, skillOf } from './roles.js';
 import { liftRuns } from './power.js';
 import { STATIONS, injured, postOfRole, rating, stationOfRoom } from './stations.js';
-import { tiredness } from './watches.js';
+import { worn } from './watches.js';
+import { slipping, stride } from './slips.js';
 import { SPACE, SYSTEMS } from './systems.js';
 
 /** Tiles per second on foot. A suit is heavy. */
@@ -121,6 +122,11 @@ export function newCrewMember(layout, { id, name, role = null, engineer = false,
     watch: 0, // which watch they stand (watches.js)
     fatigue: 0, // 0 fresh to 1 dead on their feet (watches.js)
     asleep: false, // below, in their bunk
+    hunger: 0, // 0 fed to 1 starving (watches.js, F.7)
+    eating: false, // at a meal in the mess
+    offIdle: 0, // seconds stood idle off watch away from the quarters (watches.js, D-244)
+    starving: false, // has gone past HUNGER.starving and not been fed since
+    slip: 0, // ticks left of a slip: a tired or hungry hand's fumble (slips.js, F.7)
     due: null, // where the watch bill wants them once they are free: 'post' | 'bunk'
   };
 }
@@ -359,11 +365,13 @@ export const CREW_COMMANDS = {
       if (problem) return problem;
       if (cmd.health !== undefined && !(cmd.health > 0 && cmd.health <= 1)) return 'health must be above 0 and at most 1';
       if (cmd.fatigue !== undefined && !(cmd.fatigue >= 0 && cmd.fatigue <= 1)) return 'fatigue must be between 0 and 1';
-      return cmd.health === undefined && cmd.fatigue === undefined ? 'needs health or fatigue' : null;
+      if (cmd.hunger !== undefined && !(cmd.hunger >= 0 && cmd.hunger <= 1)) return 'hunger must be between 0 and 1';
+      return cmd.health === undefined && cmd.fatigue === undefined && cmd.hunger === undefined ? 'needs health, fatigue or hunger' : null;
     },
     apply(sim, cmd) {
       if (cmd.health !== undefined) sim.state.crew[cmd.crew].health = cmd.health;
       if (cmd.fatigue !== undefined) sim.state.crew[cmd.crew].fatigue = cmd.fatigue;
+      if (cmd.hunger !== undefined) sim.state.crew[cmd.crew].hunger = cmd.hunger;
     },
   },
 };
@@ -405,7 +413,7 @@ function walk(sim, member, seconds) {
   let time = seconds;
   // Feeling the way through an unlit room is slower (S2.5, D-096).
   const lit = sim.state.rooms[member.room]?.light ?? 1;
-  const pace = WALK_SPEED * (member.suit ? SUIT_SPEED : 1) * (member.carry ? CARRY_SPEED : 1) * (lit < DARK_LIGHT ? DARK_WALK : 1) * chill(sim, member);
+  const pace = WALK_SPEED * (member.suit ? SUIT_SPEED : 1) * (member.carry ? CARRY_SPEED : 1) * (lit < DARK_LIGHT ? DARK_WALK : 1) * chill(sim, member) * stride(member);
   member.task = 'walking';
   while (member.path.length) {
     const next = member.path[0];
@@ -537,8 +545,10 @@ function work(sim, member, seconds) {
     return;
   }
 
-  // Hurt people work slower, and so does anyone in a suit, in the dark, dead on their feet (watches.js) or cold (cold.js, F.2).
-  let rate = (0.5 + 0.5 * member.health) * (member.suit ? SUIT_WORK : 1) * tiredness(member) * chill(sim, member) * seconds;
+  // A tired or hungry hand who has fumbled it gets nothing done until they have it back (slips.js, F.7).
+  if (slipping(member)) return;
+  // Hurt people work slower, and so does anyone in a suit, in the dark, dead on their feet or hungry (watches.js) or cold (cold.js, F.2).
+  let rate = (0.5 + 0.5 * member.health) * (member.suit ? SUIT_WORK : 1) * worn(member) * chill(sim, member) * seconds;
   if (job.type !== 'extinguish' && r.light < 0.5) rate *= DARK_WORK;
   // Engineers mend, patch and free doors faster (D-131). Anyone can put out a fire.
   if (job.type === 'repair' || job.type === 'patch' || job.type === 'unjam') rate *= skillFactor(skillOf(member, 'engineering'));
@@ -644,6 +654,8 @@ export function describeTask(sim, member) {
       return 'Searching the room';
     default:
       if (member.asleep) return 'Asleep';
+      if (member.eating) return 'Eating in the mess';
+      if (member.slip > 0) return member.post && stationOfRoom(sim, member.room) === member.post ? `Fumbled the ${STATIONS[member.post].name.toLowerCase()}` : 'Fumbled it';
       if (isHome(sim, member) && room.system === 'medbay' && member.health < 1 && rating(sim, 'medbay') > 0) return 'Being patched up';
       if (member.post && injured(member)) return 'Too badly hurt to stand a station';
       return member.post && stationOfRoom(sim, member.room) === member.post ? `On station: ${STATIONS[member.post].name.toLowerCase()}` : 'Standing by';

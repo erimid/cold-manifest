@@ -18,6 +18,7 @@ export const STREAMS = Object.freeze([
   'encounters', // the scope: who turns up, where, and how the returns wander
   'boarding', // a party aboard (H.2): which lock, whose warrant, where it looks, what it finds, whether a bribe takes
   'voyage', // a crossing (H.6): when a lane's event comes, debris strikes, and when a pursuer finds us
+  'slips', // a tired or hungry hand's fumbles (F.7)
   'cosmetic', // visual-only rolls (stars, flicker). Never used by the sim.
 ]);
 

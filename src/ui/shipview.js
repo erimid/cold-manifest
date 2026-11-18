@@ -32,7 +32,7 @@ import { describeJob, magazineOf, pickHand, roundsInHold } from '../sim/hold.js'
 import { feudsOf, nerveWord, regardOf, regardWord, topMemory } from '../sim/memory.js';
 import { OUTPUT, OUTPUT_LEVELS, POWERED, aiCoreStatus, litRooms, outputLimit } from '../sim/power.js';
 import { COVERS, COVER_IDS, MANNERS, MANNER_IDS, MANNER_STATIONS, POSTS, STATIONS, STATION_IDS, holderOf, margoLoad, rating, reactorLoad, roomOfStation, running, stationOfRoom } from '../sim/stations.js';
-import { onWatch, tiredWord, watchLeft, watchName } from '../sim/watches.js';
+import { hungryWord, onWatch, tiredWord, watchLeft, watchName } from '../sim/watches.js';
 import { roomView, sensorsUp, signature, unseen } from '../sim/senses.js';
 import { SPACE, SYSTEMS } from '../sim/systems.js';
 import { roleOf, skillWords } from '../sim/roles.js';
@@ -1023,9 +1023,11 @@ export function createShipView({ canvas, root, input, sim, clock, tempo = null, 
       }
       const { member, ship } = found;
       const away = ship !== sim && member.alive;
-      setText(chip.task, member.alive ? `${away ? 'Aboard: ' : ''}${member.asleep ? 'Asleep' : member.task === 'idle' && member.post && stationOfRoom(sim, member.room) === member.post ? `On ${STATIONS[member.post].name.toLowerCase()}` : (CHIP_TASKS[member.task] ?? 'Standing by')}` : 'Dead');
+      setText(chip.task, member.alive ? `${away ? 'Aboard: ' : ''}${member.asleep ? 'Asleep' : member.slip > 0 ? 'Fumbled it' : member.eating ? 'Eating' : member.task === 'idle' && member.post && stationOfRoom(sim, member.room) === member.post ? `On ${STATIONS[member.post].name.toLowerCase()}` : (CHIP_TASKS[member.task] ?? 'Standing by')}` : 'Dead');
       chip.node.classList.toggle('is-asleep', Boolean(member.alive && member.asleep));
       chip.node.classList.toggle('is-tired', Boolean(member.alive && member.fatigue > 0.6));
+      chip.node.classList.toggle('is-hungry', Boolean(member.alive && hungryWord(member)));
+      chip.node.classList.toggle('is-slipping', Boolean(member.alive && member.slip > 0));
       chip.node.classList.toggle('is-away', away);
       const width = `${Math.round(member.health * 100)}%`;
       if (chip.health.style.width !== width) chip.health.style.width = width;
@@ -1399,8 +1401,9 @@ export function createShipView({ canvas, root, input, sim, clock, tempo = null, 
       setText(panel.stats.post.value, member.post ? STATIONS[member.post].name : 'none');
       const { roster } = sim.state;
       setText(panel.stats.watch.value, roster.watches > 1 ? `${watchName(member.watch)}${onWatch(sim, member) ? ' · on' : ' · below'}` : roster.watches === 1 ? 'all hands' : 'none kept');
-      setText(panel.stats.rest.value, member.alive ? `${tiredWord(member)}${member.asleep ? ' · asleep' : ''}${ship === sim && chill(sim, member) < 1 ? ' · cold' : ''}` : 'none');
-      panel.stats.rest.node.classList.toggle('is-alarm', member.alive && member.fatigue >= 0.9);
+      const hungry = hungryWord(member);
+      setText(panel.stats.rest.value, member.alive ? `${tiredWord(member)}${hungry ? ` · ${hungry.toLowerCase()}` : ''}${member.asleep ? ' · asleep' : member.eating ? ' · eating' : ''}${ship === sim && chill(sim, member) < 1 ? ' · cold' : ''}` : 'none');
+      panel.stats.rest.node.classList.toggle('is-alarm', member.alive && (member.fatigue >= 0.9 || hungry === 'Starving'));
       for (const { station, node } of panel.posts) {
         node.classList.toggle('is-on', member.post === station);
         node.setAttribute('aria-pressed', String(member.post === station));

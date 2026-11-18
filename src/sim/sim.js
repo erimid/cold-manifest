@@ -36,6 +36,7 @@ import { POWER_COMMANDS, checkPowerInvariants, newPowerState, newSystemsState, s
 import { checkStationInvariants, closeStationTable, newStationState, rating, roomOfStation, running, stationCommands, stepStations } from './stations.js';
 import { attachMargo, checkMargoInvariants, newMargoState, stepMargo } from '../ai/margo.js';
 import { checkWatchInvariants, dealWatches, newRosterState, stepWatches, watchCommands } from './watches.js';
+import { checkSlipInvariants, stepSlips } from './slips.js';
 import { checkSenseInvariants, newSenseState, stepSenses } from './senses.js';
 import { HOLD_COMMANDS, checkHoldInvariants, newHoldState, stepHold } from './hold.js';
 import { attachMemory, checkMemoryInvariants, lampHolder, memoryTypes, remember, stepNerve, whyKeepLamp } from './memory.js';
@@ -342,7 +343,7 @@ function stepLights(sim) {
 // Margo decides how she runs the stations she holds (ai/margo.js) once they are settled; what she changes
 // takes hold when they are settled again at the end of the tick.
 const WATCH_HOOKS = { send: (sim, member, room) => sendTo(sim, member, room, 'watch'), postRoom: roomOfStation };
-const SYSTEMS = [(sim) => stepCrew(sim, TICK_SECONDS), (sim) => stepWatches(sim, TICK_SECONDS, WATCH_HOOKS), (sim) => stepHold(sim, TICK_SECONDS), (sim) => stepAtmosphere(sim, TICK_SECONDS), stepPower, stepStations, stepMargo, stepDoors, stepLights, (sim) => stepNerve(sim, TICK_SECONDS), (sim) => stepSenses(sim, TICK_SECONDS), (sim) => stepCombat(sim, TICK_SECONDS), (sim) => stepSector(sim, TICK_SECONDS), (sim) => stepSituations(sim, TICK_SECONDS), (sim) => stepEncounters(sim, TICK_SECONDS), (sim) => stepBoarders(sim, TICK_SECONDS), stepPower, stepStations, stepJudgement, stepVoice];
+const SYSTEMS = [(sim) => stepCrew(sim, TICK_SECONDS), (sim) => stepWatches(sim, TICK_SECONDS, WATCH_HOOKS), stepSlips, (sim) => stepHold(sim, TICK_SECONDS), (sim) => stepAtmosphere(sim, TICK_SECONDS), stepPower, stepStations, stepMargo, stepDoors, stepLights, (sim) => stepNerve(sim, TICK_SECONDS), (sim) => stepSenses(sim, TICK_SECONDS), (sim) => stepCombat(sim, TICK_SECONDS), (sim) => stepSector(sim, TICK_SECONDS), (sim) => stepSituations(sim, TICK_SECONDS), (sim) => stepEncounters(sim, TICK_SECONDS), (sim) => stepBoarders(sim, TICK_SECONDS), stepPower, stepStations, stepJudgement, stepVoice];
 
 /**
  * Create a simulation.
@@ -542,6 +543,6 @@ function shipProblems(ship) {
 export function checkInvariants(sim) {
   const problems = [];
   if (!Number.isInteger(sim.state.tick) || sim.state.tick < 0) problems.push(`tick is ${sim.state.tick}`);
-  problems.push(...shipProblems(sim), ...checkVoiceInvariants(sim), ...checkJudgementInvariants(sim), ...checkMargoInvariants(sim), ...checkRunInvariants(sim), ...checkEventInvariants(sim), ...checkContractInvariants(sim), ...checkEncounterInvariants(sim), ...checkBoarderInvariants(sim), ...checkStationInvariants(sim), ...checkWatchInvariants(sim));
+  problems.push(...shipProblems(sim), ...checkVoiceInvariants(sim), ...checkJudgementInvariants(sim), ...checkMargoInvariants(sim), ...checkRunInvariants(sim), ...checkEventInvariants(sim), ...checkContractInvariants(sim), ...checkEncounterInvariants(sim), ...checkBoarderInvariants(sim), ...checkStationInvariants(sim), ...checkWatchInvariants(sim), ...checkSlipInvariants(sim));
   return problems;
 }

@@ -59,6 +59,9 @@ export const TRIGGERS = Object.freeze({
   'margo.doubt': { category: 'argument', priority: 3, ttl: 10, cooldown: 30, own: true, slots: crewAndRoom, when: (event) => event.speak },
   'margo.own_way': { category: 'argument', priority: 4, ttl: 12, cooldown: 20, own: true, slots: crewAndRoom },
   'margo.stretched': { category: 'order_confirm', priority: 2, ttl: 10, cooldown: 90, own: true },
+  // A worn hand's fumble and a starving one (F.7): she says what tiredness and hunger are costing.
+  'crew.slipped': { category: 'order_confirm', priority: 2, ttl: 8, cooldown: 40, own: true, slots: crewAndRoom },
+  'crew.starving': { category: 'order_confirm', priority: 2, ttl: 10, cooldown: 120, own: true, slots: crewName },
   'power.output': { category: 'order_confirm', priority: 2, ttl: 8, cooldown: 20, when: (event) => event.reason === 'unmanned' },
   'crew.hurt': { category: 'crew_injury', priority: 3, ttl: 12, cooldown: 15, slots: crewName },
   // A fire or a hole in a room she cannot see into is not news until someone looks (senses.js): then it is "found".
