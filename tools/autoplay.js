@@ -66,9 +66,9 @@ import { COVER_IDS, MANNER_IDS, MANNER_STATIONS, POSTS, STATION_IDS, rating, run
 import { gunSlot, ourCrew } from '../src/sim/combat.js';
 import { roundsInHold } from '../src/sim/hold.js';
 import { MANUAL_DOOR_SECONDS, TICK_RATE, TICK_SECONDS, checkInvariants, createSim } from '../src/sim/sim.js';
-import { COAST, bestRoute, cheapestRoute, heldReason, laneBetween, nodeOf, paceOf, routeTotals, whyNoRunIn } from '../src/sim/sector.js';
+import { COAST, bestRoute, cheapestRoute, heldReason, hunting, laneBetween, nodeOf, paceOf, routeTotals, whyNoRunIn } from '../src/sim/sector.js';
 import { contractCrates } from '../src/sim/contracts.js';
-import { burn } from '../src/sim/senses.js';
+import { burn, troubleAboard } from '../src/sim/senses.js';
 import { chill } from '../src/sim/cold.js';
 import { BLUFFS, ENDINGS, HELM, SPAWN, STAGES_OF_AWARENESS, bearingOf, bluffChance, scopeView, tellsOf, whyNoHail, whyNoPay } from '../src/sim/encounters.js';
 import { BOARD, GOALS, OUTCOMES as BOARD_OUTCOMES, REASONS, whyNoBribe } from '../src/sim/boarders.js';
@@ -539,7 +539,7 @@ function playCrossing(seed, index) {
   const { run } = sim.state;
   const contract = run.contract;
   const end = CROSSING_MINUTES * 60 * TICK_RATE;
-  const tally = { caught: 0, escapes: 0, quick: 0, routes: 0, strikes: 0, risks: {}, time: { under: 0, coast: 0, held: 0, off: 0, port: 0, pace: 0 }, real: 0, fastTicks: 0, busy: {}, idle: 0, underReal: 0, routeReal: [], routeHours: [], spans: 0, died: {}, sighted: 0, lines: 0, outcomes: {}, events: 0, lapsed: 0, placed: 0, attended: 0, sends: 0, eventContacts: 0, shots: 0, braces: 0, tolls: 0, hooks: 0, met: {}, picked: {}, locked: 0, offered: 0, inspections: 0, seized: 0, fuelBought: 0, fuelSpent: 0, fuelBurned: 0, repairSpent: 0, answers: {}, claimLeft: false, contacts: {}, contactKinds: {}, contactSeconds: [], stages: {}, pings: 0, pingsFound: 0, looks: { found: 0, blank: 0 }, boardings: {}, staff: { crew: 0, margo: 0, dark: 0, well: 0, samples: 0 }, tired: 0, watchChanges: 0, mode: crewMode, margo: { quiet: 0, book: 0, push: 0, rating: 0, held: 0, samples: 0, hunted: 0, found: 0, stretched: 0, ownWay: 0, doubt: 0, changes: 0 } };
+  const tally = { caught: 0, escapes: 0, quick: 0, routes: 0, strikes: 0, risks: {}, time: { under: 0, coast: 0, held: 0, off: 0, port: 0, pace: 0 }, real: 0, fastTicks: 0, busy: {}, idle: 0, underReal: 0, routeReal: [], routeHours: [], spans: 0, together: { ticks: 0, loudTicks: 0, contacts: [], situations: [], jolts: {} }, died: {}, sighted: 0, lines: 0, outcomes: {}, events: 0, lapsed: 0, placed: 0, attended: 0, sends: 0, eventContacts: 0, shots: 0, braces: 0, tolls: 0, hooks: 0, met: {}, picked: {}, locked: 0, offered: 0, inspections: 0, seized: 0, fuelBought: 0, fuelSpent: 0, fuelBurned: 0, repairSpent: 0, answers: {}, claimLeft: false, contacts: {}, contactKinds: {}, contactSeconds: [], stages: {}, pings: 0, pingsFound: 0, looks: { found: 0, blank: 0 }, boardings: {}, staff: { crew: 0, margo: 0, dark: 0, well: 0, samples: 0 }, tired: 0, watchChanges: 0, mode: crewMode, margo: { quiet: 0, book: 0, push: 0, rating: 0, held: 0, samples: 0, hunted: 0, found: 0, stretched: 0, ownWay: 0, doubt: 0, changes: 0 } };
   sim.events.on('margo.own_way', () => (tally.margo.ownWay += 1));
   sim.events.on('margo.doubt', () => (tally.margo.doubt += 1));
   sim.events.on('margo.manner', (event) => event.why !== 'order' && (tally.margo.changes += 1));
@@ -592,6 +592,17 @@ function playCrossing(seed, index) {
   sim.events.on('pursuit.caught', () => (tally.caught += 1));
   sim.events.on('pursuit.sighted', () => (tally.sighted += 1));
   sim.events.on('ai.line', (event) => event.trigger && ['route.sailed', 'route.passed', 'route.offport', 'sector.jumped', 'course.ready', 'pursuit.sighted', 'contract.late', 'sector.delivered', 'fuel.out', 'pursuit.ended'].includes(event.trigger) && (tally.lines += 1));
+  // Trouble at the same time (F.4): situations and hunting ships together, and what each cost the other.
+  const loudFor = new Set(); // contacts that hunted us while trouble aboard gave us away
+  const placed = new Map(); // situation number -> { hunted, attended, lapsed }
+  sim.events.on('situation.jolted', (event) => (tally.together.jolts[event.by] = (tally.together.jolts[event.by] ?? 0) + 1));
+  sim.events.on('situation.placed', (event) => placed.set(event.situation, { hunted: hunting(sim), attended: false, lapsed: false }));
+  sim.events.on('situation.attended', (event) => placed.has(event.situation) && (placed.get(event.situation).attended = true));
+  sim.events.on('event.lapsed', (event) => placed.has(event.situation) && (placed.get(event.situation).lapsed = true));
+  sim.events.on('encounter.ended', (event) => {
+    tally.together.contacts.push({ loud: loudFor.has(event.contact), outcome: event.outcome });
+    loudFor.delete(event.contact);
+  });
   sim.events.on('route.sailed', (event) => {
     tally.routes += 1;
     tally.routeHours.push(event.hours);
@@ -822,6 +833,15 @@ function playCrossing(seed, index) {
       tally.routeReal[tally.routes - 1] = (tally.routeReal[tally.routes - 1] ?? 0) + TICK_SECONDS / rate;
       if (rate === 1 && (!tempo.reason || tempo.reason === 'out of fuel')) tally.idle += TICK_SECONDS;
       if (wasQuiet && tempo.reason) tally.spans += 1;
+      // Trouble at the same time (F.4): a situation waiting while a ship hunts us.
+      if (sim.state.tick % 10 === 0 && run.events.aboard.some((one) => !one.result) && hunting(sim)) {
+        tally.together.ticks += 10;
+        for (const one of run.events.aboard) if (!one.result && placed.has(one.n)) placed.get(one.n).hunted = true;
+        if (troubleAboard(sim).total > 0) {
+          tally.together.loudTicks += 10;
+          for (const contact of sim.state.scope.contacts) if (contact.state !== 'lost' && (contact.state !== 'unseen' || contact.aware > 0)) loudFor.add(contact.id);
+        }
+      }
     }
     sim.step();
     if (sim.state.tick % 20 === 0) {
@@ -892,6 +912,7 @@ function playCrossing(seed, index) {
     fuelLeft: run.fuel,
     minutes: sim.state.tick / TICK_RATE / 60,
     clockMinutes: tally.real / 60,
+    situationsMet: [...placed.values()],
     ticks: sim.state.tick,
 
     hash: hashState(sim.snapshot()),
@@ -1268,6 +1289,22 @@ out.push(`  the clock:         under way ${pct(time.under, allTime)} of the time
   const idle = crossings.reduce((n, c) => n + c.idle, 0);
   const spans = crossings.reduce((n, c) => n + c.spans, 0);
   out.push(`  pace (F.3):        a crossing port to port takes ${median(legs).toFixed(1)} min by the running clock (median of ${legs.length}; ${legs.length ? legs[Math.floor(legs.length / 10)].toFixed(1) : '-'} to ${legs.length ? legs[Math.floor((legs.length * 9) / 10)].toFixed(1) : '-'} for the middle 80%); normal speed with nothing to answer ${pct(idle, under)} of it (target under 10%); something to answer every ${(under / Math.max(1, spans)).toFixed(0)} s`);
+  // Trouble at the same time (F.4): how often a situation and a hunting ship overlap, and what each cost the other.
+  const both = crossings.filter((c) => c.together.ticks > 0).length;
+  const togetherTicks = crossings.reduce((n, c) => n + c.together.ticks, 0);
+  const loudTicks = crossings.reduce((n, c) => n + c.together.loudTicks, 0);
+  const jolts = {};
+  for (const c of crossings) for (const [k, n] of Object.entries(c.together.jolts)) jolts[k] = (jolts[k] ?? 0) + n;
+  const met = crossings.flatMap((c) => c.together.contacts);
+  const caught = (list) => list.filter((one) => ['docked', 'boarded'].includes(one.outcome)).length;
+  const loudMet = met.filter((one) => one.loud);
+  const quietMet = met.filter((one) => !one.loud);
+  const sits = crossings.flatMap((c) => c.situationsMet);
+  const lapsedOf = (list) => list.filter((one) => one.lapsed).length;
+  const huntedSits = sits.filter((one) => one.hunted);
+  const calmSits = sits.filter((one) => !one.hunted);
+  out.push(`  together (F.4):    a situation waiting while a ship hunted us in ${both} of ${crossings.length} crossings (${pct(both, crossings.length)}, target: most), ${(togetherTicks / TICK_RATE / Math.max(1, both)).toFixed(0)} s of ship time a crossing that had it, ${pct(loudTicks, togetherTicks)} of it with the trouble giving us away; set off by a ping ${jolts.ping ?? 0}, by a warning shot ${jolts.shot ?? 0}`);
+  out.push(`  what it cost:      ships that hunted us while trouble aboard was loud docked with us ${pct(caught(loudMet), loudMet.length)} of ${loudMet.length}, the rest ${pct(caught(quietMet), quietMet.length)} of ${quietMet.length}; situations met while hunted lapsed ${pct(lapsedOf(huntedSits), huntedSits.length)} of ${huntedSits.length}, the rest ${pct(lapsedOf(calmSits), calmSits.length)} of ${calmSits.length}`);
   out.push(`  crew lost:         ${mean(crossings.map((c) => c.dead)).toFixed(2)} a run; by cause ${Object.entries(died).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k} ${n}`).join(', ') || 'none'}`);
   out.push(`  normal speed for:  ${Object.entries(busy).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k} ${pct(n, busyAll)}`).join(', ') || 'nothing'}`);
 }

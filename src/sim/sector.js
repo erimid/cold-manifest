@@ -34,7 +34,7 @@ import { hasPilot, strike, stepFix, whyNoJump } from './combat.js';
 import { findContact, heldAlongside, liveContacts, SPAWN, spawnContact } from './encounters.js';
 import { rating } from './stations.js';
 import { SHIP_HOUR } from './shipclock.js';
-import { aboard, canMeet, heldBySituation, leaveEvents, openEvent, rollLaneEvent } from '../narrative/events.js';
+import { aboard, canMeet, heldBySituation, joltEvent, leaveEvents, openEvent, rollLaneEvent, waiting } from '../narrative/events.js';
 
 /** What a point on the chart can be, as the chart labels it. */
 export const NODE_KINDS = Object.freeze({
@@ -70,6 +70,15 @@ export const PACE_MAX = 1.4;
 export const DODGE = Object.freeze({ perRating: 0.4, most: 0.8 });
 /** The most contacts the lanes will put on the scope at once. */
 export const MAX_LANE_CONTACTS = 2;
+/**
+ * Trouble at the same time (F.4): how much likelier a lane's situation aboard is an hour while a ship is hunting us,
+ * and a ship on the scope while trouble aboard waits; and the chance a hunting ship's ping, or a warning shot
+ * landing, sets something off aboard.
+ */
+export const TOGETHER = Object.freeze({ aboard: 3, contacts: 1.5, ping: 0.3, shot: 0.5 });
+
+/** Is a ship hunting us: one whose beam has brushed us, or that has noticed us, or is alongside? */
+export const hunting = (sim) => liveContacts(sim).some((contact) => contact.state !== 'unseen' || contact.aware > 0);
 /** Where along its lane a passing point's event comes: between these shares of the lane. */
 const EVENT_ALONG = Object.freeze([0.25, 0.75]);
 /** How far out a follower turns up, in scope units, and how wide of dead astern. */
@@ -615,7 +624,9 @@ function laneRisks(sim, risk, hours) {
   const wake = run.crossing.wake ?? 0;
   if (risk.contacts > 0 && !run.delivered && liveContacts(sim).length < MAX_LANE_CONTACTS) {
     const rng = sim.rng.stream('encounters');
-    if (rng.chance(risk.contacts * (1 + RUNNING.more * wake) * hours)) {
+    // Trouble aboard that nobody has seen to draws a ship (F.4): the lane's dice lean that way.
+    const drawn = waiting(sim).length ? TOGETHER.contacts : 1;
+    if (rng.chance(risk.contacts * drawn * (1 + RUNNING.more * wake) * hours)) {
       const pool = Object.entries(risk.encounters ?? {}).filter(([id, weight]) => weight > 0 && sim.encounters.byId.has(id));
       if (pool.length) {
         const def = sim.encounters.byId.get(rng.weighted(pool, ([, weight]) => weight)[0]);
@@ -632,7 +643,9 @@ function laneRisks(sim, risk, hours) {
   }
   // Something happens aboard (H.8, D-208): the lane's chance an hour of a situation, from the events that fit the
   // point it runs to. On top of the point's own dice (startLeg); only under way, and never while two already wait.
-  if (risk.aboard > 0 && run.crossing.phase === 'under way' && canMeet(sim) && sim.rng.stream('events').chance(risk.aboard * hours)) {
+  // While a ship hunts us, things aboard go wrong more often (F.4): the lane's dice lean towards the two together.
+  const lean = hunting(sim) ? TOGETHER.aboard : 1;
+  if (risk.aboard > 0 && run.crossing.phase === 'under way' && canMeet(sim) && sim.rng.stream('events').chance(risk.aboard * lean * hours)) {
     const [from, to] = [run.crossing.path[run.crossing.leg], run.crossing.path[run.crossing.leg + 1]];
     rollLaneEvent(sim, nodeOf(run.map, to)?.kind === 'port' ? from : to, { aboard: true });
   }
@@ -690,6 +703,13 @@ function findUs(sim) {
  * after a longer lead each time, and gives up after PURSUER.shake slips (H.8); having docked, after its lead.
  */
 export function attachSector(sim) {
+  // A hunting ship sets things off aboard (F.4): its ping rattles the hull, a warning shot shakes the ship.
+  sim.events.on('contact.pinged', () => {
+    if (sim.state.run?.crossing && sim.rng.stream('events').chance(TOGETHER.ping)) joltEvent(sim, 'ping');
+  });
+  sim.events.on('shot.resolved', (event) => {
+    if (event.at === 'us' && event.result === 'warning' && sim.state.run?.crossing && sim.rng.stream('events').chance(TOGETHER.shot)) joltEvent(sim, 'shot');
+  });
   sim.events.on('encounter.ended', (event) => {
     const run = sim.state.run;
     if (!event.pursuer || !run?.pursuit || run.pursuit.done) return;
