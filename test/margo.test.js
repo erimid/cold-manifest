@@ -56,21 +56,23 @@ test('her attention goes to what needs her: an idle station gets what is left, a
   const load = margoLoad(sim);
   assert.equal(load.attention, MARGO.attention);
   assert.equal(load.held, 5);
+  // Five stations for four stations' worth of her: spread thin, all of them lose a little (F.7, D-243).
+  const thin = 1 - MARGO.spread;
   // The drive is cut, so the engines need nothing: four jobs, four stations' worth of her, and the engines idle at the floor.
   assert.equal(load.jobs, 4);
-  for (const id of ['life_support', 'helm', 'sensors', 'doors']) assert.equal(rating(sim, id), 1, id);
-  assert.ok(near(rating(sim, 'engines'), MARGO.floor));
+  for (const id of ['life_support', 'helm', 'sensors', 'doors']) assert.ok(near(rating(sim, id), thin), id);
+  assert.ok(near(rating(sim, 'engines'), MARGO.floor * thin));
   // Light the drive: five jobs, and the doors, last of them in her priorities, drop to the floor.
   go(sim, { type: 'helm.burn', on: true });
   seconds(sim, 1);
   assert.equal(margoLoad(sim).jobs, 5);
-  assert.equal(rating(sim, 'engines'), 1);
-  assert.ok(near(rating(sim, 'doors'), MARGO.floor));
+  assert.ok(near(rating(sim, 'engines'), thin));
+  assert.ok(near(rating(sim, 'doors'), MARGO.floor * thin));
   // A station handed to her comes before its equals: the doors, handed over, put the engines at the floor instead.
   go(sim, { type: 'station.cover', station: 'doors', cover: 'hers' });
   seconds(sim, 1);
-  assert.equal(rating(sim, 'doors'), 1);
-  assert.ok(near(rating(sim, 'engines'), MARGO.floor));
+  assert.ok(near(rating(sim, 'doors'), thin));
+  assert.ok(near(rating(sim, 'engines'), MARGO.floor * thin));
 });
 
 test('a damaged core has less attention to give', () => {
@@ -84,8 +86,10 @@ test('a damaged core has less attention to give', () => {
   assert.ok(margoAttention(sim) < MARGO.attention);
   const hurt = ['life_support', 'helm', 'sensors', 'engines', 'doors'].reduce((sum, id) => sum + rating(sim, id), 0);
   assert.ok(hurt < whole, `${hurt} < ${whole}`);
-  // The air still comes first.
-  assert.equal(rating(sim, 'life_support'), 1);
+  // The air still comes first: at the full figure but for being spread thin (F.7).
+  const over = margoLoad(sim).held - margoAttention(sim);
+  assert.ok(near(rating(sim, 'life_support'), 1 - MARGO.spread * over), `${rating(sim, 'life_support')}`);
+  for (const id of ['helm', 'sensors', 'engines', 'doors']) assert.ok(rating(sim, 'life_support') >= rating(sim, id), id);
 });
 
 test('hand a station to her, leave her to fill in, or keep it for the crew', () => {
@@ -259,8 +263,10 @@ test('handing her everything frees every hand, and costs the ship how well it is
   seconds(handed, 1);
   assert.ok(margoLoad(handed).jobs > margoLoad(handed).attention);
   assert.equal(handed.state.ai.stretched, true);
-  assert.equal(rating(handed, 'medbay'), MANNERS.push.rating, 'the hurt come first, and pushed');
-  assert.ok(near(rating(handed, 'shields'), MANNERS.quiet.rating * MARGO.floor), 'the shields get what is left, and kept cool');
+  // Eight stations for four stations' worth of her: each loses a share for every one past four (F.7, D-243).
+  const thin = 1 - MARGO.spread * (margoLoad(handed).held - MARGO.attention);
+  assert.ok(near(rating(handed, 'medbay'), MANNERS.push.rating * thin), 'the hurt come first, and pushed');
+  assert.ok(near(rating(handed, 'shields'), MANNERS.quiet.rating * MARGO.floor * thin), 'the shields get what is left, and kept cool');
 });
 
 test('she says what she is doing, in her own lines', () => {

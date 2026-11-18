@@ -22,6 +22,16 @@
 // to TIRED.floor of their pace. Two watches wear a crew down slowly over a
 // long crossing; three keep it fresh with fewer hands up; all hands is for
 // the bad quarter of an hour.
+//
+// Hunger (F.7, D-241; pulled forward in small from S4.2): each hand has a
+// `hunger` from 0 (fed) to 1 (starving) that climbs while they are awake,
+// faster at work. Off watch in the quarters and mess they eat before they
+// turn in, and a hand on watch who is hungry eats if they are sent there.
+// Past HUNGER.from a hand is slower, down to HUNGER.floor of their pace. All
+// hands means nobody goes below to eat: the watch bill is a choice between
+// hands at their posts now and hands fit to stand them later. A starving
+// hand blames the captain for it (the `hungry` memory). What tiredness and
+// hunger make a hand get wrong is slips.js.
 
 import { SHIP_HOUR, WATCH_HOURS } from './shipclock.js';
 
@@ -31,9 +41,36 @@ const TICKS = 20;
  * A watch in seconds (WATCH_HOURS on the ship clock, 240 s: H.8 made the 240 s watch eight hours, D-206), and
  * fatigue gained a second awake (more at work) and lost a second asleep.
  */
-export const WATCH = Object.freeze({ seconds: WATCH_HOURS * SHIP_HOUR, tire: 1 / 480, work: 1.5, rest: 1 / 500 });
+export const WATCH = Object.freeze({ seconds: WATCH_HOURS * SHIP_HOUR, tire: 1 / 480, work: 1.5, rest: 1 / 300 });
+/**
+ * A hand off watch who has been stood idle this many seconds away from the quarters, with nothing waiting for an
+ * answer in their room, goes back below on their own (F.7, D-244): an order still wakes them, but once it is done
+ * they turn in rather than stand about until the next change of the watch.
+ */
+export const BACK_BELOW = 30;
 /** Fatigue past `from` slows a hand, down to `floor` of their pace at 1. */
 export const TIRED = Object.freeze({ from: 0.6, floor: 0.6 });
+
+/**
+ * Hunger gained a second awake (WATCH.work times that at work) and asleep, lost a second eating, the point past
+ * which it slows a hand (down to `floor` of their pace when starving), when a meal is done, how hungry a hand off
+ * watch (`meal`) or on it (`onWatch`) must be to sit down to one in the mess, and when they are starving (the
+ * `crew.starving` event, once until fed again).
+ */
+export const HUNGER = Object.freeze({ awake: 1 / 600, asleep: 1 / 2400, eat: 1 / 20, from: 0.5, floor: 0.75, sated: 0.05, meal: 0.2, onWatch: 0.4, starving: 0.9 });
+
+/** How much of their pace hunger leaves a crew member: 1 when fed, HUNGER.floor when starving. */
+export function fed(member) {
+  const hunger = member?.hunger ?? 0;
+  if (hunger <= HUNGER.from) return 1;
+  return 1 - (1 - HUNGER.floor) * Math.min(1, (hunger - HUNGER.from) / (1 - HUNGER.from));
+}
+
+/** One word for how hungry someone is, or null when they are not. */
+export const hungryWord = (member) => ((member?.hunger ?? 0) >= HUNGER.starving ? 'Starving' : (member?.hunger ?? 0) > HUNGER.from ? 'Hungry' : null);
+
+/** How much of their pace tiredness and hunger together leave a crew member (F.7): on a station, at a job, on their feet. */
+export const worn = (member) => tiredness(member) * fed(member);
 
 /** How much of their pace a crew member has left: 1 when fresh, TIRED.floor when dead on their feet. */
 export function tiredness(member) {
@@ -157,11 +194,35 @@ export function stepWatches(sim, seconds, { send, postRoom }) {
       if (to && to.id !== member.room && !sim.state.rooms[to.id].jettisoned) send(sim, member, to.id);
     }
     if (!roster.watches) continue;
-    member.asleep = Boolean(bunksThere) && !onWatch(sim, member) && member.room === bunks.id && free(member);
+    // Off watch and idle away from the quarters for a while: back below (D-244).
+    if (roster.watches > 1 && bunksThere && !onWatch(sim, member) && !member.due && !sim.state.boarding && member.room !== bunks.id && free(member) && !waitsIn(sim, member.room)) {
+      member.offIdle = (member.offIdle ?? 0) + seconds;
+      if (member.offIdle >= BACK_BELOW) {
+        member.offIdle = 0;
+        send(sim, member, bunks.id);
+      }
+    } else member.offIdle = 0;
+    const below = Boolean(bunksThere) && member.room === bunks.id && free(member);
+    const hunger = member.hunger ?? 0;
+    // In the mess they eat first (F.7): off watch until fed, on watch only once hungry, and the meal goes on until it is done.
+    const eating = below && hunger > HUNGER.sated && (member.eating || hunger >= (onWatch(sim, member) ? HUNGER.onWatch : HUNGER.meal));
+    if (eating && !member.eating) sim.events.emit('crew.eating', { crew: member.id, hunger, tick });
+    member.eating = eating;
+    member.asleep = below && !eating && !onWatch(sim, member);
+    const busy = member.task === 'idle' || member.task === 'walking' ? 1 : WATCH.work;
     if (member.asleep) member.fatigue = Math.max(0, member.fatigue - WATCH.rest * seconds);
-    else member.fatigue = Math.min(1, member.fatigue + WATCH.tire * (member.task === 'idle' || member.task === 'walking' ? 1 : WATCH.work) * seconds);
+    else member.fatigue = Math.min(1, member.fatigue + WATCH.tire * busy * seconds);
+    if (eating) member.hunger = Math.max(0, hunger - HUNGER.eat * seconds);
+    else member.hunger = Math.min(1, hunger + (member.asleep ? HUNGER.asleep : HUNGER.awake * busy) * seconds);
+    if (member.hunger >= HUNGER.starving && !member.starving) {
+      member.starving = true;
+      sim.events.emit('crew.starving', { crew: member.id, room: member.room, tick });
+    } else if (member.hunger < HUNGER.from) member.starving = false;
   }
 }
+
+/** Is something in this room waiting for an answer (a situation aboard, H.7)? */
+const waitsIn = (sim, roomId) => Boolean(sim.state.run?.events?.aboard?.some((one) => !one.result && one.room === roomId));
 
 /** Watch bill problems that should never happen. */
 export function checkWatchInvariants(sim) {
@@ -173,6 +234,8 @@ export function checkWatchInvariants(sim) {
   if (!(Number.isInteger(roster.t) && roster.t >= 0 && roster.t < WATCH.seconds * TICKS)) problems.push(`the watch is ${roster.t} ticks old`);
   for (const member of mine(sim)) {
     if (!(member.fatigue >= 0 && member.fatigue <= 1)) problems.push(`crew ${member.id} fatigue is ${member.fatigue}`);
+    if (!((member.hunger ?? 0) >= 0 && (member.hunger ?? 0) <= 1)) problems.push(`crew ${member.id} hunger is ${member.hunger}`);
+    if (member.asleep && member.eating) problems.push(`crew ${member.id} is asleep and eating`);
     if (!(Number.isInteger(member.watch) && member.watch >= 0 && member.watch < count)) problems.push(`crew ${member.id} is in watch ${member.watch} of ${count}`);
     if (member.asleep && member.alive && member.path.length) problems.push(`crew ${member.id} is asleep and walking`);
   }

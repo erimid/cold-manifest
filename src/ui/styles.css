@@ -1051,6 +1051,20 @@ body {
   color: var(--sodium);
 }
 
+/* F.7: hungry, and both; a fumble flashes the chip's edge. */
+.crewchip.is-hungry .crewchip__task::after {
+  content: ' \00B7 hungry';
+  color: var(--sodium);
+}
+
+.crewchip.is-tired.is-hungry .crewchip__task::after {
+  content: ' \00B7 tired, hungry';
+}
+
+.crewchip.is-slipping {
+  outline: 2px solid var(--sodium);
+}
+
 /* ---------- intercom (S2.9, D-094) ---------- */
 
 .intercom {

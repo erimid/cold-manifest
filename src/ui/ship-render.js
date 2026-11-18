@@ -1164,6 +1164,16 @@ export function createShipRenderer(layout) {
       ctx.textAlign = 'start';
     }
 
+    // A worn hand's fumble, and a meal in the mess (F.7): a word over their head, clear of the health bar.
+    const word = member.alive && !member.hidden ? (member.slip > 0 ? 'FUMBLED' : member.eating ? 'EATING' : null) : null;
+    if (word) {
+      ctx.fillStyle = member.slip > 0 ? C.sodium : C.paper;
+      ctx.font = `700 ${Math.max(9, 0.26 * s)}px ${MONO}`;
+      ctx.textAlign = 'center';
+      ctx.fillText(word, cx, box.y - (member.health < 1 ? 14 : 4));
+      ctx.textAlign = 'start';
+    }
+
     if (!member.alive) {
       ctx.fillStyle = '#8b93a1';
       ctx.font = `700 ${Math.max(10, 0.4 * s)}px ui-monospace, Menlo, Consolas, monospace`;

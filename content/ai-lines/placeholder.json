@@ -249,8 +249,15 @@
     {"id": "ph.margo_own_way.003", "category": "argument", "placeholder": true, "conditions": {"trigger": "margo.own_way"}, "text": "{room} stays as I have it. When the reason goes, your order comes back."},
     {"id": "ph.margo_stretched.001", "category": "order_confirm", "placeholder": true, "conditions": {"trigger": "margo.stretched"}, "text": "I'm running more than I can watch. Some of it is getting the minimum."},
     {"id": "ph.margo_stretched.002", "category": "order_confirm", "placeholder": true, "conditions": {"trigger": "margo.stretched"}, "text": "Too many jobs and one of me. Put someone on a station and I'll do the rest properly."},
-    {"id": "ph.margo_stretched.003", "category": "order_confirm", "placeholder": true, "conditions": {"trigger": "margo.stretched"}, "text": "I can do four things well. I'm doing more than four."},
+    {"id": "ph.margo_stretched.003", "category": "order_confirm", "placeholder": true, "conditions": {"trigger": "margo.stretched"}, "text": "I can do four things well. I'm doing more than four, and all of it is suffering."},
     {"id": "ph.station_kept.003", "category": "order_confirm", "placeholder": true, "conditions": {"trigger": "station.kept"}, "text": "{room} is off my list. I'll still log what happens in there. I just won't help."},
-    {"id": "ph.margo_easy.003", "category": "order_confirm", "placeholder": true, "conditions": {"trigger": "margo.easy"}, "text": "I've stopped tiptoeing. {room} is running normally again."}
+    {"id": "ph.margo_easy.003", "category": "order_confirm", "placeholder": true, "conditions": {"trigger": "margo.easy"}, "text": "I've stopped tiptoeing. {room} is running normally again."},
+    {"id": "ph.crew_slipped.001", "category": "order_confirm", "placeholder": true, "conditions": {"trigger": "crew.slipped"}, "text": "{crew_name} just fumbled it in {room}. That's what a long watch does."},
+    {"id": "ph.crew_slipped.002", "category": "order_confirm", "placeholder": true, "conditions": {"trigger": "crew.slipped"}, "text": "{crew_name} lost the thread in {room}. Tired hands, Captain. Send them below."},
+    {"id": "ph.crew_slipped.003", "category": "order_confirm", "placeholder": true, "conditions": {"trigger": "crew.slipped"}, "text": "That was {crew_name} in {room}, half asleep. I can't cover a mistake I don't see coming."},
+    {"id": "ph.crew_slipped.004", "category": "order_confirm", "placeholder": true, "conditions": {"trigger": "crew.slipped"}, "text": "{crew_name} dropped it in {room}. Nobody does their best work on an empty stomach."},
+    {"id": "ph.crew_starving.001", "category": "order_confirm", "placeholder": true, "conditions": {"trigger": "crew.starving"}, "text": "{crew_name} hasn't eaten since the last port. It shows."},
+    {"id": "ph.crew_starving.002", "category": "order_confirm", "placeholder": true, "conditions": {"trigger": "crew.starving"}, "text": "{crew_name} is running on nothing. Give them half an hour in the mess or stop expecting much."},
+    {"id": "ph.crew_starving.003", "category": "order_confirm", "placeholder": true, "conditions": {"trigger": "crew.starving"}, "text": "For the log: {crew_name} is starving, and blames the watch bill. The watch bill is yours."}
   ]
 }
