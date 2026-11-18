@@ -765,7 +765,7 @@ export function createShipView({ canvas, root, input, sim, clock, tempo = null, 
     if (atLock) {
       setText(card.title, `${boarding.name} at the ${lock.toLowerCase()} lock · ${GOALS[boarding.wants]}`);
       setText(card.text, `"${demandText(boarding, def)}"`);
-      setText(card.clock, `They come through in ${seconds(boarding.demandEnds - sim.state.tick)}`);
+      setText(card.clock, `They come through in ${seconds(boarding.demandEnds - sim.state.tick)}${boarding.suited ? ' · suited: venting will not stop them' : ' · no suits'}`);
       const why = whyNoBribe(sim);
       setText(card.bribe, def?.party.bribe ? `Pay ${def.party.bribe.cost} · ${percent(bribeChance(sim))}` : 'Pay');
       card.bribe.disabled = Boolean(why);

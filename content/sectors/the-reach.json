@@ -19,8 +19,8 @@
       "crossLanes": 0.35,
       "sideLanes": 0.25,
       "fuel": { "start": 10, "max": 12 },
-      "hours": { "base": 2, "column": 1.5, "climb": 4, "min": 2, "max": 8 },
-      "slack": [0.3, 0.5],
+      "hours": { "base": 1.75, "column": 1.35, "climb": 3.5, "min": 2, "max": 8 },
+      "slack": [0.5, 0.7],
       "union": 0.3,
       "risks": [
         {
