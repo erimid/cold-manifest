@@ -229,6 +229,7 @@
       "title": "Something in the hold",
       "sign": "Something moved in {room}, behind the crates. It is warm, it is breathing, and it is not on my crew list.",
       "lapse": { "hours": 6, "text": "Nobody went down to look. By the next watch the galley is two ration tins short and the hold is quiet again.", "effects": [{ "do": "flag", "name": "stowaway_loose" }] },
+      "loud": { "noise": 0.3 },
       "text": "{who} finds a boy of about fifteen wedged in behind the machine parts with a water flask and a company blanket. He says he came aboard at the last port, that he can work, and that he would rather not say why he left.",
       "choices": [
         {
@@ -259,6 +260,7 @@
       "title": "A crate is leaking",
       "sign": "Something is dripping in {room}. The deck sensor calls it coolant. I do not think it is coolant.",
       "lapse": { "hours": 4, "text": "Nobody went to look at the drip in {room}. It has found something it can burn.", "effects": [{ "do": "fire", "room": "$room", "size": 0.35 }] },
+      "loud": { "noise": 0.2, "heat": 0.4 },
       "text": "{who} follows the drip to one of the manifest crates. The seal has gone along one edge and something pale is beading out of it, slowly, taking the paint off the deck where it lands.",
       "choices": [
         {
@@ -293,6 +295,7 @@
       "title": "{first} and {second} are fighting",
       "sign": "Raised voices in {room}. {first} and {second}. It has gone past words, and I do not have hands.",
       "lapse": { "hours": 3, "text": "Nobody came. {first} and {second} finished it themselves, and both of them are bleeding.", "effects": [{ "do": "hurt", "crew": "$first", "amount": 0.2 }, { "do": "hurt", "crew": "$second", "amount": 0.2 }] },
+      "loud": { "noise": 0.8 },
       "text": "{who} finds them in {room}: {first} has {second} against the bulkhead by the collar. Neither will say what it was about. There is a broken mug on the deck and it was somebody's only mug.",
       "choices": [
         {
@@ -313,6 +316,449 @@
           "label": "Have someone talk them down",
           "requires": { "crew": { "skill": "negotiation", "in": "$room" }, "as": "voice" },
           "outcomes": [{ "text": "{voice} asks which of them wants to explain it to the captain, and waits. It turns out neither does.", "effects": [{ "do": "flag", "name": "fight_talked_down" }] }]
+        }
+      ]
+    },
+    {
+      "id": "hold.shifted",
+      "at": [
+        "hazard"
+      ],
+      "jolt": [
+        "ping",
+        "shot"
+      ],
+      "place": {
+        "room": "hold"
+      },
+      "title": "A load adrift in the hold",
+      "sign": "Something in {room} has come off its straps. I can hear it from here, and so, I would think, can anyone listening.",
+      "lapse": {
+        "hours": 2,
+        "text": "Nobody went down. The load rolled until it found the hull plating, and the plating gave a little.",
+        "effects": [
+          {
+            "do": "breach",
+            "room": "$room",
+            "size": 0.15
+          }
+        ]
+      },
+      "loud": {
+        "noise": 0.7
+      },
+      "text": "{who} gets to {room} as a pallet of machine parts slides the width of the deck and fetches up against the bulkhead with a sound like a bell. The strap that held it is lying in two pieces.",
+      "choices": [
+        {
+          "id": "lash",
+          "label": "Get a line on it and lash it down",
+          "outcomes": [
+            {
+              "weight": 2,
+              "text": "{who} waits for the roll, gets a line round it on the way back, and hauls. It stops. It is very quiet in {room} afterwards."
+            },
+            {
+              "weight": 1,
+              "text": "It stops, eventually, against {who}'s shin. The line holds. The shin mostly holds.",
+              "effects": [
+                {
+                  "do": "hurt",
+                  "crew": "$who",
+                  "amount": 0.15
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "wedge",
+          "label": "Wedge it with whatever is to hand",
+          "outcomes": [
+            {
+              "text": "Two ration crates and a spare door seal. It will not move again until somebody needs the ration crates.",
+              "effects": [
+                {
+                  "do": "flag",
+                  "name": "hold_wedged"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "reactor.knock",
+      "jolt": [
+        "shot"
+      ],
+      "place": {
+        "room": "reactor"
+      },
+      "title": "The reactor is knocking",
+      "sign": "That round rang the reactor housing. A coolant line in {room} has started knocking, and it is running hot.",
+      "lapse": {
+        "hours": 2,
+        "text": "Nobody went to the reactor. The knocking stopped on its own, which is when the line split.",
+        "effects": [
+          {
+            "do": "damage",
+            "system": "reactor",
+            "bars": 1
+          }
+        ]
+      },
+      "loud": {
+        "noise": 0.3,
+        "heat": 0.6
+      },
+      "text": "{who} finds the line jumping against its bracket with every pulse of the pump. The lagging is smoking where it touches the housing.",
+      "choices": [
+        {
+          "id": "bleed",
+          "label": "Have an engineer bleed the line",
+          "requires": {
+            "crew": {
+              "skill": "engineering",
+              "min": 2
+            },
+            "as": "fixer"
+          },
+          "outcomes": [
+            {
+              "text": "{fixer} cracks the bleed valve, lets the air out of the line in one long hiss, and the knocking stops dead. \"Somebody packed this with a bubble in it,\" {fixer} says. \"Somebody I would like to meet.\""
+            }
+          ]
+        },
+        {
+          "id": "clamp",
+          "label": "Clamp it to the bracket and hope",
+          "outcomes": [
+            {
+              "weight": 2,
+              "text": "{who} clamps it with a spanner and a strap. The knocking becomes a shiver. The shiver is quieter."
+            },
+            {
+              "weight": 1,
+              "text": "The clamp holds the line still and the heat goes somewhere else instead: a seam weeps coolant onto the deck, and {who} pulls back a scalded hand.",
+              "effects": [
+                {
+                  "do": "hurt",
+                  "crew": "$who",
+                  "amount": 0.15
+                },
+                {
+                  "do": "damage",
+                  "system": "reactor",
+                  "bars": 1
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "sensors.feedback",
+      "jolt": [
+        "ping"
+      ],
+      "place": {
+        "room": "sensors"
+      },
+      "title": "The sensor head is howling",
+      "sign": "Their ping came in hot and our sensor head in {room} is howling it back. It is telling them where we are, a little at a time.",
+      "lapse": {
+        "hours": 1,
+        "text": "Nobody went to the sensors. The howl went on until something in the head burned out, and then it stopped.",
+        "effects": [
+          {
+            "do": "damage",
+            "system": "sensors",
+            "bars": 1
+          }
+        ]
+      },
+      "loud": {
+        "noise": 0.5,
+        "heat": 0.3
+      },
+      "text": "{who} finds the sensor head's amplifier feeding back on itself: a whine you feel in your teeth and a panel too hot to touch.",
+      "choices": [
+        {
+          "id": "pull",
+          "label": "Pull the head's fuse",
+          "outcomes": [
+            {
+              "text": "The whine stops at once, and so does the head. We are blind on that side until somebody puts it back together.",
+              "effects": [
+                {
+                  "do": "damage",
+                  "system": "sensors",
+                  "bars": 1
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "damp",
+          "label": "Have someone who knows sensors damp it by hand",
+          "requires": {
+            "crew": {
+              "skill": "engineering"
+            },
+            "as": "tech"
+          },
+          "outcomes": [
+            {
+              "text": "{tech} finds the loop, pulls one card a finger's width out of its slot, and the howl drops to a hum. \"Leave that card alone,\" {tech} says to nobody in particular."
+            }
+          ]
+        },
+        {
+          "id": "ride",
+          "label": "Let it ring itself out",
+          "outcomes": [
+            {
+              "weight": 1,
+              "text": "It rings itself out. It takes four very long minutes."
+            },
+            {
+              "weight": 1,
+              "text": "It rings itself out, and takes the amplifier with it.",
+              "effects": [
+                {
+                  "do": "damage",
+                  "system": "sensors",
+                  "bars": 1
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "quarters.nerves",
+      "at": [
+        "empty"
+      ],
+      "jolt": [
+        "ping"
+      ],
+      "cast": {
+        "shaky": {
+          "pick": "random"
+        }
+      },
+      "place": {
+        "room": [
+          "$shaky",
+          "quarters"
+        ]
+      },
+      "title": "{shaky} has lost their nerve",
+      "sign": "{shaky} heard that through the deck. They are in {room}, and they are not being quiet about it.",
+      "lapse": {
+        "hours": 2,
+        "text": "Nobody went to {shaky}. They wore themselves out in the end. They will not look at the scope now.",
+        "effects": [
+          {
+            "do": "trust",
+            "add": -2
+          },
+          {
+            "do": "flag",
+            "name": "nerves_shot"
+          }
+        ]
+      },
+      "loud": {
+        "noise": 0.6
+      },
+      "text": "{who} finds {shaky} in {room} with their back to the bulkhead, talking too fast and too loud about the last ship that pinged a hauler, and what was left of the hauler.",
+      "choices": [
+        {
+          "id": "sit",
+          "label": "Sit with them until it passes",
+          "outcomes": [
+            {
+              "text": "{who} sits down beside {shaky} and says nothing much for ten minutes. It is the right amount of nothing.",
+              "effects": [
+                {
+                  "do": "heal",
+                  "crew": "$shaky",
+                  "amount": 0.05
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "order",
+          "label": "Tell them to keep it down",
+          "outcomes": [
+            {
+              "text": "{shaky} keeps it down. {shaky} also keeps a note of who said it.",
+              "effects": [
+                {
+                  "do": "trust",
+                  "add": -1
+                },
+                {
+                  "do": "flag",
+                  "name": "nerves_ordered"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "dose",
+          "label": "Have a medic give them something",
+          "requires": {
+            "crew": {
+              "skill": "medicine"
+            },
+            "as": "medic"
+          },
+          "outcomes": [
+            {
+              "text": "{medic} gets something from the medbay into {shaky} and a blanket round them. They are asleep inside the quarter hour.",
+              "effects": [
+                {
+                  "do": "heal",
+                  "crew": "$shaky",
+                  "amount": 0.1
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "brig.hammering",
+      "jolt": [
+        "ping"
+      ],
+      "when": {
+        "fact": "flag",
+        "name": "stowaway_brig"
+      },
+      "place": {
+        "room": "brig"
+      },
+      "title": "The stowaway is beating on the brig door",
+      "sign": "The boy in {room} has worked out what a ping means. He is beating on the door with both fists.",
+      "lapse": {
+        "hours": 2,
+        "text": "Nobody went to the brig. He got the lock open with the blanket's buckle. He is somewhere aboard.",
+        "effects": [
+          {
+            "do": "flag",
+            "name": "stowaway_loose"
+          }
+        ]
+      },
+      "loud": {
+        "noise": 0.7
+      },
+      "text": "{who} opens the hatch on a boy with split knuckles and a white face. \"They find stowaways,\" he says. \"They find stowaways and they take the ship.\"",
+      "choices": [
+        {
+          "id": "tell",
+          "label": "Tell him what is out there, and that he is safer quiet",
+          "outcomes": [
+            {
+              "weight": 2,
+              "text": "{who} tells him, plainly. He sits down on the bunk and puts his hands under his arms and does not make another sound."
+            },
+            {
+              "weight": 1,
+              "text": "{who} tells him. It does not help. He goes on, quieter, which will have to do.",
+              "effects": [
+                {
+                  "do": "trust",
+                  "add": -1
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "free",
+          "label": "Let him out to help",
+          "outcomes": [
+            {
+              "text": "He is out of the brig and holding a lamp for {who} inside a minute, and he does not say a word the whole time.",
+              "effects": [
+                {
+                  "do": "flag",
+                  "name": "stowaway_aboard"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "weapons.loose-round",
+      "jolt": [
+        "shot"
+      ],
+      "place": {
+        "room": "weapons"
+      },
+      "title": "A slug loose in the gun room",
+      "sign": "That warning shot shook a slug out of its cradle in {room}. It is rolling, and it is heavy.",
+      "lapse": {
+        "hours": 1,
+        "text": "Nobody went to the gun room. The slug found the feed and jammed it.",
+        "effects": [
+          {
+            "do": "damage",
+            "system": "weapons",
+            "bars": 1
+          }
+        ]
+      },
+      "loud": {
+        "noise": 0.5
+      },
+      "text": "{who} finds a slug the length of a forearm trundling across {room}, ringing off the racks every time the ship rolls.",
+      "choices": [
+        {
+          "id": "rack",
+          "label": "Catch it and rack it",
+          "outcomes": [
+            {
+              "weight": 3,
+              "text": "{who} times it, catches it on the bounce, and seats it back in the cradle with a kick."
+            },
+            {
+              "weight": 1,
+              "text": "{who} catches it. It catches {who} first, across the knuckles.",
+              "effects": [
+                {
+                  "do": "hurt",
+                  "crew": "$who",
+                  "amount": 0.2
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "space",
+          "label": "Put it out of the lock",
+          "outcomes": [
+            {
+              "text": "Out it goes. One slug fewer, and one less thing rolling about in the dark."
+            }
+          ]
         }
       ]
     }

@@ -1123,7 +1123,7 @@ export function createShipView({ canvas, root, input, sim, clock, tempo = null, 
     }
     if (!selected) {
       // Nothing picked: how loud the ship is and why (D-074), and the one switch that matters most to it.
-      const stats = { total: stat('Signature'), light: stat('Light'), noise: stat('Noise'), heat: stat('Heat'), burn: stat('Burn'), eyes: stat('Eyes'), hull: stat('Hull'), gun: stat('Gun'), pd: stat('Point def.') };
+      const stats = { total: stat('Signature'), light: stat('Light'), noise: stat('Noise'), heat: stat('Heat'), burn: stat('Burn'), trouble: stat('Trouble'), eyes: stat('Eyes'), hull: stat('Hull'), gun: stat('Gun'), pd: stat('Point def.') };
       const dark = button('btn-dark', 'Go dark', () => order({ type: 'lights.all', on: litRooms(sim) === 0 }));
       // The helm (H.1): light the drive or cut it and drift, and a flare for something to chase instead of us.
       const burn = button('btn-burn', 'Burn', () => order({ type: 'helm.burn', on: !sim.state.helm.burn }));
@@ -1308,6 +1308,9 @@ export function createShipView({ canvas, root, input, sim, clock, tempo = null, 
       const sig = signature(sim);
       setText(panel.stats.total.value, percent(sig.total));
       for (const part of ['light', 'noise', 'heat', 'burn']) setText(panel.stats[part].value, percent(sig[part]));
+      // Trouble aboard nobody has seen to (F.4): a fight, a leak, a loose load, heard and felt through the hull.
+      setText(panel.stats.trouble.value, sig.trouble > 0 ? percent(sig.trouble) : 'none');
+      panel.stats.trouble.node.classList.toggle('is-alarm', sig.trouble > 0);
       const blind = layout.rooms.filter((room) => !sim.state.seen[room.id].live).length;
       setText(panel.stats.eyes.value, blind ? `${blind} rooms unseen` : 'every room');
       panel.stats.eyes.node.classList.toggle('is-alarm', blind > 0);

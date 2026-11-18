@@ -24,6 +24,12 @@
 //     "sign": "Something is dripping...",   a situation only: what is known before anyone is there (Margo says it)
 //     "lapse": { "hours": 3, "text": "...", "effects": [ ... ] },
 //                                           a situation only: what happens if nobody goes to it in that many hours
+//     "loud": { "noise": 0.6, "heat": 0.2 },
+//                                           a situation only (F.4): what it gives off while nobody has dealt with it,
+//                                           each 0 to 1. The noise rings in its room, and both add to what a hunting
+//                                           ship reads of us (senses.js, SIGNATURE.trouble)
+//     "jolt": ["ping", "shot"],             a situation only (F.4): set off by a hunting ship's ping, or by a warning
+//                                           shot landing, as well as (or, with no "at", instead of) the lane's dice
 //     "cast": { "scout": { "pick": "random" } },
 //                                           people the event is about: a crew filter each, cast in
 //                                           order ("pick": "random" or "best"). Nobody fits: no event
@@ -215,7 +221,7 @@ export function openEvent(sim, id, { force = false, node } = {}) {
     // Forced with its room gone (the debug sheet, a follow-up): anywhere that is still there.
     const room = roomOfPlace(sim, event, cast) ?? (force ? sim.layout.rooms.find((one) => liveRoom(sim, one.id))?.id : null);
     if (!room) return false;
-    open = { n: state.serial + 1, ...open, room, by: null, hold: Boolean(event.place.hold), mark: event.place.scope ?? null, left: event.lapse?.hours ?? null, shown: 0, next: null };
+    open = { n: state.serial + 1, ...open, room, by: null, hold: Boolean(event.place.hold), mark: event.place.scope ?? null, left: event.lapse?.hours ?? null, shown: 0, next: null, loud: event.loud ? { noise: event.loud.noise ?? 0, heat: event.loud.heat ?? 0 } : null };
   }
   if (!force && !match(event.when, { sim, vars: reachOf(sim, open) })) return false;
   const ctx = { sim, vars: reachOf(sim, open) };
@@ -257,6 +263,28 @@ export function rollLaneEvent(sim, nodeId, { aboard: only = false } = {}) {
     }
   }
   return false;
+}
+
+/**
+ * Trouble set off by a hunting ship (F.4): a situation whose `jolt` names what happened ("ping" or "shot"), if one
+ * can come now. Only under way, never one already aboard or already met this run (unless `once` is false).
+ * Returns the event id that opened, or null.
+ */
+export function joltEvent(sim, kind) {
+  const run = sim.state.run;
+  const state = run?.events;
+  if (!state || !run.crossing || run.crossing.phase !== 'under way' || !canMeet(sim)) return null;
+  const here = new Set(state.aboard.map((one) => one.id));
+  const pool = sim.transit.all.filter((event) => isAboard(event) && (event.jolt ?? []).includes(kind) && !here.has(event.id) && !(event.once !== false && state.met.includes(event.id)));
+  while (pool.length) {
+    const event = rng(sim).weighted(pool);
+    if (openEvent(sim, event.id)) {
+      sim.events.emit('situation.jolted', { event: event.id, by: kind, tick: sim.state.tick });
+      return event.id;
+    }
+    pool.splice(pool.indexOf(event), 1);
+  }
+  return null;
 }
 
 /** Events used to open on arriving at a point; since H.6 they come along the lanes (sector.js calls rollLaneEvent). */
@@ -480,7 +508,9 @@ export function checkEventInvariants(sim) {
 
 const NAME = /^[a-z][a-z0-9_]*$/;
 const CHOICE_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
-const EVENT_KEYS = ['id', 'note', 'title', 'text', 'at', 'place', 'sign', 'lapse', 'weight', 'once', 'priority', 'cast', 'when', 'choices'];
+const EVENT_KEYS = ['id', 'note', 'title', 'text', 'at', 'place', 'sign', 'lapse', 'loud', 'jolt', 'weight', 'once', 'priority', 'cast', 'when', 'choices'];
+/** What can set off a situation aboard (F.4): a hunting ship's ping, a warning shot landing. */
+export const JOLTS = Object.freeze(['ping', 'shot']);
 const PLACE_KEYS = ['room', 'scope', 'hold'];
 const LAPSE_KEYS = ['hours', 'text', 'effects'];
 const CHOICE_KEYS = ['id', 'label', 'requires', 'hidden', 'outcomes'];
@@ -559,8 +589,20 @@ export function checkEvent(item, refs = {}) {
         problems.push(...validateEffects(item.lapse.effects, env(), 'lapse.effects'));
       }
     }
+    if (item.loud !== undefined) {
+      if (!isObject(item.loud)) problems.push('loud must be { "noise": 0 to 1, "heat": 0 to 1 }');
+      else {
+        problems.push(...unknown(item.loud, ['noise', 'heat'], 'loud'));
+        for (const key of ['noise', 'heat']) if (item.loud[key] !== undefined && !(typeof item.loud[key] === 'number' && item.loud[key] >= 0 && item.loud[key] <= 1)) problems.push(`loud.${key} must be a number from 0 to 1`);
+      }
+    }
+    if (item.jolt !== undefined) {
+      if (!Array.isArray(item.jolt) || !item.jolt.length) problems.push(`jolt must be a list of what sets it off (${JOLTS.join(', ')})`);
+      else for (const kind of item.jolt) if (!JOLTS.includes(kind)) problems.push(`jolt: unknown "${kind}" (${JOLTS.join(', ')})`);
+    }
     reach.who = ABOARD.who;
   } else {
+    if (item.loud !== undefined || item.jolt !== undefined) problems.push('loud and jolt are for a situation aboard');
     if (item.sign !== undefined) problems.push('sign is for a situation aboard: a radio decision has only its text');
     if (item.lapse !== undefined) problems.push('lapse is for a situation aboard: a radio decision waits on the table');
   }

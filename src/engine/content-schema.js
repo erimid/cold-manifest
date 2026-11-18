@@ -383,7 +383,7 @@ export function validateContent(files) {
       if (type === 'contracts' && typeof item.claim?.event === 'string') followed.add(item.claim.event); // a claim opens it
       if (type === 'events') {
         for (const id of followUps(item)) followed.add(id);
-        if (item.at === undefined) unplaced.push([label, item.id]);
+        if (item.at === undefined && item.jolt === undefined) unplaced.push([label, item.id]);
       }
 
       if (type === 'weapons' && item.mount === false) unmountable.add(item.id);
@@ -416,7 +416,7 @@ export function validateContent(files) {
   for (const [label, id] of laneContacts) if (!refs.encounters.has(id)) errors.push(`${label}: can bring "${id}", which is not an encounter`);
   for (const [label, id] of strikeWeapons) if (!seenIds.get('weapons').has(id)) errors.push(`${label}: strikes with "${id}", which is not a weapon`);
 
-  for (const [label, id] of unplaced) if (!followed.has(id)) errors.push(`${label}: has no "at" and no other event leads on to it, so it can never be met`);
+  for (const [label, id] of unplaced) if (!followed.has(id)) errors.push(`${label}: has no "at", no "jolt" and no other event leads on to it, so it can never be met`);
 
   return { errors, warnings };
 }

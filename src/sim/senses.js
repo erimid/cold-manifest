@@ -35,7 +35,22 @@ import { loadOf, rating, reactorLoad, running } from './stations.js';
 export { reactorLoad };
 
 /** How much each part counts toward a ship's signature. The parts are each 0 to 1. */
-export const SIGNATURE = Object.freeze({ light: 0.2, noise: 0.1, heat: 0.35, burn: 0.2, flare: 0.5 });
+export const SIGNATURE = Object.freeze({ light: 0.2, noise: 0.1, heat: 0.35, burn: 0.2, flare: 0.5, trouble: 0.3 });
+
+/**
+ * Trouble aboard (F.4): the situations nobody has dealt with yet that give something off (an event's `loud`),
+ * in one room or the whole ship. A fight is heard through the hull; a leak runs hot.
+ */
+export function troubleAboard(ship, roomId = null) {
+  let noise = 0;
+  let heat = 0;
+  for (const one of ship.state.run?.events?.aboard ?? []) {
+    if (one.result || !one.loud || (roomId !== null && one.room !== roomId)) continue;
+    noise = Math.max(noise, one.loud.noise);
+    heat = Math.max(heat, one.loud.heat);
+  }
+  return { noise, heat, total: clamp01(noise + heat) };
+}
 /** A ship's noise is its rooms' mean noise times this (most rooms are quiet). */
 const SHIP_NOISE_GAIN = 3;
 
@@ -148,6 +163,7 @@ function steadyNoise(ship, room, people, load) {
     }
   }
   if (room.kind === 'lift' && liftRuns(ship)) level = Math.max(level, NOISE.lift);
+  level = Math.max(level, troubleAboard(ship, room.id).noise);
   for (const member of people) {
     const loud = member.task === 'fighting' ? NOISE.fighting : member.task === 'walking' ? NOISE.walking : WORK.has(member.task) ? NOISE.working : 0;
     if (loud > level) level = loud;
@@ -182,6 +198,7 @@ export function sense(ship, roomId, people = living(ship, roomId), load = reacto
     if (room.system === 'reactor') heat += 0.5 * load;
     if (room.system === 'engines') heat += 0.5 * burn(ship);
   }
+  heat += troubleAboard(ship, roomId).heat;
   let movement = 0;
   for (const member of people) if (member.task === 'walking') movement += 1;
   return { light: lightIn(r), noise: r.noise, heat: clamp01(heat), movement };
@@ -204,8 +221,9 @@ export function signature(ship) {
   const heat = clamp01(reactorLoad(ship) + 0.25 * rooms.reduce((sum, r) => sum + r.fire, 0));
   const drive = burn(ship);
   const { flare: lit } = ship.state;
-  const total = clamp01(SIGNATURE.light * light + SIGNATURE.noise * noise + SIGNATURE.heat * heat + SIGNATURE.burn * drive + SIGNATURE.flare * lit);
-  return { light, noise, heat, burn: drive, flare: lit, total };
+  const trouble = troubleAboard(ship).total;
+  const total = clamp01(SIGNATURE.light * light + SIGNATURE.noise * noise + SIGNATURE.heat * heat + SIGNATURE.burn * drive + SIGNATURE.flare * lit + SIGNATURE.trouble * trouble);
+  return { light, noise, heat, burn: drive, flare: lit, trouble, total };
 }
 
 // ---------- what a ship can see ----------

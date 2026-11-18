@@ -293,7 +293,7 @@ test('the content checker reads every contract, port and faction and catches a b
   file.data.items[2].claim.event = 'claim.nowhere';
   file.data.items[1].cargo[0].kind = 'ammo';
   const errors = validateContent(broken).errors.join('\n');
-  for (const pattern of [/type must be one of/, /no faction "nobody"/, /advance must be/, /latePay must be/, /no event "claim.nowhere"/, /kind must be cargo or salvage/, /"claim.aphelion": has no "at" and no other event leads on to it/]) assert.match(errors, pattern);
+  for (const pattern of [/type must be one of/, /no faction "nobody"/, /advance must be/, /latePay must be/, /no event "claim.nowhere"/, /kind must be cargo or salvage/, /"claim.aphelion": has no "at", no "jolt" and no other event leads on to it/]) assert.match(errors, pattern);
   const port = broken.find((one) => one.path.startsWith('ports/'));
   port.data.items[0].services.push('shipyard');
   port.data.items[0].fuel = -1;
