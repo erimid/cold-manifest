@@ -1,0 +1,15 @@
+{
+  "note": "Lines Margo says when something a choice left behind is still true (F.5, D-231): each reads a flag an event sets, in conditions.when. They count toward coverage, inside the 500-line cap.",
+  "items": [
+    { "id": "cb.idle.001", "category": "idle", "conditions": { "when": { "fact": "flag", "name": "heard_the_log" } }, "text": "I have the manifest number from that dead hull filed where I can see it. I did not ask to be able to see it." },
+    { "id": "cb.idle.002", "category": "idle", "conditions": { "when": { "fact": "flag", "name": "scrubbers_changed" } }, "text": "The new scrubbers are holding. I would like it noted that they were the last new scrubbers." },
+    { "id": "cb.idle.003", "category": "idle", "conditions": { "when": { "fact": "flag", "name": "stowaway_aboard" } }, "text": "The boy from the hold has cleaned the air plant twice. Nobody asked him. I have added him to the crew list in pencil." },
+    { "id": "cb.idle.004", "category": "idle", "conditions": { "when": { "fact": "flag", "name": "stowaway_brig" } }, "text": "The brig has been occupied for some hours. I keep the lights on in there. It seems the least I can do." },
+    { "id": "cb.idle.005", "category": "idle", "conditions": { "when": { "fact": "flag", "name": "stowaway_loose" } }, "text": "Something aboard is eating our rations that is not on my crew list. I would like it on my crew list, or off my ship." },
+    { "id": "cb.idle.006", "category": "idle", "conditions": { "when": { "fact": "flag", "name": "crate_resealed" } }, "text": "One of the manifest crates has a new seal on it. A good one. Better than the company's, which is the problem." },
+    { "id": "cb.idle.007", "category": "idle", "conditions": { "when": { "fact": "flag", "name": "fight_talked_down" } }, "text": "The two who were fighting have been sitting at the same end of the mess table. I am not going to say anything in case it stops." },
+    { "id": "cb.idle.008", "category": "idle", "conditions": { "when": { "fact": "flag", "name": "hold_wedged" } }, "text": "The load in the hold is held up by two crates of rations. I mention it because sooner or later someone will be hungry." },
+    { "id": "cb.idle.009", "category": "idle", "conditions": { "when": { "fact": "flag", "name": "nerves_shot" } }, "text": "One of ours has stopped looking at the scope. I have stopped mentioning what is on it when they are in the room." },
+    { "id": "cb.idle.010", "category": "idle", "conditions": { "when": { "fact": "flag", "name": "nerves_ordered" } }, "text": "Somebody was told to keep it down, and has. They have also stopped saying good morning to me. I am told that is not my business." }
+  ]
+}

@@ -23,7 +23,7 @@ import { chill } from './cold.js';
 import { refusalOf } from './memory.js';
 import { skillFactor, skillOf } from './roles.js';
 import { liftRuns } from './power.js';
-import { STATIONS, postOfRole, rating, stationOfRoom } from './stations.js';
+import { STATIONS, injured, postOfRole, rating, stationOfRoom } from './stations.js';
 import { tiredness } from './watches.js';
 import { SPACE, SYSTEMS } from './systems.js';
 
@@ -643,6 +643,7 @@ export function describeTask(sim, member) {
     default:
       if (member.asleep) return 'Asleep';
       if (isHome(sim, member) && room.system === 'medbay' && member.health < 1 && rating(sim, 'medbay') > 0) return 'Being patched up';
+      if (member.post && injured(member)) return 'Too badly hurt to stand a station';
       return member.post && stationOfRoom(sim, member.room) === member.post ? `On station: ${STATIONS[member.post].name.toLowerCase()}` : 'Standing by';
   }
 }

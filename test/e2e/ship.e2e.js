@@ -1718,6 +1718,15 @@ async function loopTests(browser) {
         assert.match(await page.textContent('#port-facts'), /Contract\s*Courier: 2 of 2 crates aboard/);
         assert.equal(await page.isDisabled('#btn-hire'), true, 'hiring is a stub until Stage 4');
         assert.equal(await page.isDisabled('#btn-refuel'), true, 'full tanks, nothing to buy');
+        // What the port took notice of (F.5) is said on the port screen, above the facts.
+        await game(page, () => {
+          const { sim, machine } = window.coldManifest;
+          sim.state.run.portNotes = [{ id: 'test', text: 'A Receivers clerk is waiting at the foot of the gangway.' }];
+          machine.go('port', { node: sim.state.run.at });
+        });
+        assert.match(await page.textContent('.port__note'), /Receivers clerk/);
+        await shot('f5-port-notice-ipad');
+        await game(page, () => (window.coldManifest.sim.state.run.portNotes = []));
         await shot('s3-2-port-ipad');
         await big('#screen button');
       }
@@ -1865,7 +1874,8 @@ async function loopTests(browser) {
     assert.match(facts, /6 of 6 alive/);
     assert.match(facts, /Result\s*Delivered whole/);
     assert.match(facts, /Paid\s*150 advance \+ 450 at the drop/);
-    assert.match(facts, /Standing\s*Reach Medical Cooperative \+2/);
+    // The client's +2 for a clean delivery; what the way across met can move other standing too (F.5: a head count, a bounty).
+    assert.match(facts, /Standing\s*(?:[^,]+, )*Reach Medical Cooperative \+2/);
     await shot('s3-2-summary-ipad');
     await big('#screen button');
   });

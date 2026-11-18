@@ -10,7 +10,14 @@
 //   port.sell     sell loose salvage at the yard ("salvage"), or the contract's own cargo ("contract"),
 //                 which fails the contract (contracts.js)
 // Hiring is a stub until Stage 4.
+//
+// A port also takes notice (F.5, D-230): `notices` is a list of { id, when, text, effects }. Each time we
+// dock, every notice whose `when` holds and that has not been given this run is given: its effects are
+// applied and its text is shown on the port screen (`run.portNotes`). This is how a port reads what the
+// crossing left behind it, such as a stowaway in the brig.
 
+import { holds, validateCondition, validateText } from '../narrative/conditions.js';
+import { applyEffects, validateEffects } from '../narrative/effects.js';
 import { addMoney, contractActive, contractOf, failContract } from './contracts.js';
 import { HELM } from './encounters.js';
 import { nodeOf } from './sector.js';
@@ -163,6 +170,54 @@ function sell(sim, what) {
     contractOf(sim).sold += quote.crates;
     failContract(sim, 'sold');
   }
+}
+
+// ---------- notices (F.5) ----------
+
+/** Give every notice of the port that fits and has not been given this run. Returns the notes given. */
+export function takeNotice(sim) {
+  const run = sim.state.run;
+  const port = portHere(sim);
+  run.portNotes = [];
+  if (!port?.notices) return run.portNotes;
+  run.noticed ??= [];
+  for (const notice of port.notices) {
+    if (run.noticed.includes(notice.id) || !holds(notice.when, { sim, vars: {} })) continue;
+    run.noticed.push(notice.id);
+    applyEffects(notice.effects, { sim, vars: {} });
+    run.portNotes.push({ id: notice.id, text: notice.text });
+    sim.events.emit('port.notice', { notice: notice.id, node: run.at, tick: sim.state.tick });
+  }
+  return run.portNotes;
+}
+
+/** Check a port's notices (content-schema.js). */
+export function checkNotices(notices, refs = {}) {
+  if (notices === undefined) return [];
+  if (!Array.isArray(notices)) return ['notices must be a list'];
+  const problems = [];
+  const seen = new Set();
+  notices.forEach((notice, i) => {
+    const where = `notices[${i}]`;
+    if (!notice || typeof notice !== 'object') return problems.push(`${where} must be an object`);
+    for (const key of Object.keys(notice)) if (!['id', 'when', 'text', 'effects'].includes(key)) problems.push(`${where}: unknown key "${key}" (id, when, text, effects)`);
+    if (typeof notice.id !== 'string' || !notice.id) problems.push(`${where} needs an id`);
+    else if (seen.has(notice.id)) problems.push(`${where}: the id "${notice.id}" is used twice`);
+    seen.add(notice.id);
+    if (notice.when === undefined) problems.push(`${where} needs a "when": a notice given every time is not a notice`);
+    const env = { vars: {}, refs };
+    problems.push(...validateCondition(notice.when, env, `${where}.when`).problems);
+    problems.push(...validateText(notice.text, env, `${where}.text`));
+    problems.push(...validateEffects(notice.effects, env, `${where}.effects`));
+  });
+  return problems;
+}
+
+/** Called once when the sim is created: a port takes notice when we dock. */
+export function attachPort(sim) {
+  sim.events.on('sector.arrived', (event) => {
+    if (event.kind === 'port') takeNotice(sim);
+  });
 }
 
 export const PORT_COMMANDS = {

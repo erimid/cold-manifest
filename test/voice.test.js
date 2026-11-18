@@ -21,7 +21,10 @@ const said = (sim) => sim.state.ai.log.map((line) => line.category);
 test('placeholder lines are flagged, the voice sample is 50 real lines, and every trigger has lines', () => {
   const placeholders = LINES.filter((line) => line.id.startsWith('ph.'));
   const sample = LINES.filter((line) => line.id.startsWith('vs.'));
-  assert.equal(placeholders.length + sample.length, LINES.length);
+  // Lines that call back to a choice (F.5): each reads a flag that something sets.
+  const callbacks = LINES.filter((line) => line.id.startsWith('cb.'));
+  assert.ok(callbacks.length >= 8 && callbacks.every((line) => JSON.stringify(line.conditions?.when).includes('"flag"')), 'callback lines read flags');
+  assert.equal(placeholders.length + sample.length + callbacks.length, LINES.length);
   assert.ok(placeholders.length >= 40, `${placeholders.length} placeholder lines`);
   assert.ok(placeholders.every((line) => line.placeholder === true));
   assert.equal(sample.length, 50, 'the voice sample is 50 lines (S2.10)');
@@ -149,7 +152,7 @@ test('the same trigger does not chatter: spreading fires get one remark per cool
 
 test('no line repeats until every line that fits has been heard', () => {
   const sim = newTalkingSim('repeat');
-  const pool = candidates(LINES, { trigger: 'idle', slots: {} }).length;
+  const pool = candidates(LINES, { trigger: 'idle', slots: {} }, sim).length; // with no flags set, no callback line fits
   seconds(sim, pool * IDLE_MAX_SECONDS + 60);
   const idle = sim.state.ai.log.filter((line) => line.category === 'idle').map((line) => line.id);
   assert.ok(idle.length >= pool);

@@ -2171,3 +2171,10 @@ body {
   text-transform: none;
   white-space: normal;
 }
+
+/* What a port took notice of when we docked (F.5). */
+.port__note {
+  border-left: 4px solid var(--amber-dim);
+  padding-left: 10px;
+  color: var(--amber);
+}

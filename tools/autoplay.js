@@ -62,7 +62,7 @@ import { eventView, nearestHand, situationViews } from '../src/narrative/events.
 import { findBadNumbers, hashState } from '../src/engine/hash.js';
 import { createRng } from '../src/engine/rng.js';
 import { OUTPUT_LEVELS } from '../src/sim/power.js';
-import { COVER_IDS, MANNER_IDS, MANNER_STATIONS, POSTS, STATION_IDS, rating, running } from '../src/sim/stations.js';
+import { COVER_IDS, MANNER_IDS, MANNER_STATIONS, POSTS, STATION_IDS, injured, rating, running } from '../src/sim/stations.js';
 import { gunSlot, ourCrew } from '../src/sim/combat.js';
 import { roundsInHold } from '../src/sim/hold.js';
 import { MANUAL_DOOR_SECONDS, TICK_RATE, TICK_SECONDS, checkInvariants, createSim } from '../src/sim/sim.js';
@@ -514,6 +514,12 @@ function playScenario(seed, { incoming = false } = {}) {
 const CROSSING_MINUTES = 150;
 /** Who runs the ship on a crossing, in turn (H.5): the crew; Margo, her way; the crew again; Margo, ordered by the book. */
 const MARGO_MODES = Object.freeze(['crew', 'margo', 'crew', 'book']);
+/**
+ * Every fifth crossing a careless captain has the ship (F.5): the lamps stay on, no hunting ship is answered,
+ * nobody is sent to a situation aboard (they lapse unless someone happens to be there), and the hull is never
+ * patched in port. The fires, the holes and the broken systems are still seen to, as before.
+ */
+const isCareless = (index) => index % 5 === 4;
 /** The chance the crossing bot takes the quickest route in hours over the cheapest in fuel, when the two differ and it can pay for it (H.6). */
 const QUICK_CHANCE = 0.3;
 
@@ -530,6 +536,7 @@ function playCrossing(seed, index) {
   // Who runs the ship (H.5): the crew at their posts on half the crossings; on the other half every station is
   // handed to Margo, left to her own way on one quarter and ordered run by the book on the last.
   const crewMode = MARGO_MODES[index % MARGO_MODES.length];
+  const careless = isCareless(index);
   if (crewMode !== 'crew') {
     for (const station of POSTS) sim.enqueue({ type: 'station.cover', station, cover: 'hers' });
     if (crewMode === 'book') for (const station of MANNER_STATIONS) sim.enqueue({ type: 'station.order', station, manner: 'book' });
@@ -540,6 +547,10 @@ function playCrossing(seed, index) {
   const contract = run.contract;
   const end = CROSSING_MINUTES * 60 * TICK_RATE;
   const tally = { caught: 0, escapes: 0, quick: 0, routes: 0, strikes: 0, risks: {}, time: { under: 0, coast: 0, held: 0, off: 0, port: 0, pace: 0 }, real: 0, fastTicks: 0, busy: {}, idle: 0, underReal: 0, routeReal: [], routeHours: [], spans: 0, together: { ticks: 0, loudTicks: 0, contacts: [], situations: [], jolts: {} }, died: {}, sighted: 0, lines: 0, outcomes: {}, events: 0, lapsed: 0, placed: 0, attended: 0, sends: 0, eventContacts: 0, shots: 0, braces: 0, tolls: 0, hooks: 0, met: {}, picked: {}, locked: 0, offered: 0, inspections: 0, seized: 0, fuelBought: 0, fuelSpent: 0, fuelBurned: 0, repairSpent: 0, answers: {}, claimLeft: false, contacts: {}, contactKinds: {}, contactSeconds: [], stages: {}, pings: 0, pingsFound: 0, looks: { found: 0, blank: 0 }, boardings: {}, staff: { crew: 0, margo: 0, dark: 0, well: 0, samples: 0 }, tired: 0, watchChanges: 0, mode: crewMode, margo: { quiet: 0, book: 0, push: 0, rating: 0, held: 0, samples: 0, hunted: 0, found: 0, stretched: 0, ownWay: 0, doubt: 0, changes: 0 } };
+  // Choices come back (F.5): what the ports took notice of, cargo spoiled, and time a hand was too hurt to stand a post.
+  tally.stakes = { notices: {}, spoiled: 0, injuredSeconds: 0, reads: 0 };
+  sim.events.on('port.notice', (event) => (tally.stakes.notices[event.notice] = (tally.stakes.notices[event.notice] ?? 0) + 1));
+  sim.events.on('crate.spoiled', (event) => event.contract && (tally.stakes.spoiled += 1));
   sim.events.on('margo.own_way', () => (tally.margo.ownWay += 1));
   sim.events.on('margo.doubt', () => (tally.margo.doubt += 1));
   sim.events.on('margo.manner', (event) => event.why !== 'order' && (tally.margo.changes += 1));
@@ -642,7 +653,7 @@ function playCrossing(seed, index) {
     if (tally.lastPort === `${run.at}:${tally.routes}`) return;
     tally.lastPort = `${run.at}:${tally.routes}`;
     give({ type: 'port.sell', what: 'salvage' });
-    if (sim.state.hull.points < sim.state.hull.max * 0.6) give({ type: 'port.repair', what: 'hull' });
+    if (!careless && sim.state.hull.points < sim.state.hull.max * 0.8) give({ type: 'port.repair', what: 'hull' });
     const need = cheapestRoute(run.map, run.at, goal()).fuel + (goal() === run.map.delivery ? 0 : cheapestRoute(run.map, goal(), run.map.delivery).fuel);
     if (run.fuel < Math.min(run.fuelMax, need + 2)) give({ type: 'port.refuel' });
     if (sim.state.helm.flares < HELM.flares && sim.state.money > 300) give({ type: 'port.flares' });
@@ -708,13 +719,15 @@ function playCrossing(seed, index) {
     if (sim.state.tick % TICK_RATE === 0) {
       const live = sim.state.scope.contacts.filter((contact) => contact.state !== 'lost' && contact.track.shown);
       for (const contact of live) if (contact.tolled && !whyNoPay(sim, contact.id)) give({ type: 'contact.pay', contact: contact.id });
-      if (run.crossing) answer(live);
+      if (run.crossing && !careless) answer(live);
       const slot = gunSlot(sim);
       const threat = live.find((contact) => contact.state === 'closing' || contact.state === 'alongside' || contact.tolled);
       // A careful captain (F.1): the lamps go out the moment a search beam brushes us, and stay out until the
       // scope is clear again. Something closing: the guns and the shields stood to as well.
       const hunted = live.some((contact) => contact.state !== 'unseen' || contact.aware > 0);
-      if (hunted) give({ type: 'lights.all', on: false });
+      // Once a party is at the lock there is nothing left to hide from, and a fight in the dark goes to whoever brought lamps (F.5).
+      if (sim.state.boarding && !careless) give({ type: 'lights.all', on: true });
+      else if (hunted && !careless) give({ type: 'lights.all', on: false });
       else if (!live.length && sim.state.tick % (10 * TICK_RATE) === 0) give({ type: 'lights.all', on: true });
       if (threat) {
         for (const station of ['weapons', 'shields']) if (sim.state.stations[station].down) give({ type: 'station.stand', station, down: false });
@@ -729,6 +742,7 @@ function playCrossing(seed, index) {
     }
     // Situations aboard (H.7), alongside whatever else is going on: send the nearest hand to each one nobody is
     // at (again if they never got there), answer the ones somebody is at, and put the answered ones away.
+    const boardedNow = sim.state.boarding?.phase === 'aboard';
     for (const item of situationViews(sim)) {
       if (item.state === 'answered') give({ type: 'event.dismiss', situation: item.n });
       else if (item.state === 'attended') {
@@ -738,7 +752,9 @@ function playCrossing(seed, index) {
         const pick = bot.pick(open).id;
         give({ type: 'event.choose', situation: item.n, choice: pick });
         if (contract.claim && item.id === contract.claim.event && pick === 'leave') tally.claimLeft = true;
-      } else if (sim.state.tick - (sent.get(item.n) ?? -1e9) > 30 * TICK_RATE) {
+      } else if ((!careless || sim.transit.byId.get(item.id)?.place?.hold) && !(boardedNow && !careless) && sim.state.tick - (sent.get(item.n) ?? -1e9) > 30 * TICK_RATE) {
+        // A careless captain still sees to what has the ship hove to: nothing else gets her moving. A careful one
+        // sends nobody across the ship while a boarding party is aboard (F.5): that is how hands are lost alone.
         // Never whoever is flying her: the bot keeps the helm held (below), and would only call them back.
         // The last hand alive goes whoever they are: a ship standing by a claim with only her pilot left would wait for ever.
         const alone = ourCrew(sim).filter(({ member }) => member.alive).length === 1;
@@ -865,6 +881,7 @@ function playCrossing(seed, index) {
       if (ai.alert === 'hunted') tally.margo.hunted += 1;
       if (ai.alert === 'found') tally.margo.found += 1;
       if (ai.stretched) tally.margo.stretched += 1;
+      tally.stakes.injuredSeconds += ourCrew(sim).filter(({ member }) => member.alive && member.post && injured(member)).length;
       tally.tired = Math.max(tally.tired, ...ourCrew(sim).map(({ member }) => (member.alive ? member.fatigue : 0)));
       // Where the ship hours went (H.6): under way (and at what pace), held, off a port, or in port.
       const t = tally.time;
@@ -913,6 +930,9 @@ function playCrossing(seed, index) {
     minutes: sim.state.tick / TICK_RATE / 60,
     clockMinutes: tally.real / 60,
     situationsMet: [...placed.values()],
+    careless,
+    spoiledLeft: contractCrates(sim).filter((crate) => crate.spoiled).length,
+    hullLeft: sim.state.hull.points,
     ticks: sim.state.tick,
 
     hash: hashState(sim.snapshot()),
@@ -1305,6 +1325,25 @@ out.push(`  the clock:         under way ${pct(time.under, allTime)} of the time
   const calmSits = sits.filter((one) => !one.hunted);
   out.push(`  together (F.4):    a situation waiting while a ship hunted us in ${both} of ${crossings.length} crossings (${pct(both, crossings.length)}, target: most), ${(togetherTicks / TICK_RATE / Math.max(1, both)).toFixed(0)} s of ship time a crossing that had it, ${pct(loudTicks, togetherTicks)} of it with the trouble giving us away; set off by a ping ${jolts.ping ?? 0}, by a warning shot ${jolts.shot ?? 0}`);
   out.push(`  what it cost:      ships that hunted us while trouble aboard was loud docked with us ${pct(caught(loudMet), loudMet.length)} of ${loudMet.length}, the rest ${pct(caught(quietMet), quietMet.length)} of ${quietMet.length}; situations met while hunted lapsed ${pct(lapsedOf(huntedSits), huntedSits.length)} of ${huntedSits.length}, the rest ${pct(lapsedOf(calmSits), calmSits.length)} of ${calmSits.length}`);
+  // Choices come back (F.5): the careful captain against the careless one, and what came back to bite.
+  const stakes = (of) => {
+    const handed = of.filter((c) => c.status === 'delivered');
+    const met = of.reduce((sum, c) => sum + Object.values(c.contacts).reduce((a, b) => a + b, 0), 0);
+    const docked = of.reduce((sum, c) => sum + (c.contacts.docked ?? 0), 0);
+    const why = {};
+    for (const c of of.filter((one) => one.status !== 'delivered')) why[c.crewDead ? 'crew dead' : c.reason ?? c.status] = (why[c.crewDead ? 'crew dead' : c.reason ?? c.status] ?? 0) + 1;
+    return `${of.length} crossings: ships docked with us ${pct(docked, met)} of ${met}, ${(of.reduce((sum, c) => sum + c.lapsed, 0) / Math.max(1, of.length)).toFixed(1)} situations lapsed a crossing, ${(of.reduce((sum, c) => sum + c.stakes.spoiled, 0) / Math.max(1, of.length)).toFixed(2)} crates spoiled; not handed over: ${Object.entries(why).map(([k, n]) => `${k} ${n}`).join(', ') || 'none'}; reached the drop ${pct(of.filter((c) => c.delivered).length, of.length)}, cargo handed over ${pct(handed.length, of.length)}, came good (handed over for at least half the fee) ${pct(handed.filter((c) => c.earned >= c.pay / 2).length, of.length)} (earning ${handed.length ? mean(handed.map((c) => c.earned)).toFixed(0) : '-'} on average), crew all dead ${of.filter((c) => c.crewDead).length}, crew lost in ${pct(of.filter((c) => c.dead > 0).length, of.length)}, money at the end ${mean(of.map((c) => c.money)).toFixed(0)}`;
+  };
+  const careful = crossings.filter((c) => !c.careless);
+  const careless = crossings.filter((c) => c.careless);
+  out.push(`  stakes (F.5):      careful captain ${stakes(careful)} (target: 70 to 90% reach the drop)`);
+  out.push(`                     careless captain ${stakes(careless)}`);
+  const notices = {};
+  for (const c of crossings) for (const [id, n] of Object.entries(c.stakes.notices)) notices[id] = (notices[id] ?? 0) + n;
+  const comeBack = ['airplant.choking', 'galley.raided', 'checkpoint.head-count', 'mess.grudge', 'hold.rations', 'sensors.jumpy', 'brig.hammering'];
+  const metBack = Object.fromEntries(comeBack.map((id) => [id, crossings.reduce((sum, c) => sum + (c.met[id] ?? 0), 0)]));
+  out.push(`  came back:         situations that follow a choice ${Object.entries(metBack).map(([id, n]) => `${id} ${n}`).join(', ')}; port notices ${Object.entries(notices).map(([id, n]) => `${id} ${n}`).join(', ') || 'none'}`);
+  out.push(`  losses:            ${crossings.reduce((sum, c) => sum + c.stakes.spoiled, 0)} contract crates spoiled (${pct(crossings.filter((c) => c.stakes.spoiled > 0).length, crossings.length)} of crossings); a posted hand too hurt to stand their station ${(mean(crossings.map((c) => c.stakes.injuredSeconds)) / 60).toFixed(1)} min a crossing; hull left at the end ${mean(careful.map((c) => c.hullLeft)).toFixed(1)} careful, ${mean(careless.map((c) => c.hullLeft)).toFixed(1)} careless`);
   out.push(`  crew lost:         ${mean(crossings.map((c) => c.dead)).toFixed(2)} a run; by cause ${Object.entries(died).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k} ${n}`).join(', ') || 'none'}`);
   out.push(`  normal speed for:  ${Object.entries(busy).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k} ${pct(n, busyAll)}`).join(', ') || 'nothing'}`);
 }

@@ -144,8 +144,16 @@ export function stationLive(sim, id) {
 /** What a crew member is worth on a station that uses `skill`, tiredness and all. */
 export const crewRating = (member, skill) => (CREW_RATING.base + CREW_RATING.perLevel * Math.max(0, Math.min(5, skillOf(member, skill)))) * tiredness(member);
 
-/** Is this crew member standing ready where they are: ours, awake, in plain sight, hands free, nothing else to do? */
-const ready = (member) => member.alive && (member.owner ?? 'player') === 'player' && !member.path.length && member.task === 'idle' && !member.asleep && !member.hidden && !member.job && !member.carry;
+/**
+ * Below this much health a hand is too badly hurt to work a station (F.5, D-233): the station falls to Margo,
+ * or goes dark, until the medbay has them back over it.
+ */
+export const INJURED = 0.5;
+/** Is this crew member too badly hurt to stand a station? */
+export const injured = (member) => member.alive && member.health < INJURED;
+
+/** Is this crew member standing ready where they are: ours, awake, in plain sight, hands free, nothing else to do, and not too badly hurt? */
+const ready = (member) => member.alive && (member.owner ?? 'player') === 'player' && !member.path.length && member.task === 'idle' && !member.asleep && !member.hidden && !member.job && !member.carry && !injured(member);
 
 /** Who is on a station right now: the crew member posted to it and standing ready in its room, or null. */
 export function operatorOf(sim, id) {

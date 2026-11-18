@@ -1,5 +1,5 @@
 {
-  "note": "Ports (S3.4, D-114; brief §11, §12). A port definition says what a port's services cost, in credits: `fuel` a unit, `flare` a flare for the rack (F.2; sold where fuel is, optional, free if left out), `hull` a point of hull mended, `system` a bar of system damage mended, and `salvage` what the yard pays for a salvage crate that is nobody's contract. `services` lists what it offers (refuel, repair, sell, hire). Every port on the chart uses the first port here until S3.5 names the ports and gives each its own; markets and faction prices arrive in Stage 7.",
+  "note": "Ports (S3.4, D-114; brief §11, §12). A port definition says what a port's services cost, in credits: `fuel` a unit, `flare` a flare for the rack (F.2; sold where fuel is, optional, free if left out), `hull` a point of hull mended, `system` a bar of system damage mended, and `salvage` what the yard pays for a salvage crate that is nobody's contract. `services` lists what it offers (refuel, repair, sell, hire). Every port on the chart uses the first port here until S3.5 names the ports and gives each its own; markets and faction prices arrive in Stage 7. `notices` (F.5, D-230) are what the port takes notice of when we dock: each is given once a run, the first time its `when` holds, and its effects are applied and its text shown on the port screen.",
   "items": [
     {
       "id": "company-dock",
@@ -7,10 +7,97 @@
       "text": "A company dock with a fuel line, a repair gang paid by the hour, a salvage yard that weighs everything twice, and a bar.",
       "fuel": 12,
       "flare": 20,
-      "hull": 10,
+      "hull": 20,
       "system": 30,
       "salvage": 60,
-      "services": ["refuel", "repair", "sell", "hire"]
+      "services": [
+        "refuel",
+        "repair",
+        "sell",
+        "hire"
+      ],
+      "notices": [
+        {
+          "id": "receivers-bounty",
+          "when": {
+            "fact": "flag",
+            "name": "stowaway_brig"
+          },
+          "text": "A Receivers clerk is waiting at the foot of the gangway before the clamps are on. She has a list, and the boy in the brig is on it. She pays 150 credits for him, in cash, and two officers walk him down the gangway without his blanket.",
+          "effects": [
+            {
+              "do": "money",
+              "add": 150
+            },
+            {
+              "do": "reputation",
+              "faction": "receivers",
+              "add": 1
+            },
+            {
+              "do": "trust",
+              "add": -3
+            },
+            {
+              "do": "flag",
+              "name": "stowaway_brig",
+              "value": 0
+            }
+          ]
+        },
+        {
+          "id": "stowaway-ashore",
+          "when": {
+            "fact": "flag",
+            "name": "stowaway_aboard"
+          },
+          "text": "The boy from the hold goes down the gangway with the crowd off the shift change and is gone before anyone can say goodbye. There are twenty credits on the galley table, folded small, which is probably everything he had.",
+          "effects": [
+            {
+              "do": "money",
+              "add": 20
+            },
+            {
+              "do": "flag",
+              "name": "stowaway_aboard",
+              "value": 0
+            }
+          ]
+        },
+        {
+          "id": "salvage-office-log",
+          "when": {
+            "fact": "flag",
+            "name": "heard_the_log"
+          },
+          "text": "The salvage office has heard there is a dead freighter out on the lanes, and that we were aboard her. They pay 60 credits for her position and the manifest number off her log, and do not say what they want them for.",
+          "effects": [
+            {
+              "do": "money",
+              "add": 60
+            }
+          ]
+        },
+        {
+          "id": "dock-gang-wedge",
+          "when": {
+            "fact": "flag",
+            "name": "hold_wedged"
+          },
+          "text": "The dock gang will not touch a hold with a load wedged on ration crates. Lashing it properly costs 40 credits and an argument.",
+          "effects": [
+            {
+              "do": "money",
+              "add": -40
+            },
+            {
+              "do": "flag",
+              "name": "hold_wedged",
+              "value": 0
+            }
+          ]
+        }
+      ]
     }
   ]
 }

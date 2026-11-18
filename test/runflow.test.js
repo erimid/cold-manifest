@@ -101,7 +101,7 @@ test('the port screen offers every service with its price or the reason it canno
   assert.deepEqual(Object.keys(by), ['refuel', 'flares', 'repair-hull', 'repair-systems', 'sell-salvage', 'sell-contract', 'abandon']);
   assert.equal(by.refuel.why, null);
   assert.match(by.refuel.detail, /6 units, 72 credits/);
-  assert.match(by['repair-hull'].detail, /3 points, 30 credits/);
+  assert.match(by['repair-hull'].detail, /3 points, 60 credits/);
   assert.match(by['repair-systems'].why, /nothing aboard is damaged/);
   assert.match(by['sell-salvage'].why, /no salvage/);
   assert.match(by['sell-contract'].detail, /4 crates for 640\. The contract fails/);

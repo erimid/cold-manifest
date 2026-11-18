@@ -149,7 +149,7 @@ export function createShipView({ canvas, root, input, sim, clock, tempo = null, 
       const crate = sim.state.crates[target.id];
       if (!crate) return null;
       if (crate.kind === 'ammo') return `${crate.label}: ${crate.rounds} rounds for the slug thrower. Tap it to load the gun.`;
-      return `${crate.label}${crate.contract ? ' (contract cargo)' : ''}. ${crate.sealed ? 'Under a company seal.' : crate.contents ?? 'Opened.'}`;
+      return `${crate.label}${crate.contract ? ' (contract cargo)' : ''}. ${crate.spoiled ? 'Spoiled.' : crate.sealed ? 'Under a company seal.' : crate.contents ?? 'Opened.'}`;
     }
     if (target?.kind === 'crew') {
       const { member, ship } = findCrew(sim, target.id);
@@ -1282,7 +1282,7 @@ export function createShipView({ canvas, root, input, sim, clock, tempo = null, 
       }
       const carrier = crate.by ? findCrew(sim, crate.by)?.member : null;
       setText(panel.stats.where.value, carrier ? `${carrier.name}'s arms` : `${layout.room(crate.room).name}${crate.hidden ? ', under the deck plates' : ''}`);
-      setText(panel.stats.contents.value, crate.kind === 'ammo' ? `${crate.rounds} rounds` : crate.sealed ? 'sealed' : (crate.contents ?? 'opened'));
+      setText(panel.stats.contents.value, crate.kind === 'ammo' ? `${crate.rounds} rounds` : crate.spoiled ? 'spoiled' : crate.sealed ? 'sealed' : (crate.contents ?? 'opened'));
       panel.open.disabled = !crate.sealed;
       setText(panel.open, crate.sealed ? 'Open' : 'Opened');
       if (panel.stash) {
@@ -1300,6 +1300,7 @@ export function createShipView({ canvas, root, input, sim, clock, tempo = null, 
       else if (!note && worker) note = `${worker.name}: ${describeJob(sim, worker).toLowerCase()}.`;
       else if (!note && crate.hidden) note = 'Stashed under the deck plates. A careful search can still turn it up.';
       else if (!note && crate.sealed) note = crate.contract ? 'Contract cargo. The client will see a broken seal, and pay less for it.' : 'Breaking a company seal gets logged.';
+      else if (!note && crate.contract && crate.spoiled) note = 'Spoiled. The drop will pay nothing for it.';
       else if (!note && crate.contract) note = 'Contract cargo: it is what the drop pays for.';
       setText(panel.note, queuedFor('crate', panel.id) ? 'Order queued' : note);
       return;

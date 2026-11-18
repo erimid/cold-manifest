@@ -156,7 +156,8 @@ export function contractLine(sim) {
   if (contract.status === 'failed') return `${name}: failed, ${FAILURES[contract.reason] ?? contract.reason}`;
   const aboard = contractCrates(sim).length;
   if (contract.claim && !contract.claim.done) return `${name}: the claim at ${nodeOf(sim.state.run.map, contract.claim.node)?.name ?? '?'} is still to be worked on the way`;
-  return `${name}: ${aboard} of ${contract.expected} crates aboard`;
+  const spoiled = contractCrates(sim).filter((crate) => crate.spoiled).length;
+  return `${name}: ${aboard} of ${contract.expected} crates aboard${spoiled ? `, ${spoiled} spoiled` : ''}`;
 }
 
 /**
@@ -203,5 +204,7 @@ export function portView(sim) {
     ['Hull', `${sim.state.hull.points} of ${sim.state.hull.max}`],
     ['Contract', contractLine(sim)],
   ];
-  return { name: node.name, text: isDrop ? 'The consignee is waiting at the dock.' : port.text, isDrop, facts, services, deliver, canRetire: !deliver || Boolean(deliver.why) };
+  // What the port has taken notice of since we docked (F.5): a bounty paid, a fine, a word at the gangway.
+  const notes = (run.portNotes ?? []).map((note) => note.text);
+  return { name: node.name, text: isDrop ? 'The consignee is waiting at the dock.' : port.text, notes, isDrop, facts, services, deliver, canRetire: !deliver || Boolean(deliver.why) };
 }
