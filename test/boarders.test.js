@@ -231,6 +231,7 @@ test('raid foiled: vent the room they come through and, with no suits, they fall
   const sim = newSim('raid-vent');
   const before = Object.keys(sim.state.crates).length;
   board(sim, 'raider-skiff', { at: 'quarters' });
+  sim.state.boarding.suited = false; // raiders come suited by chance (F.8): this lot did not
   walk(sim, 'okoro', 'medbay'); // the medic was in quarters
   go(sim, { type: 'door.set', door: 'd_medbay_quarters', state: 'closed' });
   go(sim, { type: 'room.vent', room: 'quarters', open: true });

@@ -525,6 +525,10 @@ function playScenario(seed, { incoming = false } = {}) {
 }
 
 const CROSSING_MINUTES = 150;
+/** Whether the careful crossing bot hides its crew from a hostile party (F.8); HIDE=0 turns it off for tuning. */
+const HIDE_FROM_RAIDS = process.env.HIDE !== '0';
+/** Whether the careful crossing bot vents the lock for a hostile party it cannot pay (F.8); VENT=0 turns it off for tuning. */
+const VENT_RAIDS = process.env.VENT !== '0';
 /** Game minutes the reactor may lie dead before the crossing bot calls the ship adrift and lost (F.7). */
 const ADRIFT_MINUTES = 60;
 /**
@@ -769,6 +773,7 @@ function playCrossing(seed, index, force = {}) {
   let crewDead = false;
   let settled = false;
   let deadFor = 0;
+  let vented = [];
   // The tempo a player would get (H.8): every tick costs a tick of real time at normal speed, less in fast time.
   const tempo = createTempo();
   let rate = 1;
@@ -803,7 +808,25 @@ function playCrossing(seed, index, force = {}) {
       // scope is clear again. Something closing: the guns and the shields stood to as well.
       const hunted = live.some((contact) => contact.state !== 'unseen' || contact.aware > 0);
       // Once a party is at the lock there is nothing left to hide from, and a fight in the dark goes to whoever brought lamps (F.5).
-      if (sim.state.boarding && !careless) give({ type: 'lights.all', on: true });
+      // A hostile party aboard (F.8): a careful captain hides the crew in the dark rather than leave them to be met
+      // one at a time, and brings them out once the party has gone. A careless one leaves them where they are.
+      const raided = sim.state.boarding?.phase === 'aboard' && sim.state.boarding.hostile;
+      if (raided && !careless && HIDE_FROM_RAIDS) {
+        give({ type: 'lights.all', on: false });
+        for (const { member } of ourCrew(sim)) {
+          if (!member.alive || member.hidden || member.path.length || member.task === 'fighting') continue;
+          if (hidingSpot(sim, member)) give({ type: 'crew.hide', crew: member.id, on: true });
+          else {
+            const room = ship.rooms.find((item) => item.hide && item.id !== sim.state.boarding.dock && lockersFree(sim, item.id) > 0 && !Object.values(sim.state.crew).some((other) => other !== member && other.goal === item.id));
+            if (room && member.goal !== room.id) give({ type: 'crew.move', crew: member.id, room: room.id });
+          }
+        }
+      } else if (sim.state.boarding && !careless) give({ type: 'lights.all', on: true });
+      if (!sim.state.boarding) for (const { member } of ourCrew(sim)) if (member.alive && member.hidden) give({ type: 'crew.hide', crew: member.id, on: false });
+      if (!sim.state.boarding && vented.length) {
+        for (const room of vented) give({ type: 'room.vent', room, open: false });
+        vented = [];
+      }
       else if (hunted && !careless) give({ type: 'lights.all', on: false });
       else if (!live.length && sim.state.tick % (10 * TICK_RATE) === 0) give({ type: 'lights.all', on: true });
       if (threat) {
@@ -855,9 +878,21 @@ function playCrossing(seed, index, force = {}) {
         if (contract.claim && view.id === contract.claim.event && pick === 'leave') tally.claimLeft = true;
       }
     } else if (sim.state.boarding?.phase === 'demand') {
-      // A party at the lock (H.2): pay if the money allows, otherwise let them get on with it.
+      // A party at the lock (H.2): pay if the money allows, otherwise let them get on with it. A careful captain
+      // with a hostile party she cannot pay off (F.8) clears the lock and the rooms beside it, vents them, and
+      // only then opens up: what comes through meets no air (the boarding bot's best answer, H.2).
+      const boarding = sim.state.boarding;
       if (!whyNoBribe(sim)) give({ type: 'boarding.bribe' });
-      else give({ type: 'boarding.admit' });
+      else if (!careless && boarding.hostile && !boarding.suited && VENT_RAIDS) {
+        const near = [boarding.dock, ...sim.layout.exits(boarding.dock).filter((exit) => exit.to !== 'space' && sim.layout.room(exit.to).kind !== 'lift').map((exit) => exit.to)];
+        const safe = ship.rooms.find((room) => !near.includes(room.id) && room.kind !== 'lift' && room.kind !== 'corridor' && room.kind !== 'helm')?.id;
+        const hands = ourCrew(sim).map(({ member }) => member).filter((member) => member.alive);
+        for (const member of hands) if (near.includes(member.room) && member.goal !== safe) give({ type: 'crew.move', crew: member.id, room: safe });
+        if (!hands.some((member) => near.includes(member.room) || (member.goal && near.includes(member.goal)))) {
+          for (const room of near) if (!vented.includes(room) && give({ type: 'room.vent', room, open: true })) vented.push(room);
+          give({ type: 'boarding.admit' });
+        }
+      } else give({ type: 'boarding.admit' });
     } else if (!run.crossing && run.at === run.map.delivery) {
       // The drop: hand over whatever is left of the cargo, if there is a contract left to hand over.
       if (!sim.whyNot({ type: 'contract.deliver' })) give({ type: 'contract.deliver' });
@@ -1261,7 +1296,7 @@ const crossings = [];
 // Staffing matters (F.7): the same seeds flown twice by a careful captain, once with the crew at their posts and once
 // with every station handed to Margo, so the gap between them is not the luck of the draw.
 const paired = [];
-const PAIRED = Math.min(runs, 40);
+const PAIRED = Math.min(runs, 60);
 const encounters = [];
 const boardings = [];
 for (let i = 1; i <= runs; i++) {
@@ -1329,6 +1364,9 @@ const clearTimes = cleared.map((s) => s.clearSeconds).sort((a, b) => a - b);
 const pct = (n, of) => (of ? `${Math.round((100 * n) / of)}%` : 'n/a');
 
 const out = [];
+/** The fun pass's targets (F.8): each session's done-when, met or not, gathered from the sections below. */
+const scores = [];
+const score = (session, what, value, ok) => scores.push({ session, what, value, ok });
 out.push('Cold Manifest autoplay');
 out.push(`  runs:              ${runs} (seeds ${baseSeed}-1 to ${baseSeed}-${runs}), each played as chaos, as a hazard scenario, under fire, as a sector crossing, as an encounter with every kind of contact and as a boarding by every kind of party, each twice`);
 out.push(`  ship:              ${ship.name}, crew of ${roster.length}, ${lines.length} AI lines`);
@@ -1416,6 +1454,8 @@ out.push(`  the clock:         under way ${pct(time.under, allTime)} of the time
   const idle = crossings.reduce((n, c) => n + c.idle, 0);
   const spans = crossings.reduce((n, c) => n + c.spans, 0);
   out.push(`  pace (F.3):        a crossing port to port takes ${median(legs).toFixed(1)} min by the running clock (median of ${legs.length}; ${legs.length ? legs[Math.floor(legs.length / 10)].toFixed(1) : '-'} to ${legs.length ? legs[Math.floor((legs.length * 9) / 10)].toFixed(1) : '-'} for the middle 80%); normal speed with nothing to answer ${pct(idle, under)} of it (target under 10%); something to answer every ${(under / Math.max(1, spans)).toFixed(0)} s`);
+  score('F.3', 'a crossing port to port, median 3 to 4 min', `${median(legs).toFixed(1)} min`, median(legs) >= 3 && median(legs) <= 4);
+  score('F.3', 'normal speed with nothing to answer under 10%', pct(idle, under), idle / Math.max(1, under) < 0.1);
   // Trouble at the same time (F.4): how often a situation and a hunting ship overlap, and what each cost the other.
   const both = crossings.filter((c) => c.together.ticks > 0).length;
   const togetherTicks = crossings.reduce((n, c) => n + c.together.ticks, 0);
@@ -1431,6 +1471,7 @@ out.push(`  the clock:         under way ${pct(time.under, allTime)} of the time
   const huntedSits = sits.filter((one) => one.hunted);
   const calmSits = sits.filter((one) => !one.hunted);
   out.push(`  together (F.4):    a situation waiting while a ship hunted us in ${both} of ${crossings.length} crossings (${pct(both, crossings.length)}, target: most), ${(togetherTicks / TICK_RATE / Math.max(1, both)).toFixed(0)} s of ship time a crossing that had it, ${pct(loudTicks, togetherTicks)} of it with the trouble giving us away; set off by a ping ${jolts.ping ?? 0}, by a warning shot ${jolts.shot ?? 0}`);
+  score('F.4', 'a situation and a hunting ship together in most crossings', pct(both, crossings.length), both > crossings.length / 2);
   out.push(`  what it cost:      ships that hunted us while trouble aboard was loud docked with us ${pct(caught(loudMet), loudMet.length)} of ${loudMet.length}, the rest ${pct(caught(quietMet), quietMet.length)} of ${quietMet.length}; situations met while hunted lapsed ${pct(lapsedOf(huntedSits), huntedSits.length)} of ${huntedSits.length}, the rest ${pct(lapsedOf(calmSits), calmSits.length)} of ${calmSits.length}`);
   // Choices come back (F.5): the careful captain against the careless one, and what came back to bite.
   const stakes = (of) => {
@@ -1445,6 +1486,13 @@ out.push(`  the clock:         under way ${pct(time.under, allTime)} of the time
   const careless = crossings.filter((c) => c.careless);
   out.push(`  stakes (F.5):      careful captain ${stakes(careful)} (target: 70 to 90% reach the drop)`);
   out.push(`                     careless captain ${stakes(careless)}`);
+  {
+    const reach = (of) => of.filter((c) => c.delivered).length / Math.max(1, of.length);
+    const good = (of) => of.filter((c) => c.status === 'delivered' && c.earned >= c.pay / 2).length / Math.max(1, of.length);
+    score('F.5', 'the careful captain reaches the drop 70 to 90%', pct(careful.filter((c) => c.delivered).length, careful.length), reach(careful) >= 0.7 && reach(careful) <= 0.9);
+    score('F.5', 'a careless captain clearly worse (10 points at reaching the drop and at coming good)', `${Math.round(100 * (reach(careful) - reach(careless)))} and ${Math.round(100 * (good(careful) - good(careless)))} points`, reach(careful) - reach(careless) >= 0.1 && good(careful) - good(careless) >= 0.1);
+    score('F.5', 'crew lost in some runs, and careful crews seldom all lost (under 10%)', `lost in ${pct(crossings.filter((c) => c.dead > 0).length, crossings.length)}, careful crews all dead ${pct(careful.filter((c) => c.crewDead).length, careful.length)}`, crossings.some((c) => c.dead > 0) && careful.filter((c) => c.crewDead).length < careful.length / 10);
+  }
   const notices = {};
   for (const c of crossings) for (const [id, n] of Object.entries(c.stakes.notices)) notices[id] = (notices[id] ?? 0) + n;
   const comeBack = ['airplant.choking', 'galley.raided', 'checkpoint.head-count', 'mess.grudge', 'hold.rations', 'sensors.jumpy', 'brig.hammering'];
@@ -1464,6 +1512,9 @@ out.push(`  the clock:         under way ${pct(time.under, allTime)} of the time
   const sawIt = crossings.filter((c) => c.remember.named > 0 || (c.remember.refused.sour ?? 0) + (c.remember.refused.feud ?? 0) > 0).length;
   out.push(`  remember (F.6):    what the crew think moved ${f6sum('moves')} times (${(f6sum('moves') / Math.max(1, crossings.length)).toFixed(1)} a crossing): of the captain down ${f6sum('bad')} and up ${f6sum('good')}, of each other ${f6sum('between')}; at the end of a crossing the living crew were ${f6listed(f6merged('end'))}`);
   out.push(`  seen again:        a choice was seen in a later answer or refusal in ${sawIt} of ${crossings.length} crossings (${pct(sawIt, crossings.length)}); orders answered shortly ${f6answers.sour ?? 0}, gladly ${f6answers.warm ?? 0}, naming the memory ${f6sum('named')}; orders refused over the captain ${refusedBy.sour ?? 0}, over a crewmate ${refusedBy.feud ?? 0} (all refusals: ${f6listed(refusedBy)})`);
+  const perCrossingSour = (who) => mean(crossings.filter((c) => c.careless === (who === 'careless')).map((c) => c.remember.refused.sour ?? 0));
+  score('F.6', 'a choice seen again in a later answer', `${sawIt} crossings`, sawIt > 0);
+  score('F.6', 'a soured crew refuses a careless captain more than a careful one', `${perCrossingSour('careless').toFixed(2)} against ${perCrossingSour('careful').toFixed(2)} a crossing`, perCrossingSour('careless') > perCrossingSour('careful'));
   out.push(`  which choices:     ${f6listed(f6merged('seen'))}`);
   const shown = crossings.find((c) => c.remember.example);
   const refusedOnce = crossings.find((c) => c.remember.refusal);
@@ -1540,7 +1591,9 @@ for (const tactic of TACTICS) {
   const met = (ok) => (ok ? 'met' : 'NOT MET');
   out.push(`Being hunted (F.1): how long a contact lasts, from turning up to its ending (target: median under 90 s, longest under ${CONTACT_MOST_SECONDS} s)`);
   out.push(`  one at a time:     median ${median(alone).toFixed(0)} s, mean ${mean(alone).toFixed(0)} s, longest ${Math.max(0, ...alone).toFixed(0)} s over ${alone.length} encounters at normal speed: ${alone.length ? met(median(alone) < 90 && Math.max(...alone) < CONTACT_MOST_SECONDS) : 'none played'}`);
+  if (alone.length) score('F.1', 'a contact alone: median under 90 s, longest under 3 min', `${median(alone).toFixed(0)} s, ${Math.max(...alone).toFixed(0)} s`, median(alone) < 90 && Math.max(...alone) < CONTACT_MOST_SECONDS);
   out.push(`  on the crossings:  median ${median(lanes).toFixed(0)} s, mean ${mean(lanes).toFixed(0)} s, longest ${Math.max(0, ...lanes).toFixed(0)} s over ${lanes.length} contacts by the bot's clock (fast time while nothing has noticed us): ${lanes.length ? met(median(lanes) < 90 && Math.max(...lanes) < CONTACT_MOST_SECONDS) : 'none met'}`);
+  if (lanes.length) score('F.1', 'a contact on the crossings: median under 90 s, longest under 3 min', `${median(lanes).toFixed(0)} s, ${Math.max(...lanes).toFixed(0)} s`, median(lanes) < 90 && Math.max(...lanes) < CONTACT_MOST_SECONDS);
   const stages = {};
   for (const e of encounters) for (const stage of new Set(e.stages)) stages[stage] = (stages[stage] ?? 0) + 1;
   out.push(`  its awareness:     of ${encounters.length} encounters, ${Object.keys(STAGES_OF_AWARENESS).filter((k) => k !== 'passing').map((k) => `${STAGES_OF_AWARENESS[k].toLowerCase()} in ${stages[k] ?? 0}`).join(', ')}; ${encounters.reduce((n, e) => n + e.pings, 0)} pings`);
@@ -1591,7 +1644,8 @@ out.push(`Stations and shifts (H.4): two watches on the crossings, ${POSTS.lengt
     const good = share(crew, came) - share(hers, came);
     const better = paired.filter((pair) => Number(pair.crew.delivered) + Number(pair.crew.status === 'delivered' && pair.crew.earned >= pair.crew.pay / 2) > Number(pair.margo.delivered) + Number(pair.margo.status === 'delivered' && pair.margo.earned >= pair.margo.pay / 2)).length;
     const worse = paired.filter((pair) => Number(pair.crew.delivered) + Number(pair.crew.status === 'delivered' && pair.crew.earned >= pair.crew.pay / 2) < Number(pair.margo.delivered) + Number(pair.margo.status === 'delivered' && pair.margo.earned >= pair.margo.pay / 2)).length;
-    out.push(`  the gap:           crew at posts over all to Margo: reached the drop ${drop >= 0 ? '+' : ''}${drop.toFixed(0)} points, came good ${good >= 0 ? '+' : ''}${good.toFixed(0)} points; the crew did better on ${better} seeds and Margo on ${worse}: ${drop >= STAFF_GAP && good >= STAFF_GAP ? 'met' : 'NOT MET'} (target: both at least ${STAFF_GAP} points)`);
+    out.push(`  the gap:           crew at posts over all to Margo: reached the drop ${drop >= 0 ? '+' : ''}${drop.toFixed(0)} points, came good ${good >= 0 ? '+' : ''}${good.toFixed(0)} points; the crew did better on ${better} seeds and Margo on ${worse}: ${good >= STAFF_GAP ? 'met' : 'NOT MET'} (target: came good at least ${STAFF_GAP} points lower with Margo)`);
+    score('F.7', 'all to Margo delivers clearly less than crew at posts (paired seeds: came good 10 points lower)', `${good.toFixed(0)} points (reaching the drop ${drop.toFixed(0)})`, good >= STAFF_GAP);
   }
   const sum = crossings.reduce((acc, c) => {
     for (const key of ['fresh', 'worn', 'few', 'many']) for (const i of [0, 1]) acc[key][i] += c.needs[key][i];
@@ -1628,6 +1682,7 @@ out.push(`Stations and shifts (H.4): two watches on the crossings, ${POSTS.lengt
     out.push(`  cost of ${t.padEnd(10)} drive ${avg('burned').toFixed(0)} s at full push, someone cold ${avg('cold').toFixed(0)} s, hull ${mean(of.map((e) => ship.hullPoints - e.hull)).toFixed(1)}, ${avg('spent').toFixed(0)} credits, standing ${avg('standing').toFixed(1)} (and ${of.reduce((n, e) => n + e.marks, 0)} lies to be found out), ${avg('flares').toFixed(1)} flares, ${avg('crates').toFixed(1)} crates, ${avg('shots').toFixed(1)} rounds`);
   }
   out.push(`  dominance:         ${tooGood.length ? `NOT MET: ${tooGood.join(', ')} get away from more than ${Math.round(100 * ANSWER_MOST)}%` : 'met'}; best against a kind: ${TACTICS.filter((t) => t !== 'nothing').map((t) => `${t} ${bestOf[t]?.join('/') ?? 'NONE'}`).join(', ')}${neverBest.length ? ` (NOT MET: ${neverBest.join(', ')})` : ''}`);
+  if (encounters.length) score('F.2', `no answer gets away from more than ${Math.round(100 * ANSWER_MOST)}%, each best against a kind`, tooGood.length || neverBest.length ? [...tooGood, ...neverBest].join(', ') : 'all answers', !tooGood.length && !neverBest.length);
 }
 out.push(`Guns as deterrents (H.3): the same encounters, by what was fired and what it did`);
 for (const def of encounterDefs) {
@@ -1661,6 +1716,15 @@ for (const answer of ANSWERS) {
 const crossBoard = {};
 for (const c of crossings) for (const [k, n] of Object.entries(c.boardings)) crossBoard[k] = (crossBoard[k] ?? 0) + n;
 out.push(`  on the crossings:  ${Object.entries(crossBoard).map(([k, n]) => `${BOARD_OUTCOMES[k].toLowerCase()} ${n}`).join(', ') || 'no boardings'}`);
+if (scores.length) {
+  // The fun pass (F.8): every session's target in one place.
+  const order = ['F.1', 'F.2', 'F.3', 'F.4', 'F.5', 'F.6', 'F.7'];
+  // With no crossings played (--only), only what the encounters measure is scored.
+  if (!crossings.length) scores.splice(0, scores.length, ...scores.filter((one) => one.session === 'F.2' || one.what.startsWith('a contact alone')));
+  scores.sort((a, b) => order.indexOf(a.session) - order.indexOf(b.session));
+  out.push(`Fun pass (F.8): every target, ${scores.filter((one) => one.ok).length} of ${scores.length} met`);
+  for (const one of scores) out.push(`  ${one.session}  ${(one.ok ? 'met    ' : 'NOT MET').padEnd(8)}${one.what}: ${one.value}`);
+}
 out.push('');
 out.push(`  wall time:         ${seconds.toFixed(2)}s`);
 const verdict = failures.length

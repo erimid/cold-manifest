@@ -86,7 +86,9 @@ export function validateParty(party, wants) {
   if (party.names !== undefined && !(Array.isArray(party.names) && party.names.every((n) => typeof n === 'string' && n.trim()))) problems.push('party.names must be a list of names');
   if (party.skills !== undefined && !(isObject(party.skills) && Object.values(party.skills).every((v) => Number.isInteger(v) && v >= 0 && v <= 5))) problems.push('party.skills must be { skill: 0 to 5 }');
   if (party.arms !== undefined && !(typeof party.arms === 'number' && party.arms >= 0.5 && party.arms <= 4)) problems.push('party.arms must be a number, 0.5 to 4: how much harder than one of ours they hit, for what they carry (H.8)');
-  for (const key of ['suits', 'hostile']) if (party[key] !== undefined && typeof party[key] !== 'boolean') problems.push(`party.${key} must be true or false`);
+  if (party.hostile !== undefined && typeof party.hostile !== 'boolean') problems.push('party.hostile must be true or false');
+  // suits: true, false, or the chance a party comes through suited (F.8), rolled at the lock and shown there.
+  if (party.suits !== undefined && typeof party.suits !== 'boolean' && !(typeof party.suits === 'number' && party.suits >= 0 && party.suits <= 1)) problems.push('party.suits must be true, false or a chance from 0 to 1');
   if (typeof party.demand !== 'string' || !party.demand.trim()) problems.push('party.demand must be what they say at the lock');
   if (party.bribe !== undefined && !(isObject(party.bribe) && Number.isInteger(party.bribe.cost) && party.bribe.cost > 0 && party.bribe.chance >= 0 && party.bribe.chance <= 1)) problems.push('party.bribe must be { cost, chance }: credits, and the chance they take it and go');
   if (!(typeof party.stay === 'number' && party.stay > 0)) problems.push('party.stay must be the seconds they will look before they give up');
@@ -154,6 +156,8 @@ export function startBoarding(sim, def, { contact = null, at = null, size = null
     deadline: null, // set when they come aboard
     leaveEnds: null, // set when they start to go
     hostile: party.hostile ?? (def.wants === 'cargo' || def.wants === 'crew'),
+    // In suits (F.8): a vented lock will not stop them. A chance is rolled here, where the captain can see it.
+    suited: typeof party.suits === 'number' ? rng.chance(party.suits) : party.suits === true,
     party: [], // ids of the people aboard, once they are
     target: def.wants === 'crew' && ours.length ? rng.pick(ours).id : null,
     strip: null,
@@ -169,7 +173,7 @@ export function startBoarding(sim, def, { contact = null, at = null, size = null
   }
   sim.state.boarding = boarding;
   sim.state.boardings = { next: boarding.id + 1, record: sim.state.boardings?.record ?? [] };
-  sim.events.emit('boarding.demand', { boarding: boarding.id, encounter: def.id, name: def.name, wants: def.wants, room: boarding.dock, text: words(sim, party.demand), target: boarding.target, strip: boarding.strip, bribe: party.bribe?.cost ?? null, tick: sim.state.tick });
+  sim.events.emit('boarding.demand', { boarding: boarding.id, encounter: def.id, name: def.name, wants: def.wants, room: boarding.dock, text: words(sim, party.demand), target: boarding.target, strip: boarding.strip, bribe: party.bribe?.cost ?? null, suited: boarding.suited, tick: sim.state.tick });
   return boarding;
 }
 
@@ -185,7 +189,7 @@ function comeAboard(sim) {
     const name = party.names?.[n] ?? `${def.name} crew ${n + 1}`;
     const member = newCrewMember(sim.layout, { id, name, skills: party.skills ?? {} }, boarding.dock, 10 + n, 'enemy');
     Object.assign(member, {
-      suit: party.suits === true,
+      suit: boarding.suited ?? party.suits === true,
       party: boarding.id,
       forces: true, // they cut what is locked against them (crew.js)
       agent: { aim: null, search: null, grab: 0, strip: null, spare: boarding.target, stun: def.wants === 'crew', arms: party.arms ?? 1, flee: false, lift: 0, lifting: null },
