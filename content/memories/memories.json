@@ -1,5 +1,5 @@
 {
-  "note": "What the crew remember (S2.10, moved into content in S3.3; D-102, D-110). Each kind says how long it lasts in seconds, how it reads in the crew panel, and which bus events write it. See src/narrative/rules.js for the fields. S4.3 adds weights, decay and opinions.",
+  "note": "What the crew remember (S2.10, moved into content in S3.3; D-102, D-110). Each kind says how long it lasts in seconds, how it reads in the crew panel, and which bus events write it. See src/narrative/rules.js for the fields. F.6 (D-235) gave a kind weight: `captain` and `toward` move what they think of the captain and of the crewmate it is about. S4.3 adds decay and the rest.",
   "items": [
     {
       "id": "death",
@@ -45,6 +45,7 @@
     {
       "id": "override",
       "seconds": 420,
+      "captain": -1,
       "text": "the captain overriding Margo in {room}",
       "bare": "the captain overriding Margo",
       "shadow": "never",
@@ -52,6 +53,57 @@
         { "event": "captain.overrode", "to": "everyone", "names": true, "when": { "fact": "event", "field": "grave", "eq": true } },
         { "event": "captain.overrode", "to": "named", "names": true, "when": { "fact": "event", "field": "grave", "eq": false } }
       ]
+    },
+    {
+      "id": "kindness",
+      "note": "F.6: written by a choice in a situation (the `remember` effect, usually with its own words). `captain` is how far it moves what they think of the captain.",
+      "seconds": 1800,
+      "captain": 2,
+      "text": "a kindness from the captain",
+      "shadow": "never"
+    },
+    {
+      "id": "slight",
+      "seconds": 1800,
+      "captain": -2,
+      "text": "a slight from the captain",
+      "shadow": "never"
+    },
+    {
+      "id": "wrong",
+      "seconds": 2400,
+      "captain": -4,
+      "text": "a wrong the captain did",
+      "shadow": "never"
+    },
+    {
+      "id": "quarrel",
+      "note": "F.6: `toward` is how far it moves what they think of the crewmate it is about.",
+      "seconds": 1800,
+      "toward": -4,
+      "text": "the fight with {who}",
+      "shadow": "never"
+    },
+    {
+      "id": "spat",
+      "seconds": 1200,
+      "toward": -2,
+      "text": "words with {who}",
+      "shadow": "never"
+    },
+    {
+      "id": "amends",
+      "seconds": 1200,
+      "toward": 3,
+      "text": "making it up with {who}",
+      "shadow": "never"
+    },
+    {
+      "id": "help",
+      "seconds": 1800,
+      "toward": 2,
+      "text": "{who} seeing them right",
+      "shadow": "never"
     }
   ]
 }

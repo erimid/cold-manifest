@@ -1831,6 +1831,38 @@ async function loopTests(browser) {
     await page.waitForSelector(`#sit-${n}`, { state: 'detached', timeout: 3000 });
     assert.equal(await state(), 'ship', 'none of it left the ship view');
 
+    // Crew remember (F.6): told to keep their fear down, they hold it against the captain. The card says whose
+    // head it went into, the crew panel shows what they think and why, and their next answer names it.
+    await game(page, () => window.coldManifest.sim.enqueue({ type: 'debug.event', event: 'quarters.nerves' }));
+    await page.waitForSelector('.sitcard[data-event="quarters.nerves"]', { timeout: 3000 });
+    const fear = Number((await page.getAttribute('.sitcard[data-event="quarters.nerves"]', 'id')).replace('sit-', ''));
+    const shaky = await game(page, (num) => {
+      const { sim } = window.coldManifest;
+      const one = sim.state.run.events.aboard.find((item) => item.n === num);
+      const them = sim.state.crew[one.cast.shaky];
+      // Somebody else looks in, unless somebody already has.
+      const hand = Object.values(sim.state.crew).find((member) => member.alive && member.owner === 'player' && member.id !== them.id && member.id !== 'ilse');
+      if (!one.by) sim.enqueue({ type: 'crew.move', crew: hand.id, room: one.room, ship: 'us' });
+      return { id: them.id, name: them.name, room: one.room };
+    }, fear);
+    await page.waitForFunction((num) => Boolean(window.coldManifest.sim.state.run.events.aboard.find((item) => item.n === num)?.by), fear, { timeout: 45000 });
+    if (!(await page.isVisible(`#sit-choice-${fear}-order`))) await page.tap(`#sit-chip-${fear}`);
+    await page.waitForSelector(`#sit-choice-${fear}-order`, { timeout: 3000 });
+    await page.tap(`#sit-choice-${fear}-order`);
+    await page.waitForSelector(`#sit-remembered-${fear}`, { timeout: 3000 });
+    assert.equal(await page.textContent(`#sit-remembered-${fear}`), `${shaky.name} will remember this.`);
+    await shot('f6-remembered-ipad');
+    await page.tap(`#sit-dismiss-${fear}`);
+    await page.waitForSelector(`#sit-${fear}`, { state: 'detached', timeout: 3000 });
+    assert.equal(await game(page, (id) => window.coldManifest.sim.state.crew[id].regard.captain, shaky.id), -2);
+    await page.tap(`#crew-${shaky.id}`);
+    await page.waitForFunction(() => /Captain\s*cool/.test(document.querySelector('#status').textContent), null, { timeout: 3000 });
+    assert.match(await page.textContent('#crew-memory'), /Remembers being told to keep the fear down\./);
+    // An ordinary order, and the answer on the intercom is short and says why.
+    await game(page, ({ id, room }) => window.coldManifest.sim.enqueue({ type: 'crew.move', crew: id, room: room === 'cargo' ? 'quarters' : 'cargo', ship: 'us' }), shaky);
+    await page.waitForFunction(() => /being told to keep the fear down/.test(document.querySelector('#intercom-text')?.textContent ?? ''), null, { timeout: 5000 });
+    await shot('f6-answer-ipad');
+
     // A patrol on the radio is a decision on the table: the event view, with the tags, as before.
     const money = await game(page, () => {
       const { sim } = window.coldManifest;

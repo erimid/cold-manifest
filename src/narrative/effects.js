@@ -7,7 +7,7 @@
 //
 // Where an effect wants someone or somewhere it takes an id, a name in reach
 // ("$scout", see conditions.js), or one of the words below:
-//   crew   "all" (everyone of ours aboard), "random" (one of them)
+//   crew   "all" (everyone of ours aboard), "random" (one of them), or { "in": "$room" }: everyone of ours in that room
 //   room   "random" (any room still attached), or { "of": "$scout" }: the room they are in
 //
 // Two effects are hooks for later stages. `scene` and `threat` only leave a note in the run (run.scenes, run.threat) and
@@ -35,6 +35,7 @@ function crewOf(target, ctx) {
   const all = aboard(ctx.sim);
   if (target === 'all') return all;
   if (target === 'random') return all.length ? [rng(ctx).pick(all)] : [];
+  if (isObject(target)) return all.filter((member) => member.room === resolve(target.in, ctx));
   const member = ctx.sim.state.crew[resolve(target, ctx)];
   return member?.alive ? [member] : [];
 }
@@ -51,7 +52,11 @@ function roomOf(target, ctx) {
   return sim.state.rooms[id] && !sim.state.rooms[id].jettisoned ? id : null;
 }
 
-const checkCrewTarget = (value, env, what) => (['all', 'random'].includes(value) ? [] : checkValue(value, 'crew', env, what));
+function checkCrewTarget(value, env, what) {
+  if (['all', 'random'].includes(value)) return [];
+  if (isObject(value)) return Object.keys(value).join() === 'in' ? checkValue(value.in, 'room', env, `${what}.in`) : [`${what} must be someone, "all", "random" or { "in": a room }`];
+  return checkValue(value, 'crew', env, what);
+}
 function checkRoomTarget(value, env, what) {
   if (value === 'random') return [];
   if (isObject(value)) return Object.keys(value).join() === 'of' ? checkValue(value.of, 'crew', env, `${what}.of`) : [`${what} must be a room, "random" or { "of": someone }`];
@@ -157,14 +162,25 @@ export const EFFECTS = Object.freeze({
       for (const member of crewOf(a.crew, ctx)) member.health = Math.min(1, member.health + a.amount);
     },
   },
-  // Put something in someone's head (memory.js). `who` is who it was about, `room` where.
+  // Put something in someone's head (memory.js). `who` is who it was about, `room` where, and `says` the memory
+  // in this choice's own words ("being told to sleep off the cough"): it should read after "Not after" and
+  // "I remember". A memory with weight moves what they think of the captain, or of `who` (F.6), and the card
+  // says who will remember it.
   remember: {
-    args: { crew: checkCrewTarget, memory: typed('memory'), room: checkRoomTarget, who: typed('crew') },
-    optional: ['room', 'who'],
+    args: { crew: checkCrewTarget, memory: typed('memory'), room: checkRoomTarget, who: typed('crew'), says: (value, env, what) => validateText(value, env, what) },
+    optional: ['room', 'who', 'says'],
     run(sim, a, ctx) {
-      const who = a.who === undefined ? null : sim.state.crew[resolve(a.who, ctx)]?.name ?? null;
+      const about = a.who === undefined ? null : sim.state.crew[resolve(a.who, ctx)] ?? null;
       const room = a.room === undefined ? undefined : roomOf(a.room, ctx);
-      for (const member of crewOf(a.crew, ctx)) remember(sim, member, a.memory, { room: room === undefined ? member.room : room, who });
+      const says = a.says === undefined ? null : fillText(a.says, ctx);
+      const kind = sim.rules?.memory[a.memory];
+      if (!kind) return; // a ship with no rules has a crew who remember nothing
+      for (const member of crewOf(a.crew, ctx)) {
+        if (about && about.id === member.id) continue; // nobody holds a memory about themselves
+        remember(sim, member, a.memory, { room: room === undefined ? member.room : room, who: about?.name ?? null, about: about?.id ?? null, says });
+        const noted = ctx.open?.result;
+        if (noted && (kind?.captain || kind?.toward) && !(noted.remembered ??= []).includes(member.id)) noted.remembered.push(member.id);
+      }
     },
   },
   // A crate set down in the hold (hold.js). A cargo crate is sealed and needs `contents`.

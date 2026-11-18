@@ -179,7 +179,7 @@ test('text is checked against the names in reach', () => {
 
 test('every fact says what it needs and what it gives, and answers on a plain ship without throwing', () => {
   const sim = started();
-  const sample = { faction: 'receivers', room: 'medbay', crew: 'ilse', door: sim.layout.doors[0].id, system: 'sensors', station: 'helm', skill: 'medicine', name: 'x', kind: 'ammo', field: 'type', event: 'none' };
+  const sample = { faction: 'receivers', room: 'medbay', crew: 'ilse', door: sim.layout.doors[0].id, system: 'sensors', station: 'helm', skill: 'medicine', name: 'x', kind: 'ammo', field: 'type', event: 'none', of: 'dace' };
   for (const [id, fact] of Object.entries(FACTS)) {
     assert.ok(['number', 'boolean', 'string', 'any'].includes(fact.value), `${id} says what it gives`);
     const args = Object.fromEntries(Object.keys(fact.args ?? {}).map((name) => [name, sample[name]]));

@@ -27,8 +27,8 @@ test('the rules in content pass their own checks, and cover what S2.10 hard-code
   for (const item of RULES.memories) assert.deepEqual(checkRule('memory', strip(item), REFS), [], item.id);
   for (const item of RULES.refusals) assert.deepEqual(checkRule('refusal', strip(item), REFS), [], item.id);
   for (const item of RULES.risks) assert.deepEqual(checkRule('risk', strip(item), REFS), [], item.id);
-  assert.deepEqual(RULES.memories.map((item) => item.id), ['death', 'burn', 'choke', 'wound', 'scare', 'override']);
-  assert.deepEqual(buildRules(RULES).refusals.map((item) => item.id), ['grave', 'burn', 'choke', 'dark', 'override']);
+  assert.deepEqual(RULES.memories.map((item) => item.id), ['death', 'burn', 'choke', 'wound', 'scare', 'override', 'kindness', 'slight', 'wrong', 'quarrel', 'spat', 'amends', 'help']); // the last seven are F.6's
+  assert.deepEqual(buildRules(RULES).refusals.map((item) => item.id), ['grave', 'burn', 'choke', 'dark', 'override', 'feud', 'sour']);
   assert.deepEqual(buildRules(RULES).risks.map((item) => item.id), ['jettison_crew', 'vent_crew', 'vent_room_crew', 'vent_near', 'air_cut', 'into_fire', 'into_vacuum']);
   for (const item of RULES.risks) assert.ok(COMMAND_TYPES.includes(item.on) && RISK_ROOMS[item.rooms]);
 });

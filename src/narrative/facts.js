@@ -103,6 +103,8 @@ export const FACTS = Object.freeze({
   'crew.suit': { args: { crew: 'crew' }, value: 'boolean', get: (sim, a) => member(sim, a.crew) && Boolean(member(sim, a.crew).suit) },
   'crew.health': { args: { crew: 'crew' }, value: 'number', get: (sim, a) => member(sim, a.crew)?.health },
   'crew.dread': { args: { crew: 'crew' }, value: 'number', get: (sim, a) => member(sim, a.crew)?.dread },
+  /** What they think of the captain, or (`of`) of a crewmate: -10 to 10 (F.6, memory.js). */
+  'crew.regard': { args: { crew: 'crew', of: 'crew' }, optional: ['of'], value: 'number', get: (sim, a) => member(sim, a.crew) && (member(sim, a.crew).regard?.[a.of ?? 'captain'] ?? 0) },
   'crew.room': { args: { crew: 'crew' }, value: 'string', get: (sim, a) => member(sim, a.crew)?.room },
   'crew.skill': { args: { crew: 'crew', skill: 'skill' }, value: 'number', get: (sim, a) => member(sim, a.crew) && (member(sim, a.crew).skills?.[a.skill] ?? 0) },
   /** How many of ours are alive aboard. */

@@ -29,7 +29,7 @@ import { describeTask } from '../sim/crew.js';
 import { chill } from '../sim/cold.js';
 import { BLUFFS, ENDINGS, bluffChance, findContact, scopeView, whyNoHail, whyNoPay } from '../sim/encounters.js';
 import { describeJob, magazineOf, pickHand, roundsInHold } from '../sim/hold.js';
-import { nerveWord, topMemory } from '../sim/memory.js';
+import { feudsOf, nerveWord, regardOf, regardWord, topMemory } from '../sim/memory.js';
 import { OUTPUT, OUTPUT_LEVELS, POWERED, aiCoreStatus, litRooms, outputLimit } from '../sim/power.js';
 import { COVERS, COVER_IDS, MANNERS, MANNER_IDS, MANNER_STATIONS, POSTS, STATIONS, STATION_IDS, holderOf, margoLoad, rating, reactorLoad, roomOfStation, running, stationOfRoom } from '../sim/stations.js';
 import { onWatch, tiredWord, watchLeft, watchName } from '../sim/watches.js';
@@ -1039,7 +1039,7 @@ export function createShipView({ canvas, root, input, sim, clock, tempo = null, 
     panel = null;
     if (selectedCrew) {
       const { member } = findCrew(sim, selectedCrew);
-      const stats = { health: stat('Health'), where: stat('In'), doing: stat('Doing'), skills: stat('Good at'), post: stat('Post'), watch: stat('Watch'), rest: stat('Rest'), suit: stat('Suit'), nerve: stat('Nerve') };
+      const stats = { health: stat('Health'), where: stat('In'), doing: stat('Doing'), skills: stat('Good at'), post: stat('Post'), watch: stat('Watch'), rest: stat('Rest'), suit: stat('Suit'), nerve: stat('Nerve'), regard: stat('Captain') };
       setText(stats.skills.value, skillWords(member) || 'Nothing special');
       const memory = el('span', { class: 'status__hint status__hint--inline', id: 'crew-memory' });
       const suit = button('btn-suit', 'Suit up', () => order({ type: 'crew.suit', crew: member.id, on: !findCrew(sim, member.id).member.suit }));
@@ -1417,7 +1417,11 @@ export function createShipView({ canvas, root, input, sim, clock, tempo = null, 
       setText(panel.stats.nerve.value, member.alive ? nerveWord(member) : 'none');
       panel.stats.nerve.node.classList.toggle('is-alarm', member.alive && member.dread >= 0.66);
       const remembered = member.alive ? topMemory(ship, member) : null;
-      setText(panel.memory, remembered ? `Remembers ${remembered}.` : '');
+      // What they think of the captain, and who they have fallen out with (F.6).
+      setText(panel.stats.regard.value, member.alive && ship === sim ? regardWord(regardOf(member)) : 'none');
+      panel.stats.regard.node.classList.toggle('is-alarm', member.alive && regardWord(regardOf(member)) === 'sour');
+      const feuds = member.alive ? feudsOf(ship, member) : [];
+      setText(panel.memory, [remembered ? `Remembers ${remembered}.` : '', feuds.length ? `Not speaking to ${feuds.join(' or ')}.` : ''].filter(Boolean).join(' '));
       setText(panel.note, queuedFor('crew', panel.id) ? 'Order queued' : refusalText());
       return;
     }

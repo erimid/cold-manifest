@@ -2,7 +2,7 @@
 // and the risks Margo objects to. They are written in the condition language (conditions.js);
 // memory.js and ai/judgement.js only carry them out. DOM-free.
 //
-//   content/memories/   { seconds, text, bare?, phrases?, shadow?, on? }
+//   content/memories/   { seconds, text, bare?, phrases?, shadow?, captain?, toward?, on? }
 //             A kind of memory: how long it lasts, how it reads in the crew panel ("{who} dying
 //             in {room}", or `bare` when there is no room), other ways of putting it that a
 //             refusal's reason can ask for by name ("{memory.shadow}"), whether it counts as a bad
@@ -10,7 +10,9 @@
 //             and which bus events write it: { event, to, when?, names? } where `to` is
 //             "subject" (the crew member the event is about), "everyone" (all of ours aboard)
 //             or "named" (everyone the event lists), `when` sees the event as $event, and
-//             `names: true` records who the event was about.
+//             `names: true` records who the event was about. `captain` and `toward` are its
+//             weight (F.6): how far it moves what they think of the captain, and of the crewmate
+//             it is about, when it is written (-5 to 5).
 //   content/refusals/   { when, reason, order? }
 //             An order to walk into a room that someone will not take. `when` sees $crew and
 //             $room; whatever it remembers with "as" can be named in `reason`.
@@ -85,7 +87,8 @@ export function checkRule(kind, item, refs = {}) {
   };
   if (item.order !== undefined && typeof item.order !== 'number') problems.push('order must be a number');
   if (kind === 'memory') {
-    keys(['seconds', 'text', 'bare', 'phrases', 'shadow', 'on']);
+    keys(['seconds', 'text', 'bare', 'phrases', 'shadow', 'captain', 'toward', 'on']);
+    for (const key of ['captain', 'toward']) if (item[key] !== undefined && !(Number.isInteger(item[key]) && item[key] !== 0 && Math.abs(item[key]) <= 5)) problems.push(`${key} must be a whole number from -5 to 5, not 0: how far the memory moves what they think`);
     if (!(typeof item.seconds === 'number' && item.seconds > 0)) problems.push('seconds must be above 0: how long the memory lasts');
     problems.push(...checkMemoryText(item.text, 'text'));
     if (item.bare !== undefined) problems.push(...checkMemoryText(item.bare, 'bare'));

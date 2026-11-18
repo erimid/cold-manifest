@@ -22,6 +22,10 @@
 //   { "memory": { "type": "burn" }, "as": "memory" }
 //                                 the newest memory that fits and has not
 //                                 faded, in the head of "of" (default $crew).
+//                                 It can also ask what the memory did to their
+//                                 view of the captain or of a crewmate
+//                                 ("captain": "bad", "toward": "bad") and who
+//                                 it is about ("about": "$other") (F.6).
 //
 // Any of them may carry "label": the words shown in a requirement tag such as
 // "[Sensors powered]" where the language cannot work the words out itself.
@@ -98,6 +102,7 @@ export const CREW_FILTERS = Object.freeze({
   in: { type: 'room', fits: (member, room) => member.room === room },
   away: { type: 'room', fits: (member, room) => member.room !== room },
   suit: { type: 'boolean', fits: (member, suit) => Boolean(member.suit) === suit },
+  awake: { type: 'boolean', fits: (member, awake) => !member.asleep === awake },
   engineer: { type: 'boolean', fits: (member, engineer) => Boolean(member.engineer) === engineer },
   skill: { type: 'skill', fits: (member, skill, ctx, spec) => (member.skills?.[skill] ?? 0) >= (spec.min ?? 1) },
   min: { type: 'count', fits: () => true }, // read by `skill`
@@ -120,6 +125,12 @@ function memoryFits(ship, entry, spec, ctx) {
   if (spec.type !== undefined && ![].concat(spec.type).includes(entry.type)) return false;
   if (spec.room !== undefined && entry.room !== resolve(spec.room, ctx)) return false;
   if (spec.dark !== undefined && Boolean(entry.dark) !== spec.dark) return false;
+  // What it did to their view of the captain, or of the crewmate it is about (F.6): "bad" or "good".
+  for (const key of ['captain', 'toward']) {
+    const weight = ship.rules?.memory[entry.type]?.[key] ?? 0;
+    if (spec[key] !== undefined && !(spec[key] === 'bad' ? weight < 0 : weight > 0)) return false;
+  }
+  if (spec.about !== undefined && (entry.about ?? null) !== resolve(spec.about, ctx)) return false;
   if (spec.shadow !== undefined) {
     const how = ship.rules?.memory[entry.type]?.shadow ?? 'if-dark';
     if ((how === 'always' || (how === 'if-dark' && Boolean(entry.dark))) !== spec.shadow) return false;
@@ -267,6 +278,7 @@ const roomName = (sim, id) => sim.layout.room(id)?.name ?? 'the ship';
 export function memoryText(sim, entry, phrase = null) {
   const kind = sim.rules?.memory[entry.type];
   if (!kind) return entry.type;
+  if (entry.says) return entry.says; // in the words of the choice that wrote it (F.6)
   const template = (phrase && kind.phrases?.[phrase]) ?? (entry.room ? kind.text : kind.bare ?? kind.text);
   return template.replace(SLOT, (_, slot) => (slot === 'who' ? entry.who ?? 'someone' : slot === 'room' ? roomName(sim, entry.room) : `{${slot}}`));
 }
@@ -323,7 +335,7 @@ export function checkValue(value, type, env, what) {
   return [`${what}: cannot check a "${type}"`];
 }
 
-const MEMORY_KEYS = ['type', 'room', 'dark', 'shadow', 'any'];
+const MEMORY_KEYS = ['type', 'room', 'dark', 'shadow', 'captain', 'toward', 'about', 'any'];
 
 function checkMemorySpec(spec, env, what) {
   if (!isObject(spec)) return [`${what} must be an object: { type, room, dark, shadow } or { any: [...] }`];
@@ -336,6 +348,8 @@ function checkMemorySpec(spec, env, what) {
   for (const type of spec.type === undefined ? [] : [].concat(spec.type)) problems.push(...checkValue(type, 'memory', { refs: env.refs }, `${what}.type`));
   if (spec.room !== undefined) problems.push(...checkValue(spec.room, 'room', env, `${what}.room`));
   for (const key of ['dark', 'shadow']) if (spec[key] !== undefined) problems.push(...checkValue(spec[key], 'boolean', env, `${what}.${key}`));
+  for (const key of ['captain', 'toward']) if (spec[key] !== undefined && !['bad', 'good'].includes(spec[key])) problems.push(`${what}.${key} must be "bad" or "good": what the memory did to their view`);
+  if (spec.about !== undefined) problems.push(...checkValue(spec.about, 'crew', env, `${what}.about`));
   return problems;
 }
 

@@ -20,7 +20,7 @@
 
 import { crewEmit, harmCrew } from './atmosphere.js';
 import { chill } from './cold.js';
-import { refusalOf } from './memory.js';
+import { moodOf, refusalOf } from './memory.js';
 import { skillFactor, skillOf } from './roles.js';
 import { liftRuns } from './power.js';
 import { STATIONS, injured, postOfRole, rating, stationOfRoom } from './stations.js';
@@ -115,6 +115,7 @@ export function newCrewMember(layout, { id, name, role = null, engineer = false,
     hidden: null, // where they are hiding (agents.js, H.2): 'locker' or 'crawlway'; null when in plain sight
     memories: [], // what they remember: { type, tick, room, who, dark } (memory.js)
     dread: 0, // 0 to 1: how the dark is wearing on them (memory.js)
+    regard: {}, // what they think of the captain ("captain") and of each crewmate (by id): -10 to 10 (F.6, memory.js)
     lampUntil: 0, // the tick until which they will not sit in the dark again
     post: owner === 'player' ? postOfRole(role) : null, // the station they are posted to (stations.js, H.4), or null for a spare hand
     watch: 0, // which watch they stand (watches.js)
@@ -332,7 +333,8 @@ export const CREW_COMMANDS = {
       member.goal = cmd.room;
       member.path = planPath(sim, member, cmd.room);
       member.task = 'walking';
-      crewEmit(sim, member, 'crew.ordered', { crew: cmd.crew, room: cmd.room, tick: sim.state.tick });
+      // How they take it (F.6): shortly or gladly, and what they remember that makes it so. For the intercom.
+      crewEmit(sim, member, 'crew.ordered', { crew: cmd.crew, room: cmd.room, ...moodOf(sim, member), tick: sim.state.tick });
     },
   },
   // Suit up or strip off. A suit keeps you breathing and halves burns, and slows everything you do.

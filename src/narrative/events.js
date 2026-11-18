@@ -64,6 +64,7 @@
 // it is answered and put away. Jumping into a port leaves every event behind.
 
 import { findRoute } from '../sim/crew.js';
+import { refusalOf } from '../sim/memory.js';
 import { NODE_KINDS, nodeOf } from '../sim/sector.js';
 import { checkCrewSpec, crewMatching, fillText, match, requirement, validateCondition, validateText, vars } from './conditions.js';
 import { applyEffects, validateEffects } from './effects.js';
@@ -166,6 +167,7 @@ function attendants(sim, room, cast = []) {
  * The hand to send to a room: one of ours, awake, in plain sight, with nothing in their arms and not already
  * walking somewhere. Somebody who is not holding a station before somebody who is (the helm is not left for a
  * drip in the hold while anyone else can go), then by the fewest doors on the way, then the first aboard.
+ * Never somebody who would refuse to go (memory.js; F.6: a grudge decides who will go where).
  * `fit(member)` can rule people out. Null if nobody can go.
  */
 export function nearestHand(sim, room, fit = () => true) {
@@ -174,7 +176,7 @@ export function nearestHand(sim, room, fit = () => true) {
   for (const member of Object.values(sim.state.crew).sort((a, b) => a.index - b.index)) {
     if (member.owner !== 'player' || !member.alive || member.asleep || member.hidden || member.job || member.carry || member.task === 'walking' || !sim.state.rooms[member.room] || !fit(member)) continue;
     const route = findRoute(sim, member.room, room, member);
-    if (!route) continue;
+    if (!route || refusalOf(sim, member, room)) continue;
     const cost = (posted.has(member.id) ? 1000 : 0) + route.length;
     if (!best || cost < best.cost) best = { member, cost };
   }
@@ -290,6 +292,19 @@ export function joltEvent(sim, kind) {
 /** Events used to open on arriving at a point; since H.6 they come along the lanes (sector.js calls rollLaneEvent). */
 export function attachEvents() {}
 
+/** An answered event as the screen needs it. `remembered` names the crew the outcome left a memory with (F.6). */
+function resultView(sim, result) {
+  if (!result) return null;
+  const remembered = (result.remembered ?? []).map((id) => sim.state.crew[id]?.name).filter(Boolean);
+  return { choice: result.choice, text: result.text, remembered, ...(result.lapsed !== undefined ? { lapsed: Boolean(result.lapsed) } : {}) };
+}
+
+/** "Dace and Pruitt will remember this.", or '' when nobody will. */
+export function rememberedLine(names = []) {
+  if (!names.length) return '';
+  return `${names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`} will remember this.`;
+}
+
 /** One choice of the open event as the screen needs it, or null if it is hidden. */
 function choiceView(sim, open, choice) {
   const reach = reachOf(sim, open);
@@ -312,7 +327,7 @@ export function eventView(sim) {
     title: fillText(event.title, ctx),
     text: fillText(event.text, ctx),
     choices: event.choices.map((choice) => choiceView(sim, open, choice)).filter(Boolean),
-    result: open.result ? { choice: open.result.choice, text: open.result.text } : null,
+    result: resultView(sim, open.result),
   };
 }
 
@@ -342,7 +357,7 @@ export function situationViews(sim) {
         by: sim.state.crew[one.by]?.name ?? null,
         text: attended ? fillText(event.text, ctx) : null,
         choices: attended ? event.choices.map((choice) => choiceView(sim, one, choice)).filter(Boolean) : [],
-        result: one.result ? { choice: one.result.choice, text: one.result.text, lapsed: Boolean(one.result.lapsed) } : null,
+        result: one.result ? { lapsed: false, ...resultView(sim, one.result) } : null,
         left: one.left,
       };
     })

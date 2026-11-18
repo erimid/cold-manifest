@@ -1,5 +1,5 @@
 {
-  "note": "The starting crew: six, one per role (D-130). Each role names the skill they excel at (src/sim/roles.js). Placeholder names and lines until S4.1's crew generation.",
+  "note": "The starting crew: six, one per role (D-130). Each role names the skill they excel at (src/sim/roles.js). Placeholder names and lines until S4.1's crew generation. `sour` and `warm` are said in place of `move` by someone who has soured on the captain or warmed to them (F.6); a line with {memory} names what they remember and is only said while they do.",
   "items": [
     {
       "id": "ilse",
@@ -14,7 +14,9 @@
         "jettison": ["Spacing it. Your call.", "Out the lock it goes.", "Dumping it."],
         "load": ["Fetching rounds.", "Going for ammo.", "I'll feed the gun."],
         "refuse": ["No, Captain. Not in there.", "I'm not doing that. Ask me why later.", "Negative. Send someone else, or send nobody."],
-        "lamp": ["Lamp's on. I'll answer for it.", "I need the light. Sorry, Captain.", "Lights. I can't work blind in here."]
+        "lamp": ["Lamp's on. I'll answer for it.", "I need the light. Sorry, Captain.", "Lights. I can't work blind in here."],
+        "sour": ["Going. I haven't forgotten {memory}.", "{room}. Aye.", "{room}. That's all you'll get from me today."],
+        "warm": ["On my way. I remember {memory}.", "{room}. Glad to, Captain.", "For you, {room}. Any time."]
       }
     },
     {
@@ -31,7 +33,9 @@
         "jettison": ["Hope that wasn't paid for.", "Cycling the lock.", "Gone in a minute."],
         "load": ["Rounds. Right.", "I'll fetch a crate.", "Feeding the thrower."],
         "refuse": ["No. Not a chance.", "You go in there, then.", "I remember the last time. No."],
-        "lamp": ["I'm putting the lamp on. Dock my pay.", "Can't see my own hands. Light's on.", "Something moved. Lamp's on. Don't start."]
+        "lamp": ["I'm putting the lamp on. Dock my pay.", "Can't see my own hands. Light's on.", "Something moved. Lamp's on. Don't start."],
+        "sour": ["Going. And I remember {memory}, in case you don't.", "{room}. Sure. Whatever you say.", "Fine. Don't expect a smile."],
+        "warm": ["Going. I remember {memory}. Still counts.", "{room}? For you, yeah.", "On it, Captain. No complaints. Write that down."]
       }
     },
     {
@@ -47,7 +51,9 @@
         "jettison": ["Taking it to the lock.", "Understood. It goes.", "Spacing it now."],
         "load": ["Bringing rounds.", "Ammo run. Going.", "I'll load it."],
         "refuse": ["I can't do that, Captain.", "Not that room. Not yet.", "I'm sorry. No."],
-        "lamp": ["I've put the light on. I had to.", "Lamp on. I'll take it off when I can.", "I need the light for a minute."]
+        "lamp": ["I've put the light on. I had to.", "Lamp on. I'll take it off when I can.", "I need the light for a minute."],
+        "sour": ["I'm going. I have not forgotten {memory}.", "{room}. As ordered.", "Yes, Captain. That is all I have to say."],
+        "warm": ["Going now. I remember {memory}.", "{room}. Of course, Captain.", "Gladly. {room}."]
       }
     },
     {
@@ -63,7 +69,9 @@
         "jettison": ["Out it goes.", "Spacing it.", "Cycling the lock."],
         "load": ["Rounds coming up.", "I'll feed her myself.", "Loading. Give me a minute."],
         "refuse": ["No, Captain. Not that one.", "Find another way.", "I'm not going in there."],
-        "lamp": ["Lamp's on. I need to see.", "Light on. Sorry.", "I'm not doing this blind."]
+        "lamp": ["Lamp's on. I need to see.", "Light on. Sorry.", "I'm not doing this blind."],
+        "sour": ["Moving. I've not forgotten {memory}.", "{room}. Right.", "Copy. Don't ask me to like it."],
+        "warm": ["Moving. I remember {memory}.", "{room}. With you, Captain.", "Copy, {room}. Glad to."]
       }
     },
     {
@@ -79,7 +87,9 @@
         "jettison": ["It goes out the lock.", "Spacing it now.", "Done in a minute."],
         "load": ["Fetching rounds.", "Ammo run.", "I'll bring them up."],
         "refuse": ["No. That's a bad order.", "Not in there, Captain.", "You'll have to make it an order on paper."],
-        "lamp": ["Lamp on. Habit.", "I want the light.", "Light's staying on for now."]
+        "lamp": ["Lamp on. Habit.", "I want the light.", "Light's staying on for now."],
+        "sour": ["Going. {memory} is noted too.", "{room}. Noted.", "Understood. Nothing more to say."],
+        "warm": ["Moving. I remember {memory}.", "{room}. You've earned it.", "Understood, Captain. Gladly."]
       }
     },
     {
@@ -95,7 +105,9 @@
         "jettison": ["That's money out the lock.", "Spacing it. I'm writing it down.", "Gone. Somebody pays for that."],
         "load": ["Rounds. Coming.", "I'll fetch a crate.", "Bringing ammo."],
         "refuse": ["No. I'm not paid enough for that.", "Not that room.", "Ask me again and I'll still say no."],
-        "lamp": ["Lamp on. Bill me.", "I need light to read the manifest.", "Light. Just for a while."]
+        "lamp": ["Lamp on. Bill me.", "I need light to read the manifest.", "Light. Just for a while."],
+        "sour": ["Going. I've not forgotten {memory}.", "{room}. I'm keeping a tally.", "{room}, then. You owe me."],
+        "warm": ["Going. I remember {memory}.", "{room}. On the house.", "{room}, Captain. No charge."]
       }
     }
   ]
