@@ -1874,7 +1874,8 @@ async function loopTests(browser) {
     assert.match(facts, /6 of 6 alive/);
     assert.match(facts, /Result\s*Delivered whole/);
     assert.match(facts, /Paid\s*150 advance \+ 450 at the drop/);
-    assert.match(facts, /Standing\s*Reach Medical Cooperative \+2/);
+    // The client's +2 for a clean delivery; what the way across met can move other standing too (F.5: a head count, a bounty).
+    assert.match(facts, /Standing\s*(?:[^,]+, )*Reach Medical Cooperative \+2/);
     await shot('s3-2-summary-ipad');
     await big('#screen button');
   });
