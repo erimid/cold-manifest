@@ -78,6 +78,8 @@ import { createTempo } from '../src/sim/tempo.js';
 import { writeFileSync } from 'node:fs';
 
 import { readContentFiles } from './lib/load-content.js';
+import { feudsOf, regardOf, regardWord } from '../src/sim/memory.js';
+import { createIntercom } from '../src/ui/intercom.js';
 
 function option(name, fallback) {
   const i = process.argv.indexOf(`--${name}`);
@@ -109,6 +111,8 @@ const ticks = Math.round(minutes * 60 * TICK_RATE);
 const content = createContent(readContentFiles());
 const shipId = String(option('ship', 'margin-of-error'));
 const ship = content.require('ships', shipId);
+/** What each of the crew says over the intercom, for the report's example of a remembered choice (F.6). */
+const crewReplies = Object.fromEntries(content.all('crew').map(({ id, replies }) => [id, replies]));
 const roster = content.all('crew').map(({ id, name, role, engineer, skills, traits }) => ({ id, name, role, engineer, skills, traits }));
 const ruleSet = { memories: content.all('memories'), refusals: content.all('refusals'), risks: content.all('risks') };
 const transitEvents = content.all('events');
@@ -573,6 +577,36 @@ function playCrossing(seed, index) {
   sim.events.on('event.opened', (event) => event.situation !== undefined && (tally.placed += 1));
   sim.events.on('situation.attended', () => (tally.attended += 1));
   const sent = new Map(); // situation number -> the tick somebody was last sent to it
+  // Crew remember (F.6): what a choice left in whose head, and where it was seen again: an answer on the
+  // intercom that is short or glad, an order refused for it.
+  tally.remember = { moves: 0, bad: 0, good: 0, between: 0, answers: { sour: 0, warm: 0 }, named: 0, refused: {}, seen: {}, example: null, refusal: null, end: {} };
+  const intercom = createIntercom(crewReplies);
+  let lastChoice = { what: null, tick: -1 };
+  const whyOf = new Map(); // crew id -> the choice that last moved what they think of the captain
+  sim.events.on('event.chosen', (event) => (lastChoice = { what: `${event.event}/${event.choice}`, tick: event.tick }));
+  sim.events.on('event.lapsed', (event) => (lastChoice = { what: `${event.event}/left alone`, tick: event.tick }));
+  sim.events.on('crew.regard', (event) => {
+    const memo = tally.remember;
+    memo.moves += 1;
+    if (event.of !== 'captain') memo.between += 1;
+    else memo[event.to < event.from ? 'bad' : 'good'] += 1;
+    if (lastChoice.tick === event.tick) whyOf.set(event.crew, lastChoice.what);
+  });
+  sim.events.on('crew.ordered', (event) => {
+    if (!event.mood || event.job) return;
+    const memo = tally.remember;
+    memo.answers[event.mood] += 1;
+    if (!event.remembers) return;
+    memo.named += 1;
+    const from = whyOf.get(event.crew) ?? 'something else';
+    memo.seen[from] = (memo.seen[from] ?? 0) + 1;
+    memo.example ??= `after ${from}, ${sim.state.crew[event.crew].name} answered an order to ${sim.layout.room(event.room)?.name}: "${intercom.reply(event, sim.layout.room(event.room)?.name).text}"`;
+  });
+  sim.events.on('crew.refused', (event) => {
+    const memo = tally.remember;
+    memo.refused[event.rule] = (memo.refused[event.rule] ?? 0) + 1;
+    if (['sour', 'feud'].includes(event.rule)) memo.refusal ??= `${event.reason} (after ${whyOf.get(event.crew) ?? 'something else'})`;
+  });
   sim.events.on('effect.applied', (event) => {
     if (event.effect === 'contact') tally.eventContacts += 1;
     if (event.effect === 'scene' || event.effect === 'threat') tally.hooks += 1;
@@ -899,6 +933,12 @@ function playCrossing(seed, index) {
   const bad = findBadNumbers(sim.state);
   if (bad.length) throw new Error(`non-finite numbers at ${bad.join(', ')}`);
   if (Math.max(0, ...tally.contactSeconds) > CONTACT_MOST_SECONDS) throw new Error(`a ship was on our hands for ${Math.max(...tally.contactSeconds).toFixed(0)} s of the clock: the most is ${CONTACT_MOST_SECONDS}`);
+  for (const { member } of ourCrew(sim)) {
+    if (!member.alive) continue;
+    const word = regardWord(regardOf(member));
+    tally.remember.end[word] = (tally.remember.end[word] ?? 0) + 1;
+    if (feudsOf(sim, member).length) tally.remember.end.feuding = (tally.remember.end.feuding ?? 0) + 1;
+  }
   return {
     ...tally,
     nodes: run.map.nodes.length,
@@ -1344,6 +1384,25 @@ out.push(`  the clock:         under way ${pct(time.under, allTime)} of the time
   const metBack = Object.fromEntries(comeBack.map((id) => [id, crossings.reduce((sum, c) => sum + (c.met[id] ?? 0), 0)]));
   out.push(`  came back:         situations that follow a choice ${Object.entries(metBack).map(([id, n]) => `${id} ${n}`).join(', ')}; port notices ${Object.entries(notices).map(([id, n]) => `${id} ${n}`).join(', ') || 'none'}`);
   out.push(`  losses:            ${crossings.reduce((sum, c) => sum + c.stakes.spoiled, 0)} contract crates spoiled (${pct(crossings.filter((c) => c.stakes.spoiled > 0).length, crossings.length)} of crossings); a posted hand too hurt to stand their station ${(mean(crossings.map((c) => c.stakes.injuredSeconds)) / 60).toFixed(1)} min a crossing; hull left at the end ${mean(careful.map((c) => c.hullLeft)).toFixed(1)} careful, ${mean(careless.map((c) => c.hullLeft)).toFixed(1)} careless`);
+  // Crew remember (F.6): choices in situations, written into the heads of the people they were about, and seen again.
+  const f6sum = (key) => crossings.reduce((sum, c) => sum + c.remember[key], 0);
+  const f6merged = (key) => {
+    const all = {};
+    for (const c of crossings) for (const [k, n] of Object.entries(c.remember[key])) all[k] = (all[k] ?? 0) + n;
+    return all;
+  };
+  const f6listed = (all, most = 8) => Object.entries(all).sort((a, b) => b[1] - a[1]).slice(0, most).map(([k, n]) => `${k} ${n}`).join(', ') || 'none';
+  const f6answers = f6merged('answers');
+  const refusedBy = f6merged('refused');
+  const sawIt = crossings.filter((c) => c.remember.named > 0 || (c.remember.refused.sour ?? 0) + (c.remember.refused.feud ?? 0) > 0).length;
+  out.push(`  remember (F.6):    what the crew think moved ${f6sum('moves')} times (${(f6sum('moves') / Math.max(1, crossings.length)).toFixed(1)} a crossing): of the captain down ${f6sum('bad')} and up ${f6sum('good')}, of each other ${f6sum('between')}; at the end of a crossing the living crew were ${f6listed(f6merged('end'))}`);
+  out.push(`  seen again:        a choice was seen in a later answer or refusal in ${sawIt} of ${crossings.length} crossings (${pct(sawIt, crossings.length)}); orders answered shortly ${f6answers.sour ?? 0}, gladly ${f6answers.warm ?? 0}, naming the memory ${f6sum('named')}; orders refused over the captain ${refusedBy.sour ?? 0}, over a crewmate ${refusedBy.feud ?? 0} (all refusals: ${f6listed(refusedBy)})`);
+  out.push(`  which choices:     ${f6listed(f6merged('seen'))}`);
+  const shown = crossings.find((c) => c.remember.example);
+  const refusedOnce = crossings.find((c) => c.remember.refusal);
+  if (shown) out.push(`  for example:       ${shown.remember.example}`);
+  if (refusedOnce) out.push(`                     ${refusedOnce.remember.refusal}`);
+  if (crossings.length >= 20 && sawIt === 0) failures.push({ seed: baseSeed, reason: 'crew remember (F.6): no choice in a situation was seen in a later answer or refusal on any crossing' });
   out.push(`  crew lost:         ${mean(crossings.map((c) => c.dead)).toFixed(2)} a run; by cause ${Object.entries(died).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k} ${n}`).join(', ') || 'none'}`);
   out.push(`  normal speed for:  ${Object.entries(busy).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k} ${pct(n, busyAll)}`).join(', ') || 'nothing'}`);
 }

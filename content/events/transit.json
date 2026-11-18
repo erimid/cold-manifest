@@ -55,7 +55,7 @@
             {
               "weight": 2,
               "text": "A deck plate lets go under {who} two compartments in. The line holds. The leg mostly holds. Nothing comes back but {who}.",
-              "effects": [{ "do": "hurt", "crew": "$who", "amount": 0.55 }]
+              "effects": [{ "do": "remember", "crew": "$who", "memory": "slight", "says": "being sent across to the dead hull" }, { "do": "hurt", "crew": "$who", "amount": 0.55 }]
             },
             {
               "weight": 1,
@@ -180,7 +180,7 @@
       "lapse": {
         "hours": 6,
         "text": "Nobody looked in on {patient}. The cough has gone down onto the chest.",
-        "effects": [{ "do": "hurt", "crew": "$patient", "amount": 0.2 }]
+        "effects": [{ "do": "remember", "crew": "$patient", "memory": "slight", "says": "nobody looking in on the cough" }, { "do": "hurt", "crew": "$patient", "amount": 0.2 }]
       },
       "text": "{patient} has had a cough since the last port and has stopped pretending otherwise. It is probably the scrubbers. On this ship it is usually the scrubbers.",
       "cast": { "patient": { "pick": "random" } },
@@ -193,7 +193,7 @@
             {
               "weight": 1,
               "text": "It is not the scrubbers. {patient} is grey by the next watch and angry about being asked.",
-              "effects": [{ "do": "hurt", "crew": "$patient", "amount": 0.3 }]
+              "effects": [{ "do": "remember", "crew": "$patient", "memory": "slight", "says": "being told to sleep off a bad chest" }, { "do": "hurt", "crew": "$patient", "amount": 0.3 }]
             }
           ]
         },
@@ -204,7 +204,7 @@
           "outcomes": [
             {
               "text": "{medic} listens to {patient}'s chest for a long time, says a word nobody else knows, and comes back from the medbay with something that works.",
-              "effects": [{ "do": "heal", "crew": "$patient", "amount": 0.25 }]
+              "effects": [{ "do": "remember", "crew": "$patient", "memory": "help", "who": "$medic", "says": "{medic} seeing to the cough" }, { "do": "remember", "crew": "$patient", "memory": "kindness", "says": "the cough being seen to" }, { "do": "heal", "crew": "$patient", "amount": 0.25 }]
             }
           ]
         },
@@ -357,7 +357,7 @@
       "lapse": {
         "hours": 3,
         "text": "Nobody came. {first} and {second} finished it themselves, and both of them are bleeding.",
-        "effects": [{ "do": "hurt", "crew": "$first", "amount": 0.3 }, { "do": "hurt", "crew": "$second", "amount": 0.3 }]
+        "effects": [{ "do": "remember", "crew": "$first", "memory": "quarrel", "who": "$second", "says": "the fight with {second}" }, { "do": "remember", "crew": "$second", "memory": "quarrel", "who": "$first", "says": "the fight with {first}" }, { "do": "remember", "crew": "$first", "memory": "slight", "says": "the fight with {second} nobody came to stop" }, { "do": "remember", "crew": "$second", "memory": "slight", "says": "the fight with {first} nobody came to stop" }, { "do": "hurt", "crew": "$first", "amount": 0.3 }, { "do": "hurt", "crew": "$second", "amount": 0.3 }]
       },
       "loud": { "noise": 0.8 },
       "text": "{who} finds them in {room}: {first} has {second} against the bulkhead by the collar. Neither will say what it was about. There is a broken mug on the deck and it was somebody's only mug.",
@@ -366,11 +366,11 @@
           "id": "part",
           "label": "Get between them",
           "outcomes": [
-            { "weight": 2, "text": "It takes a shoulder and a loud voice. {first} lets go. They sit at opposite ends of the table and do not look up." },
+            { "weight": 2, "text": "It takes a shoulder and a loud voice. {first} lets go. They sit at opposite ends of the table and do not look up.", "effects": [{ "do": "remember", "crew": "$first", "memory": "spat", "who": "$second", "says": "the fight with {second} that was pulled apart" }, { "do": "remember", "crew": "$second", "memory": "spat", "who": "$first", "says": "the fight with {first} that was pulled apart" }] },
             {
               "weight": 1,
               "text": "{who} gets between them and takes the elbow that was meant for somebody else. It ends it, at least.",
-              "effects": [{ "do": "hurt", "crew": "$who", "amount": 0.1 }]
+              "effects": [{ "do": "remember", "crew": "$first", "memory": "spat", "who": "$second", "says": "the fight with {second} that was pulled apart" }, { "do": "remember", "crew": "$second", "memory": "spat", "who": "$first", "says": "the fight with {first} that was pulled apart" }, { "do": "hurt", "crew": "$who", "amount": 0.1 }]
             }
           ]
         },
@@ -380,7 +380,7 @@
           "outcomes": [
             {
               "text": "It lasts under a minute, the way real ones do. Afterwards {second} picks up the pieces of the mug.",
-              "effects": [{ "do": "hurt", "crew": "$first", "amount": 0.12 }, { "do": "hurt", "crew": "$second", "amount": 0.12 }]
+              "effects": [{ "do": "remember", "crew": "$first", "memory": "quarrel", "who": "$second", "says": "the fight with {second}" }, { "do": "remember", "crew": "$second", "memory": "quarrel", "who": "$first", "says": "the fight with {first}" }, { "do": "remember", "crew": "$first", "memory": "slight", "says": "being left to fight it out with {second}" }, { "do": "remember", "crew": "$second", "memory": "slight", "says": "being left to fight it out with {first}" }, { "do": "hurt", "crew": "$first", "amount": 0.12 }, { "do": "hurt", "crew": "$second", "amount": 0.12 }]
             }
           ]
         },
@@ -391,7 +391,7 @@
           "outcomes": [
             {
               "text": "{voice} asks which of them wants to explain it to the captain, and waits. It turns out neither does.",
-              "effects": [{ "do": "flag", "name": "fight_talked_down" }]
+              "effects": [{ "do": "remember", "crew": "$first", "memory": "amends", "who": "$second", "says": "being talked down from the fight with {second}" }, { "do": "remember", "crew": "$second", "memory": "amends", "who": "$first", "says": "being talked down from the fight with {first}" }, { "do": "flag", "name": "fight_talked_down" }]
             }
           ]
         }
@@ -618,6 +618,7 @@
         "hours": 2,
         "text": "Nobody went to {shaky}. They wore themselves out in the end. They will not look at the scope now.",
         "effects": [
+          { "do": "remember", "crew": "$shaky", "memory": "slight", "says": "being left alone with the fear" },
           {
             "do": "trust",
             "add": -2
@@ -640,6 +641,7 @@
             {
               "text": "{who} sits down beside {shaky} and says nothing much for ten minutes. It is the right amount of nothing.",
               "effects": [
+                { "do": "remember", "crew": "$shaky", "memory": "help", "who": "$who", "says": "{who} sitting up when the nerve went" }, { "do": "remember", "crew": "$shaky", "memory": "kindness", "says": "the company when the nerve went" },
                 {
                   "do": "heal",
                   "crew": "$shaky",
@@ -656,6 +658,7 @@
             {
               "text": "{shaky} keeps it down. {shaky} also keeps a note of who said it.",
               "effects": [
+                { "do": "remember", "crew": "$shaky", "memory": "slight", "says": "being told to keep the fear down" },
                 {
                   "do": "trust",
                   "add": -1
@@ -681,6 +684,7 @@
             {
               "text": "{medic} gets something from the medbay into {shaky} and a blanket round them. They are asleep inside the quarter hour.",
               "effects": [
+                { "do": "remember", "crew": "$shaky", "memory": "help", "who": "$medic", "says": "{medic} and the blanket" },
                 {
                   "do": "heal",
                   "crew": "$shaky",
@@ -870,7 +874,7 @@
           "outcomes": [
             {
               "text": "{who} puts the kettle on and does not ask him anything. By the second cup he has said his name, and that he can fix a pump.",
-              "effects": [{ "do": "flag", "name": "stowaway_aboard" }, { "do": "flag", "name": "stowaway_loose", "value": 0 }]
+              "effects": [{ "do": "remember", "crew": "$who", "memory": "kindness", "says": "the boy fed at the galley table" }, { "do": "flag", "name": "stowaway_aboard" }, { "do": "flag", "name": "stowaway_loose", "value": 0 }]
             }
           ]
         }
@@ -915,7 +919,7 @@
           "outcomes": [
             {
               "text": "They send a launch for him. He goes across without looking back. The crew are quiet for the rest of the watch, and Margo logs it without a word.",
-              "effects": [{ "do": "flag", "name": "stowaway_aboard", "value": 0 }, { "do": "reputation", "faction": "receivers", "add": 1 }, { "do": "trust", "add": -3 }]
+              "effects": [{ "do": "remember", "crew": "all", "memory": "slight", "says": "the boy handed over to the patrol" }, { "do": "flag", "name": "stowaway_aboard", "value": 0 }, { "do": "reputation", "faction": "receivers", "add": 1 }, { "do": "trust", "add": -3 }]
             }
           ]
         }
@@ -932,7 +936,7 @@
       "lapse": {
         "hours": 4,
         "text": "Nobody went. The grudge found its own way out: a coolant valve on the reactor left a quarter turn open, and nobody will say who was last down there.",
-        "effects": [{ "do": "damage", "system": "reactor", "bars": 1 }, { "do": "trust", "add": -1 }]
+        "effects": [{ "do": "remember", "crew": "$sore", "memory": "slight", "says": "the grudge nobody came to hear" }, { "do": "damage", "system": "reactor", "bars": 1 }, { "do": "trust", "add": -1 }]
       },
       "loud": { "noise": 0.4 },
       "text": "{who} finds {sore} in {room} with a split lip that was not there an hour ago, and a list of grievances that goes back further than the fight. Nobody broke it up properly the first time, and it has not finished.",
@@ -944,7 +948,7 @@
           "outcomes": [
             {
               "text": "{voice} gets the two of them in the mess with the door shut, and does not let either of them leave until it is said. It takes an hour. It holds.",
-              "effects": [{ "do": "flag", "name": "fight_talked_down" }]
+              "effects": [{ "do": "remember", "crew": "$sore", "memory": "kindness", "says": "the grudge being heard out properly" }, { "do": "flag", "name": "fight_talked_down" }]
             }
           ]
         },
@@ -956,7 +960,7 @@
             {
               "weight": 1,
               "text": "The rota does not stop them meeting at the galley. {sore} comes off worse.",
-              "effects": [{ "do": "hurt", "crew": "$sore", "amount": 0.15 }]
+              "effects": [{ "do": "remember", "crew": "$sore", "memory": "slight", "says": "the rota that did not keep the fight away" }, { "do": "hurt", "crew": "$sore", "amount": 0.15 }]
             }
           ]
         },
@@ -966,7 +970,7 @@
           "outcomes": [
             {
               "text": "The money goes back in the ship's account, where it does at least some good. The grudge goes on, quieter.",
-              "effects": [{ "do": "money", "add": 40 }, { "do": "trust", "add": -1 }]
+              "effects": [{ "do": "remember", "crew": "$sore", "memory": "slight", "says": "a day's pay docked over the fight" }, { "do": "money", "add": 40 }, { "do": "trust", "add": -1 }]
             }
           ]
         }
@@ -1025,7 +1029,7 @@
       "lapse": {
         "hours": 3,
         "text": "Nobody went. {jumpy} tried to tune out a ghost on the scope and burned out half the sensor head doing it.",
-        "effects": [{ "do": "damage", "system": "sensors", "bars": 1 }, { "do": "trust", "add": -1 }]
+        "effects": [{ "do": "remember", "crew": "$jumpy", "memory": "slight", "says": "the ghost on the scope nobody came for" }, { "do": "damage", "system": "sensors", "bars": 1 }, { "do": "trust", "add": -1 }]
       },
       "loud": { "noise": 0.3 },
       "text": "{who} finds {jumpy} in {room} with their face a hand's breadth from the scope, red-eyed, counting contacts that are only noise. Ever since the last ship pinged us they have not been right.",
@@ -1037,7 +1041,7 @@
             {
               "when": { "fact": "flag", "name": "nerves_ordered" },
               "text": "{jumpy} goes, without a word, and with a look that says this is the second time they have been told what to do with their fear.",
-              "effects": [{ "do": "trust", "add": -1 }]
+              "effects": [{ "do": "remember", "crew": "$jumpy", "memory": "slight", "says": "being ordered off the scope" }, { "do": "trust", "add": -1 }]
             },
             {
               "fallback": true,
@@ -1052,7 +1056,7 @@
           "outcomes": [
             {
               "text": "{who} pulls up a stool and names every blip as it comes, out loud: noise, noise, noise. By the end of the watch {jumpy} is doing it too.",
-              "effects": [{ "do": "flag", "name": "nerves_shot", "value": 0 }, { "do": "flag", "name": "nerves_ordered", "value": 0 }]
+              "effects": [{ "do": "remember", "crew": "$jumpy", "memory": "help", "who": "$who", "says": "{who} sitting the watch out" }, { "do": "remember", "crew": "$jumpy", "memory": "kindness", "says": "the watch sat out together" }, { "do": "flag", "name": "nerves_shot", "value": 0 }, { "do": "flag", "name": "nerves_ordered", "value": 0 }]
             }
           ]
         },
@@ -1063,7 +1067,7 @@
           "outcomes": [
             {
               "text": "{medic} does it gently and does it properly. {jumpy} wakes up embarrassed, which is better than the alternative.",
-              "effects": [{ "do": "heal", "crew": "$jumpy", "amount": 0.15 }, { "do": "flag", "name": "nerves_shot", "value": 0 }]
+              "effects": [{ "do": "remember", "crew": "$jumpy", "memory": "help", "who": "$medic", "says": "{medic} doing it gently" }, { "do": "heal", "crew": "$jumpy", "amount": 0.15 }, { "do": "flag", "name": "nerves_shot", "value": 0 }]
             }
           ]
         }

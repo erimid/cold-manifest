@@ -15,8 +15,17 @@
 // What counts as a memory, which bus events write one, and which orders are
 // refused because of one are content (content/memories/ and content/refusals/, S3.3, D-110), written in
 // the condition language. This file carries them out. A sim given no rules
-// has a crew who remember nothing. S4.3 adds weights, opinions and decay;
-// S4.5 widens refusal into mutiny.
+// has a crew who remember nothing.
+//
+// F.6 (D-235 to D-239) brings a small part of S4.3 forward. A kind of memory can carry weight:
+// `captain` moves what they think of the captain when it is written, `toward` what they think
+// of the crewmate it is about. What the captain chooses in a situation aboard is written into
+// the heads of the people it was about (the `remember` effect, with its own words: `says`).
+// What someone thinks is their `regard`: a number from -10 to 10 for the captain and for each
+// crewmate, kept after the memory itself has faded. It changes how they answer an order
+// (`moodOf`, on the intercom), which orders they refuse (the `crew.regard` fact, read by
+// content/refusals/), and who will go where (events.js' nearestHand passes over anyone who
+// would refuse). S4.3 adds decay, Margo, and the rest; S4.5 widens refusal into mutiny.
 
 import { fillText, isFresh, match, memoryMatching, memoryText, vars } from '../narrative/conditions.js';
 import { crewEmit } from './atmosphere.js';
@@ -36,6 +45,16 @@ export { DARK_ROOM };
  */
 export const DREAD = Object.freeze({ seconds: 75, company: 0.4, remembered: 2, calm: 20, hold: 45 });
 
+/** Whose regard `member.regard.captain` is. Every other key is a crew id. */
+export const CAPTAIN = 'captain';
+/**
+ * What they think of someone runs from `min` to `max`, 0 to start. At `cool` or below they answer the captain
+ * shortly and at `warm` or above gladly; at `sour` or below they refuse a risk for this captain, at `feud` or
+ * below they will not be shut in a room with that crewmate, and at `loyal` or above they go where an old
+ * fright would have stopped them (content/refusals/ reads the same numbers through the `crew.regard` fact).
+ */
+export const REGARD = Object.freeze({ min: -10, max: 10, cool: -2, warm: 2, sour: -4, loyal: 4, feud: -4 });
+
 const isOurs = (ship, member) => (ship.side ?? 'player') === 'player' && member.owner === 'player';
 const isDark = (r) => !r.jettisoned && lightIn(r) < DARK_ROOM;
 const kinds = (ship) => ship.rules?.memory ?? {};
@@ -44,13 +63,61 @@ const kinds = (ship) => ship.rules?.memory ?? {};
 export const memoryTypes = (ship) => Object.keys(kinds(ship));
 
 /** Write something into a crew member's memory. The oldest go first when the log is full. */
-export function remember(ship, member, type, { room = null, who = null } = {}) {
-  if (!kinds(ship)[type]) throw new Error(`Unknown memory type "${type}"`);
-  const entry = { type, tick: ship.state.tick, room, who, dark: room !== null && ship.state.rooms[room] ? isDark(ship.state.rooms[room]) : false };
+export function remember(ship, member, type, { room = null, who = null, about = null, says = null } = {}) {
+  const kind = kinds(ship)[type];
+  if (!kind) throw new Error(`Unknown memory type "${type}"`);
+  // `about` is the id of the crewmate it concerns (`who` is their name, as it was then); `says` is the
+  // memory in the words of whatever wrote it, in place of the kind's own.
+  const entry = { type, tick: ship.state.tick, room, who, about, says, dark: room !== null && ship.state.rooms[room] ? isDark(ship.state.rooms[room]) : false };
   member.memories = member.memories.filter((old) => isFresh(ship, old));
   member.memories.push(entry);
   if (member.memories.length > MEMORY_MAX) member.memories.shift();
+  // A memory with weight moves what they think (F.6): of the captain, and of whoever it is about.
+  if (isOurs(ship, member)) {
+    if (kind.captain) moveRegard(ship, member, CAPTAIN, kind.captain, entry);
+    if (kind.toward && about && about !== member.id && ship.state.crew[about]) moveRegard(ship, member, about, kind.toward, entry);
+  }
   return entry;
+}
+
+/** What someone thinks of the captain, or (`of`: a crew id) of a crewmate: -10 to 10, 0 for no view either way. */
+export const regardOf = (member, of = CAPTAIN) => member?.regard?.[of] ?? 0;
+
+/** Move what someone thinks of the captain or a crewmate by `add`. `entry` is the memory that did it, if one did. */
+export function moveRegard(ship, member, of, add, entry = null) {
+  const from = regardOf(member, of);
+  const to = Math.max(REGARD.min, Math.min(REGARD.max, from + add));
+  if (to === from) return;
+  member.regard[of] = to;
+  ship.events.emit('crew.regard', { crew: member.id, of, from, to, memory: entry ? memoryText(ship, entry) : null, tick: ship.state.tick });
+}
+
+/** A word for what someone thinks of the captain or a crewmate. */
+export function regardWord(value) {
+  if (value <= REGARD.sour) return 'sour';
+  if (value <= REGARD.cool) return 'cool';
+  if (value >= REGARD.loyal) return 'loyal';
+  if (value >= REGARD.warm) return 'warm';
+  return 'even';
+}
+
+/**
+ * How someone answers the captain just now (F.6): { mood: 'sour' | 'warm' | null, remembers } where `remembers`
+ * is the memory behind it in a few words, if it has not faded. Read when an order is given, for the intercom.
+ */
+export function moodOf(ship, member) {
+  const regard = regardOf(member);
+  const mood = regard <= REGARD.cool ? 'sour' : regard >= REGARD.warm ? 'warm' : null;
+  if (!mood) return { mood: null, remembers: null };
+  const entry = memoryMatching({ captain: mood === 'sour' ? 'bad' : 'good' }, member, { sim: ship, vars: {} });
+  return { mood, remembers: entry ? memoryText(ship, entry) : null };
+}
+
+/** The crewmates someone has fallen out with, by name, for the crew panel. */
+export function feudsOf(ship, member) {
+  return Object.entries(member.regard ?? {})
+    .filter(([of, value]) => of !== CAPTAIN && value <= REGARD.feud && ship.state.crew[of]?.alive)
+    .map(([of]) => ship.state.crew[of].name);
 }
 
 /** The newest memory of a kind that has not faded, and that `fits` if given. */
@@ -163,7 +230,7 @@ export function attachMemory(sim) {
         const who = writer.to === 'subject' ? (subject?.alive ? [subject] : []) : living().filter((member) => writer.to === 'everyone' || (event.crewAll ?? []).includes(member.id));
         // Aboard their ship the room means nothing here; it is remembered as what happened, not a place.
         const room = (event.aboard === undefined || event.aboard === 'player') && sim.state.rooms[event.room] ? event.room : null;
-        for (const member of who) remember(sim, member, writer.type, { room, who: writer.names ? nameOf(event.crew) : null });
+        for (const member of who) remember(sim, member, writer.type, { room, who: writer.names ? nameOf(event.crew) : null, about: writer.names && sim.state.crew[event.crew] ? event.crew : null });
       }
     });
   }
@@ -176,6 +243,11 @@ export function checkMemoryInvariants(ship) {
     if (!Array.isArray(member.memories) || member.memories.length > MEMORY_MAX) problems.push(`crew ${id} holds ${member.memories?.length} memories`);
     else if (ship.rules && member.memories.some((entry) => !ship.rules.memory[entry.type])) problems.push(`crew ${id} has a memory of an unknown kind`);
     if (!(member.dread >= 0 && member.dread < 1)) problems.push(`crew ${id} dread is ${member.dread}`);
+    for (const [of, value] of Object.entries(member.regard ?? {})) {
+      if (!(value >= REGARD.min && value <= REGARD.max)) problems.push(`crew ${id} regard for ${of} is ${value}`);
+      if (of === id) problems.push(`crew ${id} has a regard for themselves`);
+    }
+    if (!member.regard || typeof member.regard !== 'object') problems.push(`crew ${id} has no regard`);
   }
   return problems;
 }

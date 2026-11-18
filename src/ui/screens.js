@@ -3,6 +3,7 @@
 // and calls back; main.js owns which one is up. The event view is real since S3.3, and the
 // contract board and the port since S3.4; scenes arrive in Stage 4.
 
+import { rememberedLine } from '../narrative/events.js';
 import { el } from './dom.js';
 
 const tag = (text) => el('div', { class: 'stencil' }, text);
@@ -125,7 +126,7 @@ export function renderEvent(root, { view, onChoose, onContinue }) {
       el('h2', { id: 'event-title' }, view.title),
       el('p', { id: 'event-text' }, view.text),
       view.result
-        ? el('div', { class: 'event__result' }, el('p', { id: 'event-result' }, view.result.text), el('div', { class: 'menu' }, el('button', { class: 'btn', type: 'button', id: 'btn-event-continue', press: onContinue }, 'Continue')))
+        ? el('div', { class: 'event__result' }, el('p', { id: 'event-result' }, view.result.text), view.result.remembered.length ? el('p', { class: 'event__remembered', id: 'event-remembered' }, rememberedLine(view.result.remembered)) : null, el('div', { class: 'menu' }, el('button', { class: 'btn', type: 'button', id: 'btn-event-continue', press: onContinue }, 'Continue')))
         : el('div', { class: 'menu', id: 'event-choices' }, view.choices.map(choice)),
     ),
   );

@@ -6,7 +6,7 @@
 // The cards are DOM laid over the schematic, so they are controls like any other (44 px, keyboard,
 // screen reader). Only one card is open at a time; a chip opens and folds its own.
 
-import { situationViews } from '../narrative/events.js';
+import { rememberedLine, situationViews } from '../narrative/events.js';
 import { el } from './dom.js';
 
 /** The words under a chip's title: what state the matter is in. */
@@ -31,6 +31,8 @@ export function createSituationCards({ sim, order, nearest, selected }) {
     if (view.state === 'answered') {
       return [
         el('p', { class: 'sitcard__text', id: `sit-result-${view.n}` }, view.result.text),
+        // Whose head the choice went into (F.6).
+        view.result.remembered.length ? el('p', { class: 'sitcard__text sitcard__remembered', id: `sit-remembered-${view.n}` }, rememberedLine(view.result.remembered)) : null,
         el('div', { class: 'sitcard__buttons' }, el('button', { class: 'btn btn--small', type: 'button', id: `sit-dismiss-${view.n}`, press: () => order({ type: 'event.dismiss', situation: view.n }) }, 'Put away')),
       ];
     }
