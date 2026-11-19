@@ -1,9 +1,7 @@
 // The ship view: the main gameplay screen (brief §18).
 //
-// Tap a room to see its status, tap a door to open or close it, long-press
-// (or right-click) anything for a description. The switch panel along the
-// bottom holds the reactor's output, the lights by deck, the lift, every
-// station with who has it, and the watch bill (H.4).
+// Tap a room to see its status and what can be done there, tap a door to open
+// or close it, long-press (or right-click) anything for a description.
 //
 // From S2.7 the screen shows what Margo knows, not what is so (senses.js): a
 // room of ours she cannot see into is drawn as last seen, behind static, and
@@ -19,6 +17,12 @@
 // From H.3 (D-152) there is no enemy ship on the screen and no weapons bar: a contact's panel lays the
 // deterrent gun on it (or holds fire), pays a toll and shows our gun's rounds; point defence looks after
 // itself; Brace sits with the helm controls; drones and pods are drawn on the scope.
+// From H.9 (D-251 to D-254) the screen is built round people: the crew down the left (a card each: face, post,
+// watch, what they are doing, how they are), Margo's channel down the right (her face, the stations she holds,
+// a running transcript of her and the crew, and the captain's reply chips), and her monitor between them with
+// the ship across its full width. The bottom panels are gone: the card for whatever is picked (a room's
+// actions, with its station's switches; a crew member; a crate; a contact; or with nothing picked the helm)
+// sits on the monitor under the ship, beside the scope.
 
 import { REFUSALS_PER_RUN, trustWord } from '../ai/judgement.js';
 import { pickTarget } from '../engine/hit.js';
@@ -44,6 +48,8 @@ import { el } from './dom.js';
 import { createIntercom } from './intercom.js';
 import { AUTO_PAUSE } from './settings.js';
 import { createShipRenderer } from './ship-render.js';
+import { drawBody, skinOf } from './crew-art.js';
+import { crewCardView, heldStations, roomStation } from './people.js';
 import { createSituationCards } from './situations.js';
 import { bearingText, drawScope, hunter, hunterText, rangeText, scopeDial, scopeHit, scopeMarks } from './scope.js';
 
@@ -51,8 +57,8 @@ import { bearingText, drawScope, hunter, hunterText, rangeText, scopeDial, scope
 const CONTACT_HINT = 'A hail is a lie told once. The gun cannot sink anything; it can make a ship think twice, and every round tells everyone where we are.';
 
 const percent = (value) => `${Math.round(value * 100)}%`;
-/** How long a crew member's intercom reply stays on the monitor, in real milliseconds. */
-const INTERCOM_MS = 4000;
+/** How many lines Margo's channel keeps (H.9). */
+const CHANNEL_LINES = 80;
 /** How long a crew member's reason for refusing stays in the status panel: long enough to read a whole sentence. */
 const REFUSAL_MS = 7000;
 /** How long a shot's result stays on screen, in seconds of game time. */
@@ -75,8 +81,6 @@ function effectWords(effects) {
   if (effects.crew.length) words.push(effects.crew.length > 1 ? `CREW x${effects.crew.length}` : 'CREW');
   return words.join('  ');
 }
-/** Short task names for the crew bar, where there is no room for a sentence. */
-const CHIP_TASKS = { walking: 'Walking', crawling: 'Crawling', waiting: 'At a door', extinguish: 'Fighting fire', patch: 'Patching hull', repair: 'Repairing', unjam: 'Freeing door', idle: 'Standing by', fighting: 'Fighting', sabotage: 'Wrecking', lifting: 'Lifting', opening: 'Opening', loading: 'Loading gun', cycling: 'At the airlock', stashing: 'Stashing', hiding: 'Hiding' };
 /** What a crate is, in a few words for its panel. */
 const CRATE_KIND = { ammo: 'Ordnance · rounds for the heavy guns', cargo: 'Company manifest', salvage: 'Salvage' };
 /** Start a sentence with a capital: the sim's reasons are written to follow "because". */
@@ -92,7 +96,6 @@ const BLIP_EVERY = 3;
 export function createShipView({ canvas, root, input, sim, clock, tempo = null, onBack, audio = null, settings = null, debug = false, crewReplies = {} }) {
   const { layout } = sim;
   const intercom = createIntercom(crewReplies);
-  let heard = null; // the last intercom reply: { name, text, at } (real time, so it shows while paused)
   const renderer = createShipRenderer(layout);
   const ctx = canvas.getContext('2d');
   let size = { w: 0, h: 0, dpr: 1 };
@@ -102,25 +105,26 @@ export function createShipView({ canvas, root, input, sim, clock, tempo = null, 
   let lastHand = null; // the crew member selected last: crate orders go to them if they can take them
   let movingCrate = null; // a crate id; while set, tapping a room of ours has it carried there
   let monitor = { x: 0, y: 0, w: 0, h: 0 }; // Margo's schematic screen, in CSS pixels
+  let shipBox = { x: 0, y: 0, w: 0, h: 0 }; // where the ship is drawn on it
   let scopeBox = null; // the passive scope (H.1)
   let boardCall = null; // the boarding card's live parts (H.2)
   let tollCall = null; // the toll card's live parts (H.3)
   let impacts = []; // rounds that just landed on us, for a moment: { room, result, damage, effects, tick }
   let shake = null; // { tick, strength } the last hit on our ship, while the screen shakes
-  let roster = null; // the crew bar's live parts
+  let crewCards = null; // the crew column's live parts (H.9)
+  const channel = []; // Margo's channel (H.9): every line in it, hers and the crew's, kept across visits to port
+  let channelN = 0; // the last of her lines put in the channel
   let showCrawlways = false;
   let subscriptions = [];
   let nodes = null;
   let panel = null; // the status panel's live parts for the current selection
-  let power = null; // the power panel's live parts
   let refusal = null; // { text, until } the last order the ship refused, shown briefly
   let notice = null; // why the game paused itself, shown on the pause button until it resumes
   let typed = { n: 0, start: 0, shown: -1 }; // the AI line being typed out
-  let sheet = null; // which pop-up sheet is open: 'log' | 'settings' | null
+  let sheet = null; // which pop-up sheet is open: 'settings' | 'debug' | null
   let chart = null; // Margo's route chart (chart.js), while there is a run
   let chartOpen = false; // the chart is up on the monitor, over the schematic
   let situations = null; // the cards at the rooms where something wants dealing with (H.7)
-  let logShown = -1; // the last line number the open log has drawn
   const counts = { canvasTaps: 0, infos: 0 };
 
   // ---------- naming ----------
@@ -173,31 +177,41 @@ export function createShipView({ canvas, root, input, sim, clock, tempo = null, 
 
   // ---------- layout ----------
 
+  /**
+   * The people-first screen (H.9, D-251): the crew down the left, Margo's channel down the right, and between them
+   * her monitor. The ship takes the monitor's full width along the top; under it the card for whatever is picked
+   * (a room's actions, a crew member, a contact, or with nothing picked the helm) and the scope.
+   */
   function measure() {
     const w = canvas.clientWidth;
     const h = canvas.clientHeight;
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    // The ship gets the space between the top bar and the bottom panels, and is refitted if either moves.
-    const top = Math.round(nodes.top.getBoundingClientRect().bottom) + 10;
-    const bottom = Math.round(nodes.bottom.getBoundingClientRect().top) - 10;
-    if (w === size.w && h === size.h && dpr === size.dpr && top === size.top && bottom === size.bottom) return;
+    const slot = nodes.monitor.getBoundingClientRect();
+    const box = { x: Math.round(slot.left), y: Math.round(slot.top), w: Math.round(slot.width), h: Math.round(slot.height) };
+    if (w === size.w && h === size.h && dpr === size.dpr && box.x === monitor.x && box.y === monitor.y && box.w === monitor.w && box.h === monitor.h) return;
     if (w !== size.w || h !== size.h || dpr !== size.dpr) {
       canvas.width = Math.round(w * dpr);
       canvas.height = Math.round(h * dpr);
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     }
-    size = { w, h, dpr, top, bottom };
-    // The monitor: the space between the top bar and the dock, with a bezel round the schematic.
-    monitor = { x: 12, y: top, w: w - 24, h: Math.max(80, bottom - top) };
-    // The intercom line sits on the bottom edge of the monitor, inside the bezel.
-    nodes.intercom.style.left = `${monitor.x + 22}px`;
-    nodes.intercom.style.top = `${monitor.y + monitor.h - 58}px`;
-    // The chart takes the whole monitor when it is up (D-106).
-    if (chart) Object.assign(chart.node.style, { left: `${monitor.x}px`, top: `${monitor.y}px`, width: `${monitor.w}px`, height: `${monitor.h}px` });
-    // A small green screen is let into the corner of Margo's (D-073): the passive scope (H.1). Our ship is fitted to what is left.
-    const boxW = Math.round(Math.min(320, Math.max(240, monitor.w * 0.29)));
-    scopeBox = { x: monitor.x + monitor.w - boxW - 10, y: monitor.y + 10, w: boxW, h: monitor.h - 20 };
-    view = renderer.fit({ x: monitor.x + 12, y: monitor.y + 10, w: monitor.w - boxW - 34, h: monitor.h - 20 });
+    size = { w, h, dpr };
+    monitor = { ...box, h: Math.max(160, box.h) };
+    // The chart and the settings sheet take the whole monitor when they are up (D-106).
+    const whole = { left: `${monitor.x}px`, top: `${monitor.y}px`, width: `${monitor.w}px`, height: `${monitor.h}px` };
+    if (chart) Object.assign(chart.node.style, whole);
+    Object.assign(nodes.sheet.style, whole);
+    // The ship along the top, as wide as the glass allows and never more than three fifths of its height.
+    const inner = { x: monitor.x + 7, y: monitor.y + 8, w: monitor.w - 14, h: monitor.h - 30 };
+    const fitted = renderer.fit({ ...inner, h: Math.round(inner.h * 0.6) });
+    const tall = (layout.bounds.h + (layout.facing === 'up' ? 1.6 : 0)) * fitted.scale;
+    const spare = Math.round(inner.h * 0.6) - tall;
+    view = { ...fitted, oy: fitted.oy - spare / 2 };
+    shipBox = { x: inner.x, y: inner.y, w: inner.w, h: Math.round(tall) };
+    // Under it, the picked thing's card on the left and the scope on the right (H.1), as square as there is room for.
+    const below = { y: inner.y + shipBox.h + 12, h: inner.h - shipBox.h - 12 };
+    const side = Math.round(Math.max(200, Math.min(below.h, inner.w * 0.44, 380)));
+    scopeBox = { x: inner.x + inner.w - side, y: below.y, w: side, h: below.h };
+    Object.assign(nodes.status.style, { left: `${inner.x}px`, top: `${below.y}px`, width: `${inner.w - side - 12}px`, height: `${below.h}px` });
   }
 
   /** Our own people aboard a ship: the ones that can be tapped. Their boarders are only looked at. */
@@ -244,32 +258,39 @@ export function createShipView({ canvas, root, input, sim, clock, tempo = null, 
   /** When a line was said, on the ship clock (H.8). */
   const stamp = (tick) => clockText(tick);
 
-  /** Type the newest line out a few characters a frame. Real time, so a line finishes even if the game pauses on it. */
+  /**
+   * Her new lines go into the channel as she says them, and the newest types out a few characters a frame. Real
+   * time, so a line finishes even if the game pauses on it.
+   */
   function updateVoice() {
+    for (const line of sim.state.ai.log) {
+      if (line.n <= channelN) continue;
+      channelN = line.n;
+      addLine({ who: 'margo', n: line.n, tick: line.tick, text: line.text });
+      typed = { n: line.n, start: performance.now(), shown: -1 };
+    }
     const last = sim.state.ai.log.at(-1);
-    if (!last) return;
+    if (!last || !nodes.aiText) return;
     const now = performance.now();
-    if (last.n !== typed.n) typed = { n: last.n, start: now, shown: -1 };
+    if (last.n !== typed.n) return;
     const count = Math.min(last.text.length, Math.floor(((now - typed.start) / 1000) * TYPE_SPEED));
     if (count !== typed.shown) {
       if (count > typed.shown && count < last.text.length && count % BLIP_EVERY === 0) audio?.play('blip');
       typed.shown = count;
       nodes.aiText.textContent = last.text.slice(0, count);
       nodes.ai.classList.toggle('is-typing', count < last.text.length);
+      if (count < last.text.length) nodes.log.scrollTop = nodes.log.scrollHeight;
     }
     nodes.ai.classList.toggle('is-urgent', last.priority >= 4 && Boolean(sim.state.ai.speaking));
-    if (sheet === 'log' && logShown !== last.n) drawLog();
   }
 
-  /** Show what one of our crew just said over the intercom. */
+  /** What one of our crew just said over the intercom: a line in Margo's channel, in their name. */
   function hear(event, roomId) {
     const found = findCrew(sim, event.crew);
     if (!found) return;
     const said = intercom.reply(event, found.ship.layout.room(roomId)?.name ?? 'there');
     if (!said) return;
-    heard = { name: found.member.name, text: said.text, at: performance.now() };
-    nodes.intercom.replaceChildren(el('span', { class: 'stencil intercom__who' }, `Intercom · ${heard.name}`), el('span', { class: 'intercom__text', id: 'intercom-text' }, said.text));
-    nodes.intercom.hidden = false;
+    addLine({ who: found.member.id, name: found.member.name, colour: renderer.crewColour(found.member.index), tick: sim.state.tick, text: said.text });
     audio?.play('blip');
   }
 
@@ -278,7 +299,6 @@ export function createShipView({ canvas, root, input, sim, clock, tempo = null, 
     const held = sim.state.ai.objection;
     if (nodes.objection.hidden === Boolean(held)) {
       nodes.objection.hidden = !held;
-      nodes.aiButtons.hidden = Boolean(held);
       nodes.ai.classList.toggle('is-objecting', Boolean(held));
     }
     if (!held) return setText(nodes.aiName, 'M.A.R.G.O.');
@@ -288,19 +308,6 @@ export function createShipView({ canvas, root, input, sim, clock, tempo = null, 
     const answered = sim.state.commands.some((command) => command.type === 'captain.override' || command.type === 'captain.standDown');
     nodes.override.disabled = answered;
     nodes.standDown.disabled = answered;
-  }
-
-  function drawLog() {
-    const { log } = sim.state.ai;
-    logShown = log.at(-1)?.n ?? 0;
-    nodes.sheet.replaceChildren(
-      el('div', { class: 'stencil' }, 'M.A.R.G.O. log'),
-      log.length
-        ? el('ol', { class: 'ailog', id: 'ailog' }, log.map((line) => el('li', {}, el('time', {}, stamp(line.tick)), ' ', line.text)))
-        : el('p', { class: 'status__hint' }, 'She has not said anything yet.'),
-    );
-    const list = nodes.sheet.querySelector('.ailog');
-    if (list) list.scrollTop = list.scrollHeight;
   }
 
   function drawSettings() {
@@ -320,7 +327,6 @@ export function createShipView({ canvas, root, input, sim, clock, tempo = null, 
     sheet = sheet === which ? null : which;
     nodes.sheet.hidden = sheet === null;
     nodes.sheet.className = `panel sheet sheet--${sheet}`;
-    if (sheet === 'log') drawLog();
     if (sheet === 'settings') drawSettings();
     if (sheet === 'debug') drawDebug();
   }
@@ -409,90 +415,79 @@ export function createShipView({ canvas, root, input, sim, clock, tempo = null, 
     );
   }
 
-  function setPip(node, kind) {
-    const name = `pip pip--${kind}`;
-    if (node.className !== name) node.className = name;
-  }
 
-  // ---------- the switch panel and the watch bill ----------
+
+  // ---------- a station's switches, on its room's card (H.9) ----------
 
   /**
-   * The switch panel (H.4, D-185), where the breaker board was: the reactor's
-   * three outputs, the lights by deck, the lift motor, and every station with
-   * who has it and a switch to stand it down or to. Beside them the watch bill.
-   * It folds down to the reactor's load and who has the watch, and opens on
-   * demand (tap, or P). Bars are no longer routed, so the Q row does nothing.
+   * What the old switch panel did for one station, now on the card of the room it is in (H.9, D-252): stand it
+   * down or to, who runs it with nobody on it (Fill in, Hers, Crew only: the hand-off to Margo), and how she runs
+   * it. The reactor's room adds its three outputs, the lift's the lift motor.
    */
-  function buildPower() {
-    const summary = el('div', { class: 'power__summary', id: 'power-summary' });
-    const lights = el('div', { class: 'power__lights', id: 'power-lights' });
-    const load = el('i', { class: 'power__loadfill' });
-    const outputs = OUTPUT_LEVELS.map((level) => ({ level, node: button(`btn-output-${level}`, OUTPUT[level].name, () => order({ type: 'power.output', level })) }));
-    const decks = layout.decks.map((deck) => ({ deck, node: button(`btn-deck-${deck.id}`, deck.name.replace(/ deck$/i, ''), () => order({ type: 'deck.lights', deck: deck.id, on: deckLit(deck) === 0 })) }));
-    const allLights = button('btn-lights-all', 'All', () => order({ type: 'lights.all', on: litRooms(sim) === 0 }));
-    const lift = button('btn-lift', 'Lift', () => order({ type: 'power.lift', on: !sim.state.power.lift }));
-    const tiles = STATION_IDS.filter((id) => roomOfStation(sim, id)).map((id) => {
-      const who = el('span', { class: 'station__who' });
-      const rate = el('span', { class: 'station__rating' });
-      const stand = el('button', { class: 'btn station__stand', type: 'button', id: `btn-stand-${id}`, 'aria-label': `Stand ${STATIONS[id].name} down or to`, press: () => order({ type: 'station.stand', station: id, down: !sim.state.stations[id].down }) }, 'On');
-      // The name picks the station for Margo's row above (H.5): who runs it with nobody on it, and how she runs it.
-      // The name and the line under it are one button, so the tile is no taller than it was.
-      const pick = el('button', { class: 'station__pick', type: 'button', id: `btn-station-${id}`, 'aria-pressed': 'false', 'aria-label': `${STATIONS[id].name}: what Margo does with it`, press: () => pickStation(id) }, el('span', { class: 'station__name' }, STATIONS[id].name), el('span', { class: 'station__line' }, who, rate));
-      const node = el('div', { class: 'station', id: `station-${id}`, title: STATIONS[id].blurb }, pick, stand);
-      const lamp = el('i', { class: 'pip' });
-      const mini = el('div', { class: 'power__mini', id: `power-mini-${id}` }, el('span', {}, STATIONS[id].system ? SYSTEMS[STATIONS[id].system].code : 'HLM'), el('span', { class: 'power__minipips' }, lamp));
-      return { id, node, pick, who, rate, stand, lamp, mini };
-    });
-    // Margo's row (H.5, D-187, D-189): for the picked station, who runs it with nobody on it, and her standing order.
-    const margoName = el('span', { class: 'stencil power__rowname', id: 'margo-station' }, 'Margo');
-    const covers = COVER_IDS.map((cover) => ({ cover, node: button(`btn-cover-${cover}`, COVERS[cover].name, () => power.picked && order({ type: 'station.cover', station: power.picked, cover })) }));
-    const manners = [null, ...MANNER_IDS].map((manner) => ({ manner, node: button(`btn-manner-${manner ?? 'own'}`, manner ? MANNERS[manner].name : 'Her way', () => power.picked && order({ type: 'station.order', station: power.picked, manner })) }));
-    const margoNote = el('div', { class: 'power__margonote', id: 'margo-note' });
-    const margoRow = el('div', { class: 'power__row power__margo', id: 'switch-margo' }, margoName, covers.map((c) => c.node), el('span', { class: 'power__gap' }), manners.map((m) => m.node), margoNote);
-    const watchNote = el('div', { class: 'power__watch', id: 'watch-note' });
-    const watches = [1, 2, 3].map((count) => ({ count, node: button(`btn-watches-${count}`, count === 1 ? 'All hands' : `${count} watches`, () => order({ type: 'roster.watches', count })) }));
-    const muster = button('btn-muster', 'To stations', () => order({ type: 'roster.muster' }));
-    const toggle = el('button', { class: 'btn btn--small power__toggle', type: 'button', id: 'btn-breakers', 'aria-expanded': 'false', press: () => openBoard(!power.open) }, el('span', { id: 'breakers-label' }, 'Switches'), el('small', { class: 'power__key' }, 'P'));
-    const board = el(
+  function buildStation(id) {
+    const parts = { id };
+    parts.stand = el('button', { class: 'btn btn--small station__stand', type: 'button', id: `btn-stand-${id}`, 'aria-label': `Stand ${STATIONS[id].name} down or to`, press: () => order({ type: 'station.stand', station: id, down: !sim.state.stations[id].down }) }, 'On');
+    parts.who = el('span', { class: 'station__who', id: `station-${id}` });
+    parts.covers = id === 'ai_core' ? [] : COVER_IDS.map((cover) => ({ cover, node: button(`btn-cover-${cover}`, COVERS[cover].name, () => order({ type: 'station.cover', station: id, cover })) }));
+    parts.manners = MANNER_STATIONS.includes(id) ? [null, ...MANNER_IDS].map((manner) => ({ manner, node: button(`btn-manner-${manner ?? 'own'}`, manner ? MANNERS[manner].name : 'Her way', () => order({ type: 'station.order', station: id, manner })) })) : [];
+    parts.note = el('div', { class: 'status__hint station__note', id: 'margo-note' });
+    parts.outputs = id === 'reactor' ? OUTPUT_LEVELS.map((level) => ({ level, node: button(`btn-output-${level}`, OUTPUT[level].name, () => order({ type: 'power.output', level })) })) : [];
+    parts.node = el(
       'div',
-      { class: 'power__board', id: 'breaker-board', hidden: true },
-      el(
-        'div',
-        { class: 'power__switches' },
-        el('div', { class: 'power__row', id: 'switch-output' }, el('span', { class: 'stencil power__rowname' }, 'Reactor'), outputs.map((o) => o.node)),
-        el('div', { class: 'power__row', id: 'switch-lights' }, el('span', { class: 'stencil power__rowname' }, 'Lights'), decks.map((d) => d.node), allLights, lift),
-        el('div', { class: 'power__row', id: 'switch-watch' }, el('span', { class: 'stencil power__rowname' }, 'Watch'), watches.map((w) => w.node), muster),
-        margoRow,
-      ),
-      el('div', { class: 'power__stations', id: 'stations' }, tiles.map((t) => t.node)),
+      { class: 'station', id: `station-card-${id}` },
+      el('div', { class: 'station__head' }, el('span', { class: 'stencil' }, STATIONS[id].name), parts.who, parts.stand),
+      parts.outputs.length ? el('div', { class: 'status__controls station__row', id: 'switch-output' }, el('span', { class: 'stencil station__rowname' }, 'Output'), parts.outputs.map((o) => o.node)) : null,
+      parts.covers.length ? el('div', { class: 'status__controls station__row', id: 'switch-margo' }, el('span', { class: 'stencil station__rowname' }, 'Margo'), parts.covers.map((c) => c.node)) : null,
+      parts.manners.length ? el('div', { class: 'status__controls station__row' }, el('span', { class: 'stencil station__rowname' }, 'Runs it'), parts.manners.map((m) => m.node)) : null,
+      parts.note,
     );
-    const folded = el('div', { class: 'power__folded', id: 'breakers-folded' }, tiles.map((t) => t.mini));
-    power = { summary, lights, load, outputs, decks, allLights, lift, tiles, watchNote, watches, muster, toggle, board, folded, margoRow, margoName, covers, manners, margoNote, picked: null, open: false, node: null };
-    power.node = el(
-      'div',
-      { class: 'panel power breakers is-closed', id: 'power' },
-      el('div', { class: 'power__reactor' }, el('div', { class: 'stencil' }, 'Reactor'), el('div', { class: 'power__load', title: 'Reactor load: what a scope reads as our heat' }, load), summary, lights, watchNote, toggle),
-      board,
-      folded,
-    );
-    return power.node;
+    return parts;
   }
 
-  /** Open or fold the switch panel. */
-  function openBoard(open) {
-    if (power.open === open) return;
-    power.open = open;
-    power.board.hidden = !open;
-    power.folded.hidden = open;
-    power.node.classList.toggle('is-closed', !open);
-    power.toggle.setAttribute('aria-expanded', String(open));
-    setText(power.toggle.firstChild, open ? 'Fold' : 'Switches');
+  /** A lift's card has the lift motor and nothing else to do with a station. */
+  function updateLift(node) {
+    node.classList.toggle('is-on', sim.state.power.lift);
+    node.setAttribute('aria-pressed', String(sim.state.power.lift));
+    setText(node, sim.state.power.lift ? 'Lift motor on' : 'Lift motor off');
+    node.title = sim.state.power.lift ? 'The lift motor is running.' : 'The lift motor is off: the lifts are cranked by hand.';
   }
 
-  /** Pick the station the Margo row is about; picked again, the row folds away. */
-  function pickStation(id) {
-    power.picked = power.picked === id ? null : id;
-    updatePower();
+  function updateStation(parts) {
+    const { id } = parts;
+    const station = STATIONS[id];
+    const system = station.system ? sim.state.systems[station.system] : null;
+    const entry = sim.state.stations[id];
+    const run = rating(sim, id);
+    setText(parts.who, `${holderText(id)}${run > 0 ? ` ${run.toFixed(1)}` : ''}`);
+    parts.who.classList.toggle('is-dead', run === 0);
+    setText(parts.stand, entry.down ? 'Off' : 'On');
+    parts.stand.classList.toggle('is-on', !entry.down);
+    parts.stand.setAttribute('aria-pressed', String(!entry.down));
+    parts.stand.disabled = Boolean(system?.lost);
+    for (const { cover, node } of parts.covers) {
+      node.classList.toggle('is-on', entry.cover === cover);
+      node.setAttribute('aria-pressed', String(entry.cover === cover));
+      const why = entry.cover === cover ? null : sim.whyNot({ type: 'station.cover', station: id, cover });
+      node.classList.toggle('is-blocked', Boolean(why));
+      node.title = why ? sentence(why) : COVERS[cover].blurb;
+    }
+    for (const { manner, node } of parts.manners) {
+      node.classList.toggle('is-on', entry.order === manner);
+      node.setAttribute('aria-pressed', String(entry.order === manner));
+      node.title = manner ? MANNERS[manner].blurb : 'Leave it to her judgement.';
+    }
+    const limit = outputLimit(sim);
+    const output = sim.state.power.output;
+    for (const { level, node } of parts.outputs) {
+      node.classList.toggle('is-on', output === level && limit !== null);
+      node.setAttribute('aria-pressed', String(output === level));
+      const why = level === output ? null : sim.whyNot({ type: 'power.output', level });
+      node.title = why ? sentence(why) : level === 'low' ? 'Everything works slower, and she runs cool.' : level === 'hard' ? 'Everything works faster, and she glows. Needs a hand on the reactor.' : 'The book figure.';
+      node.classList.toggle('is-blocked', Boolean(why));
+    }
+    const load = margoLoad(sim);
+    const stretched = load.held > load.attention ? ` She has ${load.held} stations and attention for ${Math.floor(load.attention)}.` : '';
+    setText(parts.note, `${id === 'ai_core' ? 'Her own core.' : MANNER_STATIONS.includes(id) ? margoText(id) : 'She keeps the reactor at its output.'}${stretched}`);
   }
 
   /** Who has a station, in a word or two. */
@@ -518,84 +513,169 @@ export function createShipView({ canvas, root, input, sim, clock, tempo = null, 
     return `${order} ${how}${entry.why && entry.why !== 'order' ? `: ${WHY[entry.why]}` : ''}.`;
   }
 
-  function updatePower() {
-    const limit = outputLimit(sim);
-    const loaded = reactorLoad(sim);
-    const output = sim.state.power.output;
-    setText(power.summary, limit === null ? 'Reactor dead' : `${OUTPUT[output].name} · load ${percent(loaded)}`);
-    power.summary.classList.toggle('is-alarm', limit !== 'hard');
-    const width = `${Math.round(loaded * 100)}%`;
-    if (power.load.style.width !== width) power.load.style.width = width;
-    setText(power.lights, `Lights · ${litRooms(sim)} rooms`);
+  // ---------- the crew column (H.9) ----------
+
+  /**
+   * The crew down the left of the screen (H.9, D-251): a card each, with their face, name, role, post, watch, what
+   * they are doing and how they are. Tap a card to pick them, then a room to send them. The watch bill sits at
+   * the head of the column, where the switch panel kept it.
+   */
+  function buildCrewColumn() {
+    const watchNote = el('div', { class: 'crewcol__watch', id: 'watch-note' });
+    const watches = [1, 2, 3].map((count) => ({ count, node: button(`btn-watches-${count}`, count === 1 ? 'All' : `${count}`, () => order({ type: 'roster.watches', count }), 'crewcol__watchbtn') }));
+    for (const { count, node } of watches) node.setAttribute('aria-label', count === 1 ? 'All hands' : `${count} watches`);
+    const muster = button('btn-muster', 'To stations', () => order({ type: 'roster.muster' }), 'crewcol__muster');
+    const cards = ourCrew(sim).map(({ member }) => {
+      const face = el('canvas', { class: 'crewcard__face', width: 96, height: 96, 'aria-hidden': 'true' });
+      const name = el('span', { class: 'crewcard__name' }, member.name);
+      const watch = el('span', { class: 'crewcard__watch' });
+      const role = el('span', { class: 'crewcard__role' });
+      const doing = el('span', { class: 'crewcard__doing' });
+      const mood = el('span', { class: 'crewcard__mood' });
+      const health = el('i', { class: 'crewcard__health' });
+      const node = el(
+        'button',
+        { class: 'btn crewcard', type: 'button', id: `crew-${member.id}`, press: () => selectCrew(selectedCrew === member.id ? null : member.id) },
+        el('span', { class: 'crewcard__num', style: `background:${renderer.crewColour(member.index)}` }, String(member.index + 1)),
+        face,
+        el('span', { class: 'crewcard__body' }, el('span', { class: 'crewcard__top' }, name, watch), role, doing, mood, el('span', { class: 'crewcard__bar' }, health)),
+      );
+      return { id: member.id, node, face, role, watch, doing, mood, health, drawn: '' };
+    });
+    crewCards = { cards, watchNote, watches, muster };
+    return el(
+      'aside',
+      { class: `crewcol${cards.length > 6 ? ' crewcol--many' : ''}`, id: 'crewbar', 'aria-label': 'Crew' },
+      el('div', { class: 'panel crewcol__head' }, el('div', { class: 'stencil' }, 'Crew'), watchNote, el('div', { class: 'crewcol__watches', id: 'switch-watch' }, watches.map((w) => w.node), muster)),
+      el('div', { class: 'crewcol__cards' }, cards.map((card) => card.node)),
+    );
+  }
+
+  /** A head and shoulders for a crew card, drawn with the same body as on the decks (D-132). Redrawn only when it changes. */
+  function drawFace(card, member, view) {
+    const key = `${view.alive}|${view.flags.suit ?? false}|${view.flags.asleep ?? false}`;
+    if (card.drawn === key) return;
+    card.drawn = key;
+    const c = card.face.getContext('2d');
+    c.clearRect(0, 0, 96, 96);
+    c.fillStyle = '#0b0f14';
+    c.fillRect(0, 0, 96, 96);
+    if (!member) return;
+    drawBody(c, { x: 48, feet: 168, s: 74, colour: renderer.crewColour(member.index), skin: skinOf(member.index), role: member.role, facing: 1, pose: 'stand', suit: Boolean(member.suit), dim: !view.alive });
+  }
+
+  function updateCrewColumn() {
     const { roster } = sim.state;
     const left = watchLeft(sim);
-    setText(power.watchNote, roster.watches > 1 ? `${watchName(roster.on)} watch · ${hoursText(left / SHIP_HOUR)} left` : roster.watches === 1 ? 'All hands' : 'No watch bill');
-    for (const { level, node } of power.outputs) {
-      node.classList.toggle('is-on', output === level && limit !== null);
-      node.setAttribute('aria-pressed', String(output === level));
-      const why = level === output ? null : sim.whyNot({ type: 'power.output', level });
-      node.title = why ? sentence(why) : level === 'low' ? 'Everything works slower, and she runs cool.' : level === 'hard' ? 'Everything works faster, and she glows. Needs a hand on the reactor.' : 'The book figure.';
-      node.classList.toggle('is-blocked', Boolean(why));
-    }
-    for (const { deck, node } of power.decks) {
-      const lit = deckLit(deck);
-      node.classList.toggle('is-on', lit > 0);
-      node.setAttribute('aria-pressed', String(lit > 0));
-    }
-    power.allLights.classList.toggle('is-on', litRooms(sim) > 0);
-    power.lift.classList.toggle('is-on', sim.state.power.lift);
-    power.lift.setAttribute('aria-pressed', String(sim.state.power.lift));
-    power.lift.title = sim.state.power.lift ? 'The lift motor is running.' : 'The lift motor is off: the lifts are cranked by hand.';
-    for (const tile of power.tiles) {
-      const station = STATIONS[tile.id];
-      const system = station.system ? sim.state.systems[station.system] : null;
-      const down = sim.state.stations[tile.id].down;
-      const run = rating(sim, tile.id);
-      const by = holderOf(sim, tile.id);
-      setText(tile.who, holderText(tile.id));
-      setText(tile.rate, run > 0 ? run.toFixed(1) : '');
-      setText(tile.stand, down ? 'Off' : 'On');
-      tile.stand.classList.toggle('is-on', !down);
-      tile.stand.setAttribute('aria-pressed', String(!down));
-      tile.stand.disabled = Boolean(system?.lost);
-      tile.node.classList.toggle('is-dead', run === 0);
-      tile.node.classList.toggle('is-crew', by !== null && by !== 'margo');
-      tile.node.classList.toggle('is-damaged', Boolean(system && system.damage > 0));
-      setPip(tile.lamp, system && system.damage >= system.level ? 'broken' : run > 0 ? 'on' : 'off');
-      tile.mini.classList.toggle('is-dead', run === 0);
-      tile.mini.classList.toggle('is-damaged', Boolean(system && system.damage > 0));
-    }
-    for (const { count, node } of power.watches) {
+    setText(crewCards.watchNote, roster.watches > 1 ? `${watchName(roster.on)} watch · ${hoursText(left / SHIP_HOUR)} left` : roster.watches === 1 ? 'All hands' : 'No watch bill');
+    for (const { count, node } of crewCards.watches) {
       node.classList.toggle('is-on', roster.watches === count);
       node.setAttribute('aria-pressed', String(roster.watches === count));
     }
-    // Margo's row, for the picked station: only while one is picked, so the panel is no taller than it need be.
-    const picked = power.picked;
-    for (const tile of power.tiles) {
-      tile.node.classList.toggle('is-picked', tile.id === picked);
-      tile.pick.setAttribute('aria-pressed', String(tile.id === picked));
+    for (const card of crewCards.cards) {
+      const view = crewCardView(sim, card.id);
+      drawFace(card, sim.state.crew[card.id] ?? findCrew(sim, card.id)?.member ?? null, view);
+      setText(card.role, view.taken || !view.alive ? view.role ?? '' : `${view.role} · ${view.post}`);
+      setText(card.watch, view.watchTag ?? '');
+      card.watch.title = view.watch ? `${view.watch} watch` : '';
+      card.watch.classList.toggle('is-below', Boolean(view.below));
+      setText(card.doing, view.doing);
+      setText(card.mood, view.mood);
+      card.node.title = view.detail ?? '';
+      card.mood.classList.toggle('is-alarm', Boolean(view.alarm));
+      const width = `${Math.round(view.health * 100)}%`;
+      if (card.health.style.width !== width) card.health.style.width = width;
+      const flags = view.flags ?? {};
+      card.node.classList.toggle('is-selected', selectedCrew === card.id && !view.taken);
+      card.node.classList.toggle('is-dead', !view.alive);
+      card.node.classList.toggle('is-asleep', Boolean(flags.asleep));
+      card.node.classList.toggle('is-tired', Boolean(flags.tired));
+      card.node.classList.toggle('is-hungry', Boolean(flags.hungry));
+      card.node.classList.toggle('is-slipping', Boolean(flags.slipping));
+      card.node.classList.toggle('is-away', Boolean(view.away));
+      card.node.classList.toggle('is-hurt', view.alive && Boolean(flags.hurt));
+      card.node.setAttribute('aria-pressed', String(selectedCrew === card.id));
     }
-    power.margoRow.hidden = !picked;
-    if (!picked) return;
-    const entry = sim.state.stations[picked];
-    const load = margoLoad(sim);
-    setText(power.margoName, `Margo · ${STATIONS[picked].name}`);
-    for (const { cover, node } of power.covers) {
-      node.classList.toggle('is-on', entry.cover === cover);
-      node.setAttribute('aria-pressed', String(entry.cover === cover));
-      const why = entry.cover === cover ? null : sim.whyNot({ type: 'station.cover', station: picked, cover });
-      node.classList.toggle('is-blocked', Boolean(why));
-      node.title = why ? sentence(why) : COVERS[cover].blurb;
+  }
+
+  // ---------- Margo's channel (H.9) ----------
+
+  /**
+   * Margo's channel down the right of the screen (H.9, D-253): her face, which stations she is holding, and a
+   * running transcript where she and the crew speak; the captain answers with the reply chips under it (her
+   * objection, a party at the lock, a toll). It takes the place of her text box, her log and the cards over the dock.
+   */
+  function buildChannel() {
+    nodes.aiName = el('span', { class: 'stencil channel__name', id: 'ai-name' }, 'M.A.R.G.O.');
+    nodes.heldNote = el('span', { class: 'channel__heldnote', id: 'margo-holding' });
+    nodes.held = el('div', { class: 'channel__held', id: 'margo-held' });
+    nodes.log = el('ol', { class: 'channel__log ailog', id: 'ailog', 'aria-live': 'polite' });
+    // The captain's two answers when she holds an order: chips under the transcript, only while she does.
+    nodes.override = button('btn-override', 'Do it anyway', () => order({ type: 'captain.override' }), 'btn--danger chip');
+    nodes.standDown = button('btn-stand-down', 'Stand down', () => order({ type: 'captain.standDown' }), 'chip');
+    nodes.objection = el('div', { class: 'channel__chips', id: 'objection', hidden: true }, nodes.standDown, nodes.override);
+    nodes.ai = el(
+      'aside',
+      { class: 'panel channel aibox', id: 'aibox', 'aria-label': "Margo's channel" },
+      el(
+        'div',
+        { class: 'channel__head' },
+        el('div', { class: 'margo-face', 'aria-hidden': 'true' }, el('div', { class: 'margo-face__eye' }, el('div', { class: 'margo-face__iris' })), el('div', { class: 'margo-face__mouth' })),
+        el('div', { class: 'channel__who' }, nodes.aiName, nodes.heldNote),
+      ),
+      nodes.held,
+      nodes.log,
+      el('div', { class: 'channel__calls' }, buildCalls(), nodes.objection),
+    );
+    nodes.aiText = null;
+    nodes.intercom = null;
+    // The transcript outlives the screen: coming back from port or an event shows it as it was, whole.
+    for (const line of channel) addLine(line, true);
+    return nodes.ai;
+  }
+
+  /** Put a line in the transcript: Margo's (amber) or a crew member's (their colour, their name). */
+  function addLine(line, replay = false) {
+    const text = el('span', { class: 'channel__text' }, line.text);
+    const item = el(
+      'li',
+      { class: `channel__line channel__line--${line.who === 'margo' ? 'margo' : line.who === 'note' ? 'note' : 'crew'}` },
+      el('time', {}, stamp(line.tick)),
+      ' ',
+      line.who === 'margo' || line.who === 'note' ? null : el('span', { class: 'channel__speaker', style: line.colour ? `color:${line.colour}` : '' }, `${line.name}: `),
+      text,
+    );
+    nodes.log.append(item);
+    while (nodes.log.children.length > CHANNEL_LINES) nodes.log.firstElementChild.remove();
+    if (line.who === 'margo') {
+      nodes.aiText?.removeAttribute('id');
+      text.id = 'ai-text';
+      nodes.aiText = text;
+    } else if (line.who !== 'note') {
+      nodes.intercom?.removeAttribute('id');
+      nodes.intercom?.querySelector('#intercom-text')?.removeAttribute('id');
+      item.id = 'intercom';
+      text.id = 'intercom-text';
+      nodes.intercom = item;
     }
-    const mannered = MANNER_STATIONS.includes(picked);
-    for (const { manner, node } of power.manners) {
-      node.hidden = !mannered;
-      node.classList.toggle('is-on', entry.order === manner);
-      node.setAttribute('aria-pressed', String(entry.order === manner));
-      node.title = manner ? MANNERS[manner].blurb : 'Leave it to her judgement.';
-    }
-    const stretched = load.held > load.attention ? ` She has ${load.held} stations and attention for ${Math.floor(load.attention)}.` : '';
-    setText(power.margoNote, `${picked === 'ai_core' ? 'Her own core.' : mannered ? margoText(picked) : 'She keeps the reactor at its output.'}${stretched}`);
+    if (!replay) channel.push(line);
+    if (channel.length > CHANNEL_LINES) channel.shift();
+    nodes.log.scrollTop = nodes.log.scrollHeight;
+    return text;
+  }
+
+  /** The head of the channel: the stations she is holding, each a tap away from its room's card (the hand-offs). */
+  let heldKey = '';
+  function updateHeld() {
+    const { held, attention, stretched } = heldStations(sim);
+    const key = `${held.map((h) => h.id).join(',')}|${attention}|${stretched}`;
+    if (key === heldKey) return;
+    heldKey = key;
+    setText(nodes.heldNote, held.length ? `Holding ${held.length} station${held.length === 1 ? '' : 's'}${stretched ? `, attention for ${attention}` : ''}` : 'Holding no stations');
+    nodes.heldNote.classList.toggle('is-alarm', stretched);
+    nodes.held.replaceChildren(
+      ...held.map((item) => el('button', { class: 'btn chip chip--station', type: 'button', id: `btn-held-${item.id}`, title: `${item.name}: open its room`, press: () => select({ kind: 'room', id: item.room }) }, item.code)),
+    );
   }
 
   // A weapon order names a room on their ship, which may share an id with one of ours.
@@ -817,7 +897,7 @@ export function createShipView({ canvas, root, input, sim, clock, tempo = null, 
     ctx.font = "700 10px ui-monospace, 'SF Mono', Menlo, Consolas, monospace";
     ctx.textBaseline = 'bottom';
     ctx.textAlign = 'right';
-    ctx.fillText('M.A.R.G.O. SCHEMATIC · COMPANY ISSUE', x + w - (scopeBox ? scopeBox.w + 28 : 18), y + h - 6);
+    ctx.fillText('M.A.R.G.O. SCHEMATIC · COMPANY ISSUE', x + w - 18, y + h - 6);
     if (scopeBox) drawScope(ctx, scopeBox, scopeView(sim), { selected: selected?.kind === 'contact' ? selected.id : null, active: sensorsUp(sim), reduce: reduceMotion(), marks: situationMarks() });
     ctx.textAlign = 'start';
     ctx.textBaseline = 'alphabetic';
@@ -994,49 +1074,6 @@ export function createShipView({ canvas, root, input, sim, clock, tempo = null, 
     buildPanel();
   }
 
-  function buildRoster() {
-    const chips = ourCrew(sim).map(({ member }) => {
-      const health = el('i', { class: 'crewchip__health' });
-      const task = el('span', { class: 'crewchip__task' });
-      const node = el(
-        'button',
-        { class: 'btn crewchip', type: 'button', id: `crew-${member.id}`, title: roleOf(member)?.name ?? '', press: () => selectCrew(selectedCrew === member.id ? null : member.id) },
-        el('span', { class: 'crewchip__num', style: `background:${renderer.crewColour(member.index)}` }, String(member.index + 1)),
-        el('span', { class: 'crewchip__body' }, el('span', { class: 'crewchip__name' }, member.name), task, el('span', { class: 'crewchip__bar' }, health)),
-      );
-      return { id: member.id, node, health, task };
-    });
-    roster = chips;
-    // A big crew (D-130) packs the chips tighter so all of them fit beside the ship's name.
-    return el('div', { class: `crewbar${chips.length > 4 ? ' crewbar--many' : ''}`, id: 'crewbar' }, chips.map((chip) => chip.node));
-  }
-
-  function updateRoster() {
-    for (const chip of roster) {
-      const found = findCrew(sim, chip.id);
-      if (!found) {
-        // Taken off the ship by a bounty party (H.2).
-        setText(chip.task, 'Taken');
-        chip.node.classList.add('is-dead');
-        chip.node.classList.remove('is-selected');
-        continue;
-      }
-      const { member, ship } = found;
-      const away = ship !== sim && member.alive;
-      setText(chip.task, member.alive ? `${away ? 'Aboard: ' : ''}${member.asleep ? 'Asleep' : member.slip > 0 ? 'Fumbled it' : member.eating ? 'Eating' : member.task === 'idle' && member.post && stationOfRoom(sim, member.room) === member.post ? `On ${STATIONS[member.post].name.toLowerCase()}` : (CHIP_TASKS[member.task] ?? 'Standing by')}` : 'Dead');
-      chip.node.classList.toggle('is-asleep', Boolean(member.alive && member.asleep));
-      chip.node.classList.toggle('is-tired', Boolean(member.alive && member.fatigue > 0.6));
-      chip.node.classList.toggle('is-hungry', Boolean(member.alive && hungryWord(member)));
-      chip.node.classList.toggle('is-slipping', Boolean(member.alive && member.slip > 0));
-      chip.node.classList.toggle('is-away', away);
-      const width = `${Math.round(member.health * 100)}%`;
-      if (chip.health.style.width !== width) chip.health.style.width = width;
-      chip.node.classList.toggle('is-selected', selectedCrew === chip.id);
-      chip.node.classList.toggle('is-dead', !member.alive);
-      chip.node.classList.toggle('is-hurt', member.alive && member.health < 0.35);
-    }
-  }
-
   function buildPanel() {
     panel = null;
     if (selectedCrew) {
@@ -1125,7 +1162,9 @@ export function createShipView({ canvas, root, input, sim, clock, tempo = null, 
     }
     if (!selected) {
       // Nothing picked: how loud the ship is and why (D-074), and the one switch that matters most to it.
-      const stats = { total: stat('Signature'), light: stat('Light'), noise: stat('Noise'), heat: stat('Heat'), burn: stat('Burn'), trouble: stat('Trouble'), eyes: stat('Eyes'), hull: stat('Hull'), gun: stat('Gun'), pd: stat('Point def.') };
+      const stats = { total: stat('Signature'), light: stat('Light'), noise: stat('Noise'), heat: stat('Heat'), burn: stat('Burn'), trouble: stat('Trouble'), eyes: stat('Eyes'), reactor: stat('Reactor'), hull: stat('Hull'), gun: stat('Gun'), pd: stat('Point def.') };
+      // The reactor's load is what a scope reads as our heat (H.4); its outputs are on the reactor room's card (H.9).
+      stats.reactor.value.id = 'power-summary';
       const dark = button('btn-dark', 'Go dark', () => order({ type: 'lights.all', on: litRooms(sim) === 0 }));
       // The helm (H.1): light the drive or cut it and drift, and a flare for something to chase instead of us.
       const burn = button('btn-burn', 'Burn', () => order({ type: 'helm.burn', on: !sim.state.helm.burn }));
@@ -1139,7 +1178,8 @@ export function createShipView({ canvas, root, input, sim, clock, tempo = null, 
       nodes.status.replaceChildren(
         el('div', { class: 'status__head' }, el('div', { class: 'status__title', id: 'status-title' }, layout.name), el('div', { class: 'stencil' }, 'What we give off'), note),
         el('div', { class: 'status__stats' }, Object.values(stats).map((s) => s.node)),
-        el('div', { class: 'status__controls status__controls--row' }, dark, burn, flare, brace, fetch, el('span', { class: 'status__hint status__hint--inline' }, 'Tap crew, then a room, to send them. Tap the scope to turn the ship, or a contact on it to read it and lay the gun on it. Long-press anything to ask what it is.')),
+        el('div', { class: 'status__controls status__controls--row' }, dark, burn, flare, brace, fetch),
+        el('p', { class: 'status__hint' }, 'Tap crew, then a room, to send them. Tap a room for what can be done there. Tap the scope to turn the ship, or a contact on it to read it. Long-press anything to ask what it is.'),
       );
       panel = { kind: 'ship', stats, dark, burn, flare, brace, braceNote, fetch, note };
       updatePanel();
@@ -1232,13 +1272,19 @@ export function createShipView({ canvas, root, input, sim, clock, tempo = null, 
           controls.push(button('btn-dbg-damage', 'Damage', hurt(1), 'btn--debug'), button('btn-dbg-repair', 'Repair', hurt(-1), 'btn--debug'));
         }
       }
-      const system = room.system ? SYSTEMS[room.system].name : room.kind === 'helm' ? 'Helm' : 'Corridor';
+      const system = room.system ? SYSTEMS[room.system].name : room.kind === 'helm' ? 'Helm' : room.kind === 'lift' ? 'Lift' : 'Corridor';
+      // The station in the room (H.9): what the switch panel did for it, here where it is.
+      const id = roomStation(sim, room.id);
+      const station = id ? buildStation(id) : null;
+      const lift = room.kind === 'lift' ? button('btn-lift', 'Lift motor', () => order({ type: 'power.lift', on: !sim.state.power.lift })) : null;
+      if (lift) controls.unshift(lift);
       nodes.status.replaceChildren(
         el('div', { class: 'status__head' }, el('div', { class: 'status__title', id: 'status-title' }, room.name), system.toLowerCase() !== room.name.toLowerCase() && el('div', { class: 'stencil' }, system), note),
         el('div', { class: 'status__stats' }, Object.values(stats).map((s) => s.node)),
         el('div', { class: 'status__controls' }, controls),
+        station?.node,
       );
-      panel = { kind: 'room', id: room.id, sys, stats, lights, deckLights, deck, vent, ventArmed: 0, repair, jettison, armedUntil: 0, note };
+      panel = { kind: 'room', id: room.id, sys, stats, lights, deckLights, deck, vent, ventArmed: 0, repair, jettison, armedUntil: 0, note, station, lift };
     } else {
       const door = layout.door(selected.id);
       const stats = { state: stat('State'), opening: stat('Opening') };
@@ -1322,6 +1368,9 @@ export function createShipView({ canvas, root, input, sim, clock, tempo = null, 
       panel.burn.classList.toggle('is-on', sim.state.helm.burn);
       setText(panel.flare, `Flare (${sim.state.helm.flares})`);
       panel.flare.disabled = sim.state.helm.flares < 1;
+      const limit = outputLimit(sim);
+      setText(panel.stats.reactor.value, limit === null ? 'Reactor dead' : `${OUTPUT[sim.state.power.output].name} · load ${percent(reactorLoad(sim))}`);
+      panel.stats.reactor.node.classList.toggle('is-alarm', limit !== 'hard');
       const { hull } = sim.state;
       setText(panel.stats.hull.value, `${hull.points} of ${hull.max}`);
       panel.stats.hull.node.classList.toggle('is-alarm', hull.points < hull.max / 2);
@@ -1458,6 +1507,8 @@ export function createShipView({ canvas, root, input, sim, clock, tempo = null, 
         const run = rating(sim, id);
         setText(panel.stats.system.value, run > 0 ? `${holderText(id)} · ${run.toFixed(1)}` : holderText(id).toLowerCase());
       }
+      if (panel.station) updateStation(panel.station);
+      if (panel.lift) updateLift(panel.lift);
       setText(panel.lights, r.lightsOn ? 'Lights off' : 'Lights on');
       panel.lights.disabled = r.jettisoned;
       if (panel.deckLights) {
@@ -1604,8 +1655,10 @@ export function createShipView({ canvas, root, input, sim, clock, tempo = null, 
       skipAhead();
       return;
     }
-    if (action === 'breakers') {
-      openBoard(!power.open);
+    if (action === 'helm') {
+      // The helm's card: nothing picked (H.9; P opened the switch panel before).
+      selectCrew(null);
+      select(null);
       return;
     }
     if (action === 'override') {
@@ -1642,25 +1695,10 @@ export function createShipView({ canvas, root, input, sim, clock, tempo = null, 
       pauseNote: el('small', { id: 'pause-note' }, 'Space bar'),
       skipLabel: el('span', {}, 'Next'),
       skipNote: el('small', { id: 'skip-note' }, 'N key'),
-      aiText: el('span', { class: 'aibox__text', id: 'ai-text' }),
       sheet: el('div', { class: 'panel sheet', id: 'sheet', hidden: true }),
-      intercom: el('div', { class: 'intercom', id: 'intercom', hidden: true, 'aria-live': 'polite' }),
-      aiName: el('span', { class: 'stencil aibox__name', id: 'ai-name' }, 'M.A.R.G.O.'),
+      // The space Margo's monitor gets: nothing in it but what the canvas draws.
+      monitor: el('div', { class: 'ship__monitor', id: 'monitor', 'aria-hidden': 'true' }),
     };
-    // The captain's two answers when she holds an order: shown in her box, in place of Log and Settings, only while she does.
-    nodes.override = button('btn-override', 'Do it anyway', () => order({ type: 'captain.override' }), 'btn--danger');
-    nodes.standDown = button('btn-stand-down', 'Stand down', () => order({ type: 'captain.standDown' }));
-    nodes.objection = el('div', { class: 'aibox__buttons aibox__objection', id: 'objection', hidden: true }, nodes.standDown, nodes.override);
-    nodes.aiButtons = el('div', { class: 'aibox__buttons' }, button('btn-log', 'Log', () => openSheet('log')), settings && button('btn-settings', 'Settings', () => openSheet('settings')));
-    // Margo: her face on the monitor, and what she is saying (D-073).
-    nodes.ai = el(
-      'div',
-      { class: 'panel aibox', id: 'aibox' },
-      el('div', { class: 'margo-face', 'aria-hidden': 'true' }, el('div', { class: 'margo-face__eye' }, el('div', { class: 'margo-face__iris' })), el('div', { class: 'margo-face__mouth' })),
-      el('div', { class: 'aibox__body' }, nodes.aiName, nodes.aiText),
-      nodes.objection,
-      nodes.aiButtons,
-    );
     nodes.pause = el('button', { class: 'btn btn--pause', type: 'button', id: 'btn-pause', press: () => clock.toggle() }, nodes.pauseLabel, nodes.pauseNote);
     // On to the next thing (F.3): skip ahead on a quiet crossing until something turns up.
     nodes.skip = el('button', { class: 'btn btn--skip', type: 'button', id: 'btn-skip', 'aria-label': 'On to the next thing', press: skipAhead }, nodes.skipLabel, nodes.skipNote);
@@ -1668,7 +1706,7 @@ export function createShipView({ canvas, root, input, sim, clock, tempo = null, 
       'div',
       { class: 'shipbar' },
       el('div', { class: 'panel shipbar__name' }, el('div', { class: 'stencil' }, layout.name), nodes.clock),
-      buildRoster(),
+      el('div', { class: 'shipbar__clockbtns' }, nodes.pause, tempo && sim.state.run ? nodes.skip : null),
       el(
         'div',
         { class: 'shipbar__buttons' },
@@ -1677,14 +1715,14 @@ export function createShipView({ canvas, root, input, sim, clock, tempo = null, 
         debug && button('btn-dbg-contact', 'Contact', () => order(sim.state.scope.contacts.length ? { type: 'debug.contact', clear: true } : { type: 'debug.contact', encounter: sim.encounters.all[0].id, state: 'closing', range: 25 }), 'btn--debug'),
         debug && button('btn-dbg-menu', 'More', () => openSheet('debug'), 'btn--debug'),
         sim.state.run && (nodes.chartButton = button('btn-chart', 'Chart', () => openChart(!chartOpen))),
+        settings && button('btn-settings', 'Settings', () => openSheet('settings')),
         button('btn-back', 'Back', onBack),
       ),
     );
-    nodes.bottom = el('div', { class: 'shipdock' }, nodes.sheet, nodes.ai, buildCalls(), el('div', { class: 'shipdock__row' }, nodes.status, tempo && sim.state.run ? el('div', { class: 'shipdock__clockbtns' }, nodes.pause, nodes.skip) : nodes.pause), buildPower());
     chart = sim.state.run ? createChart({ sim, order, onClose: () => openChart(false) }) : null;
     const hand = (member) => (member ? { id: member.id, name: member.name } : null);
     situations = createSituationCards({ sim, order, nearest: (room, about = []) => hand(nearestHand(sim, room, (member) => !about.includes(member.id))), selected: () => hand(selectedCrew && sim.state.crew[selectedCrew]?.alive && !sim.state.crew[selectedCrew].asleep ? sim.state.crew[selectedCrew] : null) });
-    root.replaceChildren(el('section', { class: 'ship' }, nodes.top, nodes.bottom, situations.node, nodes.info, nodes.intercom, chart?.node));
+    root.replaceChildren(el('section', { class: 'ship ship--people' }, nodes.top, buildCrewColumn(), nodes.monitor, buildChannel(), nodes.status, situations.node, nodes.sheet, nodes.info, chart?.node));
     if (chart) chart.node.hidden = !chartOpen;
     buildPanel();
   }
@@ -1762,11 +1800,13 @@ export function createShipView({ canvas, root, input, sim, clock, tempo = null, 
     enter() {
       sheet = null;
       build();
-      // Whatever she said before this screen opened is shown whole, not typed again.
+      // Whatever she said before this screen opened goes into the channel whole, not typed again.
+      updateVoice();
       const last = sim.state.ai.log.at(-1);
       typed = { n: last?.n ?? 0, start: -1e9, shown: -1 };
       canvas.hidden = false;
       size = { w: 0, h: 0, dpr: 1 }; // force a measure
+      monitor = { x: -1, y: -1, w: 0, h: 0 };
       measure();
       subscriptions = [
         input.on('tap', onTap),
@@ -1799,11 +1839,7 @@ export function createShipView({ canvas, root, input, sim, clock, tempo = null, 
     },
     /** Called every rendered frame, paused or not. */
     update() {
-      if (heard && performance.now() - heard.at > INTERCOM_MS) {
-        heard = null;
-        nodes.intercom.hidden = true;
-      }
-      updateCalls(); // first: a card coming or going moves the space the ship is fitted to
+      updateCalls();
       measure();
       const jolt = shakeOffset(clock.alpha);
       ctx.clearRect(0, 0, size.w, size.h);
@@ -1832,13 +1868,13 @@ export function createShipView({ canvas, root, input, sim, clock, tempo = null, 
       drawShots(clock.alpha);
       drawImpacts(clock.alpha);
       ctx.restore();
-      situations.update({ boxOf: (room) => roomBox(layout, view, room), bounds: { x: monitor.x, y: monitor.y, w: monitor.w - (scopeBox ? scopeBox.w + 20 : 0), h: monitor.h }, hidden: chartOpen });
+      situations.update({ boxOf: (room) => roomBox(layout, view, room), bounds: { x: monitor.x, y: monitor.y, w: monitor.w, h: monitor.h }, hidden: chartOpen || Boolean(sheet) });
       drawScanlines();
       updateClock();
       updateSkip();
       updatePanel();
-      updatePower();
-      updateRoster();
+      updateCrewColumn();
+      updateHeld();
       updateVoice();
       updateObjection();
       if (chartOpen) chart.update();
@@ -1848,10 +1884,17 @@ export function createShipView({ canvas, root, input, sim, clock, tempo = null, 
     /** Say why the game just paused itself. Shown on the pause button until play resumes. */
     announce(text) {
       notice = text;
+      if (nodes?.log) addLine({ who: 'note', tick: sim.state.tick, text: clock.paused ? `Paused: ${text}` : text });
     },
     /** For automated tests and the debug console. */
     debug: {
       targets: () => renderer.targets(view, oursOn(sim), { crates: sim.state.crates }),
+      /** Pick something the way a tap would ({ kind, id }), or nothing for the helm's card; nobody stays picked. */
+      pick(next = null) {
+        movingCrate = null;
+        selectCrew(null);
+        select(next);
+      },
       get movingCrate() {
         return movingCrate;
       },

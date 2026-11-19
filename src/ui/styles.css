@@ -338,8 +338,7 @@ body {
   min-width: 0;
 }
 
-.shipbar,
-.shipdock {
+.shipbar {
   display: flex;
   justify-content: space-between;
   gap: 12px;
@@ -373,22 +372,7 @@ body {
   gap: 10px;
 }
 
-.shipdock {
-  flex-direction: column;
-  gap: 8px;
-}
-
-.shipdock__row {
-  display: flex;
-  align-items: stretch;
-  gap: 12px;
-}
-
 /* ---------- the AI's text box, log and settings ---------- */
-
-.shipdock {
-  position: relative;
-}
 
 /* Margo's own corner of the monitor: her face, and her words in amber phosphor (D-073). */
 .aibox {
@@ -414,29 +398,6 @@ body {
   border-left-color: var(--alarm);
 }
 
-.aibox__body {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-
-.aibox__buttons {
-  display: flex;
-  gap: 8px;
-}
-
-.aibox__buttons .btn {
-  min-height: var(--tap);
-  padding-top: 4px;
-  padding-bottom: 4px;
-}
-
-.aibox__buttons[hidden] {
-  display: none;
-}
-
 /* She is holding an order (S2.10): the box goes red until the captain answers. */
 .aibox.is-objecting {
   border-left-color: var(--alarm);
@@ -450,12 +411,6 @@ body {
 .aibox__name {
   font-size: 0.68em;
   white-space: nowrap;
-}
-
-.aibox__text {
-  line-height: 1.35;
-  color: var(--amber);
-  text-shadow: 0 0 6px rgba(255, 179, 71, 0.45);
 }
 
 /* Her face: a camera eye in a cheap housing. It widens while she speaks, and goes red when it is bad. */
@@ -523,12 +478,6 @@ body {
   .aibox.is-typing .margo-face__mouth {
     animation: none;
   }
-}
-
-
-.aibox.is-typing .aibox__text::after {
-  content: '▌';
-  color: var(--amber);
 }
 
 .sheet {
@@ -605,127 +554,9 @@ body {
 
 /* ---------- crew bar ---------- */
 
-.crewbar {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 6px;
-  flex: 1;
-  min-width: 0;
-}
-
-.btn.crewchip {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 160px;
-  min-width: var(--tap); /* a crowded bar (a fight, with the debug buttons and the chart) squeezes them down to a tap and no less */
-  min-height: var(--tap);
-  padding: 6px 10px 6px 8px;
-  border-left-width: 2px;
-  border-left-color: var(--hull-edge);
-  letter-spacing: 0.06em;
-  text-transform: none;
-}
-
 /* Six or more crew (D-130): narrower chips, the number smaller, the name and task in small type. */
-.crewbar--many {
-  gap: 4px;
-  flex-wrap: nowrap;
-}
+
 /* With a big crew the ship's name stacks over its clock, to give the chips the room. */
-.shipbar:has(.crewbar--many) .shipbar__name {
-  flex-direction: column;
-  gap: 2px;
-  padding: 6px 12px;
-}
-.shipbar:has(.crewbar--many) .shipbar__name .stencil {
-  letter-spacing: 0.18em;
-}
-.crewbar--many .btn.crewchip {
-  width: 96px;
-  gap: 5px;
-  padding: 4px 6px 4px 5px;
-  letter-spacing: 0.02em;
-}
-.crewbar--many .crewchip__num {
-  width: 20px;
-  height: 20px;
-  font-size: 0.72em;
-  flex: none;
-}
-.crewbar--many .crewchip__name {
-  font-size: 0.7em;
-  letter-spacing: 0.02em;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.crewbar--many .crewchip__task {
-  font-size: 0.6em;
-}
-
-.crewchip__num {
-  display: grid;
-  place-items: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  color: #05070b;
-  font-weight: 700;
-}
-
-.crewchip__body {
-  display: grid;
-  gap: 2px;
-  flex: 1;
-  min-width: 0;
-}
-
-.crewchip__name {
-  text-transform: uppercase;
-  letter-spacing: 0.12em;
-}
-
-.crewchip__task {
-  font-size: 0.68em;
-  font-weight: 400;
-  color: #8b93a1;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.crewchip__bar {
-  display: block;
-  height: 4px;
-  background: #05070b;
-  border-radius: 2px;
-}
-
-.crewchip__health {
-  display: block;
-  height: 100%;
-  background: #8be28b;
-  border-radius: 2px;
-}
-
-.crewchip.is-hurt .crewchip__health {
-  background: var(--alarm);
-}
-
-.crewchip.is-selected {
-  border-color: var(--paper);
-  box-shadow: 0 0 0 2px var(--paper), 0 3px 0 #05070b;
-}
-
-.crewchip.is-dead {
-  color: #6a7180;
-}
-
-.crewchip.is-dead .crewchip__num {
-  background: #3a404b !important;
-}
 
 .status__hint--inline {
   align-self: center;
@@ -750,278 +581,6 @@ body {
 /* ---------- breaker board (S2.9, D-095) ---------- */
 
 /* Cheap company hardware: a grey steel box with rivets, folded down to a strip outside a fight. */
-.panel.breakers {
-  background:
-    radial-gradient(circle at 7px 7px, #6b7380 0 2px, transparent 2.5px),
-    radial-gradient(circle at calc(100% - 7px) 7px, #6b7380 0 2px, transparent 2.5px),
-    radial-gradient(circle at 7px calc(100% - 7px), #6b7380 0 2px, transparent 2.5px),
-    radial-gradient(circle at calc(100% - 7px) calc(100% - 7px), #6b7380 0 2px, transparent 2.5px),
-    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.015) 0 2px, transparent 2px 6px),
-    linear-gradient(#262b33, #1d2229);
-  border-color: #4a525e;
-}
-
-.btn.power__toggle {
-  min-height: var(--tap);
-  min-width: var(--tap);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-}
-
-/* Folded, the board is one low strip: the reactor gauge in a row, the lamps, and the handle. */
-.breakers.is-closed {
-  padding-top: 4px;
-  padding-bottom: 4px;
-}
-
-.breakers.is-closed .power__reactor {
-  flex-direction: row;
-  align-items: center;
-  gap: 12px;
-  max-width: none;
-}
-
-.breakers.is-closed .power__lights {
-  display: none;
-}
-
-.breakers.is-closed .power__toggle {
-  order: 9;
-}
-
-.power__folded {
-  flex: 1;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 6px 10px;
-}
-
-.power__folded[hidden],
-.power__tiles[hidden],
-.power__board[hidden] {
-  display: none;
-}
-
-.power__mini {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  min-width: 48px;
-  font-size: 0.72em;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  color: var(--amber);
-}
-
-.power__mini.is-dead {
-  color: #6a7180;
-}
-
-.power__mini.is-damaged {
-  color: var(--alarm);
-}
-
-.power__minipips {
-  display: flex;
-  gap: 3px;
-  height: 8px;
-}
-
-.power__minipips .pip {
-  max-width: 12px;
-  border-width: 1.5px;
-}
-
-.power__name {
-  font-size: 0.62em;
-  color: #8b93a1;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* The breakers themselves: a dark recess with a lamp strip and a rocker, eight in one row. */
-.breakers .power__tiles {
-  flex-wrap: nowrap;
-  gap: 5px;
-}
-
-.breakers .power__tile {
-  flex: 1 1 0;
-  width: auto;
-  min-width: 96px;
-  gap: 4px;
-  padding: 3px 3px 4px;
-  background: rgba(0, 0, 0, 0.28);
-  border: 1px solid #343b45;
-  border-radius: 3px;
-  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.6);
-}
-
-/* ---------- switch panel and watch bill (H.4, D-185) ---------- */
-
-/* Open, the panel is two rows of big switches over a row of stations. */
-.power__board {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.power__switches {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px 18px;
-}
-
-.power__row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 5px;
-}
-
-.power__rowname {
-  min-width: 58px;
-  font-size: 0.72em;
-  color: #8b93a1;
-}
-
-.power__row .btn {
-  min-height: var(--tap);
-  min-width: var(--tap);
-  padding: 0 10px;
-  font-size: 0.8em;
-}
-
-.power__row .btn.is-blocked {
-  opacity: 0.55;
-}
-
-/* The reactor's load: what a scope reads as our heat. */
-.power__load {
-  width: 100%;
-  min-width: 70px;
-  height: 8px;
-  border: 1.5px solid var(--amber-dim);
-  border-radius: 2px;
-  box-sizing: border-box;
-}
-
-.power__loadfill {
-  display: block;
-  height: 100%;
-  background: var(--amber);
-}
-
-.power__watch {
-  color: #8b93a1;
-  white-space: nowrap;
-}
-
-.power__stations {
-  display: flex;
-  gap: 5px;
-}
-
-/* A station: its name, who has it and how well, and its switch. */
-.station {
-  flex: 1 1 0;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  padding: 3px 3px 4px;
-  background: rgba(0, 0, 0, 0.28);
-  border: 1px solid #343b45;
-  border-radius: 3px;
-  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.6);
-  font-size: 0.78em;
-}
-
-.station__name {
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--amber);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* The name is a button: it picks the station for Margo's row (H.5). */
-.station__pick {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 2px;
-  min-height: var(--tap);
-  min-width: 0;
-  padding: 0;
-  background: none;
-  border: 0;
-  border-bottom: 1px solid transparent;
-  color: inherit;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-
-.station.is-picked {
-  border-color: var(--amber);
-}
-
-.station.is-picked .station__pick {
-  border-bottom-color: var(--amber);
-}
-
-/* Margo's row: who runs the picked station with nobody on it, her standing order, and what she is doing. */
-.power__gap {
-  width: 8px;
-}
-
-.power__margo[hidden] {
-  display: none;
-}
-
-.power__margonote {
-  flex: 1 1 160px;
-  color: #aab2bf;
-  font-size: 0.8em;
-}
-
-.station__line {
-  display: flex;
-  justify-content: space-between;
-  gap: 4px;
-  color: #aab2bf;
-  white-space: nowrap;
-  overflow: hidden;
-}
-
-/* Someone of ours on a station reads differently from Margo: brighter, and marked. */
-.station.is-crew .station__who {
-  color: var(--paper);
-  font-weight: 700;
-}
-
-.station.is-crew .station__who::before {
-  content: '\25B8 ';
-}
-
-.station.is-dead .station__name,
-.station.is-dead .station__line {
-  color: #6a7180;
-}
-
-.station.is-damaged .station__name {
-  color: var(--alarm);
-}
 
 .btn.station__stand {
   min-height: var(--tap);
@@ -1042,130 +601,11 @@ body {
   padding: 0 8px;
 }
 
-.crewchip.is-asleep {
-  opacity: 0.6;
-}
-
-.crewchip.is-tired .crewchip__task::after {
-  content: ' \00B7 tired';
-  color: var(--sodium);
-}
-
 /* F.7: hungry, and both; a fumble flashes the chip's edge. */
-.crewchip.is-hungry .crewchip__task::after {
-  content: ' \00B7 hungry';
-  color: var(--sodium);
-}
-
-.crewchip.is-tired.is-hungry .crewchip__task::after {
-  content: ' \00B7 tired, hungry';
-}
-
-.crewchip.is-slipping {
-  outline: 2px solid var(--sodium);
-}
 
 /* ---------- intercom (S2.9, D-094) ---------- */
 
-.intercom {
-  position: absolute;
-  z-index: 3;
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  max-width: 60%;
-  padding: 6px 12px;
-  background: rgba(7, 11, 18, 0.86);
-  border: 1px solid var(--amber-dim);
-  border-left: 4px solid var(--amber);
-  pointer-events: none;
-}
-
-.intercom[hidden] {
-  display: none;
-}
-
-.intercom__who {
-  font-size: 0.72em;
-  color: var(--amber-dim);
-  white-space: nowrap;
-}
-
-.intercom__text {
-  color: var(--paper);
-}
-
 /* ---------- power panel ---------- */
-
-.power {
-  display: flex;
-  align-items: stretch;
-  gap: 10px;
-  padding: 6px 10px;
-}
-
-.power__reactor {
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  gap: 4px;
-  min-width: 120px;
-  max-width: 132px;
-  padding-right: 12px;
-  border-right: 2px dashed var(--hull-edge);
-  font-size: 0.8em;
-}
-
-.power__summary {
-  color: var(--amber);
-}
-
-.power__summary.is-alarm {
-  color: var(--alarm);
-  font-weight: 700;
-}
-
-.power__lights {
-  color: #8b93a1;
-}
-
-.power__tiles {
-  flex: 1;
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: space-between;
-  gap: 6px;
-}
-
-.power__tile {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  width: 92px;
-}
-
-.power__label {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  color: var(--amber);
-}
-
-.power__tile.is-dead .power__code {
-  color: #6a7180;
-}
-
-.power__tile.is-damaged .power__code {
-  color: var(--alarm);
-}
-
-.power__key {
-  font-size: 0.7em;
-  font-weight: 400;
-  color: #6a7180;
-}
 
 /* Keyboard hints mean nothing on a touch screen. */
 @media (hover: none) {
@@ -1174,22 +614,12 @@ body {
   }
 }
 
-.power__pips {
-  display: flex;
-  gap: 4px;
-  height: 14px;
-}
-
 .pip {
   flex: 1;
   max-width: 28px;
   border: 2px solid var(--amber-dim);
   border-radius: 2px;
   box-sizing: border-box;
-}
-
-.power__pips--reactor .pip {
-  max-width: 12px;
 }
 
 /* Lit, empty and broken differ in shape as well as colour (brief §17). */
@@ -1206,26 +636,6 @@ body {
 .pip--broken {
   border-color: var(--alarm);
   background: repeating-linear-gradient(135deg, var(--alarm) 0 2px, transparent 2px 5px);
-}
-
-.power__buttons {
-  display: flex;
-  gap: 4px;
-}
-
-.btn.power__btn {
-  flex: 1;
-  min-width: var(--tap);
-  min-height: var(--tap);
-  padding: 0;
-  font-size: 1.3em;
-  letter-spacing: 0;
-  text-align: center;
-  border-left: 2px solid var(--hull-edge);
-}
-
-.btn.power__btn:not([disabled]) {
-  border-color: var(--amber-dim);
 }
 
 .status {
@@ -1335,18 +745,8 @@ body {
 
 /* On to the next thing (F.3): beside the pause button, lit while it skips. */
 /* Pause with Next under it, in the one column: the status panel keeps its width. */
-.shipdock__clockbtns {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 210px;
-}
 
 /* Together no taller than Pause alone was (88 px), so the ship keeps its size. */
-.shipdock__clockbtns .btn--pause {
-  flex: 1;
-  min-height: 40px;
-}
 
 .btn--skip {
   display: flex;
@@ -1457,25 +857,9 @@ body {
   font-size: calc(12px * var(--text-scale));
 }
 /* The crew bar keeps to one row: chips narrow before they wrap (three crew; see DECISIONS DF-25). */
-.crewbar {
-  flex-wrap: nowrap;
-}
-.crewbar .btn.crewchip {
-  flex: 0 1 160px;
-}
-.crewchip__name,
-.crewchip__task {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 
 /* ---------- the cards above the status panel: a party at the lock, a toll (H.2, H.3) ---------- */
-.fightstack {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
+
 .fightcall {
   display: flex;
   align-items: center;
@@ -1551,13 +935,6 @@ body {
 }
 
 /* Aboard the other ship (S2.4): the chip says so in the alarm colour. */
-.crewchip.is-away {
-  border-color: var(--alarm);
-}
-
-.crewchip.is-away .crewchip__task {
-  color: var(--alarm);
-}
 
 /* Settings toggles two to a row, so the sheet stays short on an iPad. */
 .sheet__pairs {
@@ -1901,18 +1278,6 @@ body {
 }
 
 /* The strip stays on one line: the load bar gives way before the words or the Switches button do. */
-.power__summary {
-  white-space: nowrap;
-  font-size: 0.85em;
-}
-
-.power__watch {
-  font-size: 0.85em;
-}
-
-.btn.power__toggle {
-  flex-shrink: 0;
-}
 
 /* ---------- the route planner (H.6, D-197): lanes by risk, Union space, the ship on her lane ---------- */
 
@@ -2199,4 +1564,541 @@ body {
   border-left: 4px solid var(--amber-dim);
   padding-left: 10px;
   color: var(--amber);
+}
+
+/* ---------- the people-first screen (H.9, D-251) ----------
+   The crew down the left, Margo's channel down the right, her monitor between them with the ship across its
+   full width. The bottom panels (the dock, the ship panel, the switch panel) are gone: the card for whatever is
+   picked sits on the monitor under the ship, beside the scope. */
+
+#screen:has(.ship--people) {
+  padding: max(10px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(10px, env(safe-area-inset-bottom))
+    max(12px, env(safe-area-inset-left));
+}
+
+.ship.ship--people {
+  --crew-w: 168px;
+  --chan-w: 222px;
+  display: grid;
+  grid-template-columns: var(--crew-w) minmax(0, 1fr) var(--chan-w);
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 8px;
+}
+
+@media (min-width: 1300px) {
+  .ship.ship--people {
+    --crew-w: 236px;
+    --chan-w: 330px;
+  }
+}
+
+.ship--people > .shipbar {
+  grid-column: 1 / -1;
+  align-items: stretch;
+}
+
+.ship--people .shipbar__name {
+  flex-direction: column;
+  gap: 2px;
+  justify-content: center;
+  min-width: calc(var(--crew-w));
+}
+
+.shipbar__clockbtns {
+  display: flex;
+  gap: 8px;
+  margin-right: auto;
+}
+
+.ship--people .btn--pause {
+  min-width: 170px;
+  min-height: var(--tap);
+  padding: 4px 16px;
+  font-size: 1em;
+  border-left-width: 8px;
+}
+
+.ship--people .btn--skip {
+  min-width: 130px;
+}
+
+.ship--people .shipbar__buttons {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.ship--people .shipbar__buttons .btn {
+  padding: 10px 14px;
+  min-width: 0;
+}
+
+.ship--people .shipbar__name .stencil {
+  white-space: nowrap;
+}
+
+.ship__monitor {
+  grid-column: 2;
+  grid-row: 2;
+  pointer-events: none;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* The picked thing's card: laid on the monitor under the ship by the ship view, which knows where the ship is. */
+.ship--people > .status {
+  position: fixed;
+  z-index: 2;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  justify-content: flex-start;
+  font-size: 0.82em;
+  background: linear-gradient(180deg, rgba(20, 25, 32, 0.92), rgba(11, 15, 20, 0.92));
+}
+
+.ship--people > .status .status__controls {
+  margin-top: 0;
+  gap: 8px;
+}
+
+.ship--people > .status .btn--small {
+  padding: 8px 12px;
+  letter-spacing: 0.08em;
+}
+
+.ship--people > .status .status__stats {
+  gap: 2px 16px;
+}
+
+.ship--people > .status .status__controls--row .btn {
+  flex: 1 1 auto;
+}
+
+/* A station's switches on its room's card (H.9, D-252). */
+.station {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 0 0;
+  border-top: 1px solid var(--hull-edge);
+}
+
+.station__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.station__head .station__who {
+  flex: 1;
+  color: var(--paper);
+}
+
+.station__head .station__who.is-dead {
+  color: #6a7180;
+}
+
+.station__row {
+  align-items: center;
+}
+
+.station__rowname {
+  min-width: 4.6em;
+  font-size: 0.7em;
+}
+
+.ship--people > .status .station__row .btn--small {
+  padding: 6px 9px;
+}
+
+.station__row .btn.is-blocked {
+  opacity: 0.5;
+}
+
+.station__note {
+  font-size: 0.92em;
+}
+
+.ship--people .btn.station__stand {
+  min-width: 64px;
+  padding: 8px 10px;
+  text-align: center;
+}
+
+/* The settings and debug sheets fill the monitor. */
+.ship--people > .sheet {
+  position: fixed;
+  right: auto;
+  bottom: auto;
+  max-height: none;
+  overflow-y: auto;
+  z-index: 6;
+}
+
+/* ---------- the crew column ---------- */
+
+.crewcol {
+  grid-column: 1;
+  grid-row: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+}
+
+.crewcol__head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 8px;
+  font-size: 0.78em;
+  pointer-events: auto;
+}
+
+.crewcol__watch {
+  color: var(--amber);
+}
+
+.crewcol__watches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.ship--people .btn.crewcol__watchbtn {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 4px;
+  text-align: center;
+  letter-spacing: 0.04em;
+  border-left-width: 4px;
+}
+
+.ship--people .btn.crewcol__muster {
+  flex: 1 1 100%;
+  padding: 6px 8px;
+  text-align: center;
+  letter-spacing: 0.06em;
+  border-left-width: 4px;
+}
+
+.crewcol__cards {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  pointer-events: auto;
+}
+
+.btn.crewcard {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  flex: 1 1 0;
+  min-height: 64px;
+  max-height: 104px;
+  min-width: 0;
+  padding: 5px 8px 5px 5px;
+  font-size: calc(12px * var(--text-scale));
+  letter-spacing: 0.02em;
+  text-transform: none;
+  border-left-width: 4px;
+}
+
+.crewcard__num {
+  position: absolute;
+  left: 2px;
+  top: 2px;
+  z-index: 1;
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  font-size: 10px;
+  line-height: 17px;
+  text-align: center;
+  color: var(--space);
+}
+
+.crewcard__face {
+  flex: none;
+  align-self: center;
+  width: 48px;
+  height: 48px;
+  border: 1px solid var(--hull-edge);
+  border-radius: 3px;
+}
+
+.crewcard__body {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 1px;
+  min-width: 0;
+  flex: 1;
+}
+
+.crewcard__watch {
+  float: right;
+  font-weight: 400;
+  font-size: 0.85em;
+  letter-spacing: 0.04em;
+  color: #8b93a1;
+}
+
+.crewcard__watch.is-below {
+  opacity: 0.55;
+}
+
+.crewcard__top {
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.crewcard__role,
+.crewcard__doing,
+.crewcard__mood {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.crewcard__role {
+  font-weight: 400;
+  color: #8b93a1;
+}
+
+.crewcard__doing {
+  font-weight: 400;
+  color: var(--paper);
+}
+
+.crewcard__mood {
+  font-weight: 400;
+  color: #aab2bf;
+  font-style: italic;
+}
+
+.crewcard__mood.is-alarm {
+  color: var(--alarm);
+  font-style: normal;
+}
+
+.crewcard__bar {
+  display: block;
+  height: 3px;
+  margin-top: 2px;
+  background: #2a3039;
+}
+
+.crewcard__health {
+  display: block;
+  height: 100%;
+  background: var(--infect);
+}
+
+.crewcard.is-hurt .crewcard__health {
+  background: var(--alarm);
+}
+
+.crewcard.is-selected {
+  border-color: var(--amber);
+  box-shadow: inset 0 0 0 2px var(--amber), 0 3px 0 #05070b;
+}
+
+.crewcard.is-dead {
+  opacity: 0.5;
+}
+
+.crewcard.is-asleep .crewcard__face {
+  opacity: 0.55;
+}
+
+.crewcard.is-slipping {
+  border-left-color: var(--alarm);
+}
+
+.crewcard.is-away .crewcard__doing {
+  color: var(--sodium);
+}
+
+/* ---------- Margo's channel ---------- */
+
+.ship--people > .channel {
+  grid-column: 3;
+  grid-row: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  min-height: 0;
+  padding: 6px 8px;
+  border-left: 2px solid var(--hull-edge);
+  border-top: 4px solid var(--amber-dim);
+}
+
+.ship--people > .channel.is-urgent,
+.ship--people > .channel.is-objecting {
+  border-top-color: var(--alarm);
+}
+
+.channel__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.channel__head .margo-face {
+  width: 44px;
+  height: 44px;
+}
+
+.channel__who {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.channel__name {
+  white-space: normal;
+  font-size: 0.66em;
+  text-align: left;
+}
+
+.is-objecting .channel__name {
+  color: var(--alarm);
+}
+
+.channel__held {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px;
+  font-size: 0.68em;
+  color: #8b93a1;
+}
+
+.channel__heldnote {
+  font-size: 0.72em;
+  color: #8b93a1;
+}
+
+.channel__heldnote.is-alarm {
+  color: var(--alarm);
+}
+
+.ship--people .btn.chip {
+  min-width: 0;
+  min-height: var(--tap);
+  padding: 4px 8px;
+  font-size: 0.95em;
+  letter-spacing: 0.04em;
+  border-left-width: 3px;
+}
+
+.ship--people .btn.chip--station {
+  min-width: var(--tap);
+  text-align: center;
+}
+
+.channel__log {
+  flex: 1;
+  min-height: 0;
+  max-height: none;
+  margin: 0;
+  padding: 4px 2px 4px 0;
+  list-style: none;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  font-size: 0.76em;
+  line-height: 1.4;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.channel__line {
+  color: var(--paper);
+}
+
+.channel__line time {
+  color: #6a7180;
+  font-size: 0.86em;
+}
+
+.channel__line--margo .channel__text {
+  color: var(--amber);
+  text-shadow: 0 0 6px rgba(255, 179, 71, 0.35);
+}
+
+.channel__line--note .channel__text {
+  color: var(--sodium);
+}
+
+.channel__speaker {
+  font-weight: 700;
+}
+
+.channel__line:last-child {
+  padding-bottom: 2px;
+}
+
+.aibox.is-typing #ai-text::after {
+  content: '▌';
+  animation: blink 0.8s steps(1) infinite;
+}
+
+.channel__calls {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.channel__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.channel__chips[hidden] {
+  display: none;
+}
+
+.channel__chips .btn {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 8px 10px;
+  text-align: center;
+}
+
+/* A party at the lock, a toll: reply chips under the transcript. */
+.channel .fightcall {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  padding: 6px 8px;
+}
+
+.channel .fightcall__buttons {
+  flex-wrap: wrap;
+  flex-shrink: 1;
+  gap: 6px;
+}
+
+.channel .fightcall__buttons .btn {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 8px 10px;
+  letter-spacing: 0.06em;
+  text-align: center;
+}
+
+.channel .fightcall__text {
+  white-space: normal;
 }
