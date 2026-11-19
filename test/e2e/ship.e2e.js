@@ -1822,7 +1822,16 @@ async function loopTests(browser) {
       await page.touchscreen.tap(pick.x, pick.y);
       const took = await page.waitForFunction((n) => /^Send Vesna/.test(document.querySelector(`#sit-send-${n}`)?.textContent ?? ''), leak, { timeout: 2000 }).then(() => true, () => false);
       if (took) break;
-      assert.ok(tries < 4, `a tap on Vesna picks her (${await game(page, () => JSON.stringify((({ alive, room, task }) => ({ alive, room, task }))(window.coldManifest.sim.state.crew.vesna)))})`);
+      assert.ok(tries < 4, `a tap on Vesna picks her (${await game(page, (at) => {
+        const { sim, shipView } = window.coldManifest;
+        const under = document.elementFromPoint(at.x, at.y);
+        const view = document.getElementById('view').getBoundingClientRect();
+        return JSON.stringify({
+          ...(({ alive, room, task }) => ({ alive, room, task }))(sim.state.crew.vesna),
+          at, picked: shipView.debug.selectedCrew, open: shipView.debug.situationOpen, taps: shipView.debug.counts.canvasTaps,
+          under: under && `${under.tagName}#${under.id}.${under.className}`, view: [view.x, view.y, view.width, view.height].map(Math.round),
+        });
+      }, { x: pick.x, y: pick.y })})`);
     }
     await page.tap(`#sit-send-${leak}`);
     await page.waitForFunction((n) => document.querySelector(`#sit-${n}`)?.dataset.state === 'attended', leak, { timeout: 45000 });
@@ -2332,9 +2341,138 @@ async function watchTests(browser) {
   await context.close();
 }
 
+// ---------- H.10: the two iPad sizes, long-press on controls, and the frame's cost ----------
+
+/** Time spent in each animation frame's callbacks, in ms: the sim steps and the drawing (H.10). */
+const frameCost = (page, ms) =>
+  game(page, (span) => new Promise((done) => {
+    window.__frameCost = [];
+    setTimeout(() => {
+      const all = window.__frameCost.slice().sort((a, b) => a - b);
+      done({ n: all.length, median: all[all.length >> 1], p90: all[Math.floor(all.length * 0.9)] });
+    }, span);
+  }), ms);
+
+async function sizeTests(browser) {
+  for (const [name, viewport] of [['iPad 1024x768 (iPad, iPad mini)', { width: 1024, height: 768 }], ['iPad 1366x1024 (12.9-inch iPad Pro)', { width: 1366, height: 1024 }]]) {
+    console.log(name);
+    const context = await browser.newContext({ ...devices['iPad (gen 7) landscape'], viewport, screen: viewport });
+    const page = await context.newPage();
+    await page.addInitScript(() => {
+      const raf = window.requestAnimationFrame.bind(window);
+      window.requestAnimationFrame = (fn) => raf((t) => {
+        const start = performance.now();
+        fn(t);
+        window.__frameCost?.push(performance.now() - start);
+      });
+    });
+    await throttle(context, page);
+    const errors = [];
+    page.on('pageerror', (e) => errors.push(e.message));
+    await page.goto(`http://localhost:${PORT}/?seed=E2E-BOARDED&watches=0&autopause=0`);
+    await page.waitForFunction(() => window.coldManifest?.machine.state === 'title');
+    await page.tap('#btn-ship');
+    await page.waitForFunction(() => window.coldManifest.machine.state === 'ship');
+    await settled(page);
+
+    await check(`${viewport.width}: the screen fits with nothing cut off, and the ship sits between the columns`, async () => {
+      const page_ = await game(page, () => ({ w: document.documentElement.scrollWidth, h: document.documentElement.scrollHeight }));
+      assert.deepEqual(page_, { w: viewport.width, h: viewport.height });
+      const off = await page.$$eval('.ship .btn', (nodes, vp) => nodes.map((n) => ({ id: n.id, r: n.getBoundingClientRect() })).filter(({ r }) => r.width > 0 && (r.left < 0 || r.top < 0 || r.right > vp.width + 0.5 || r.bottom > vp.height + 0.5)).map(({ id }) => id), viewport);
+      assert.deepEqual(off, []);
+      const all = await game(page, () => window.coldManifest.shipView.debug.targets());
+      const crew = await page.locator('#crewbar').boundingBox();
+      const margo = await page.locator('#aibox').boundingBox();
+      for (const t of all.filter((x) => x.kind === 'room')) assert.ok(t.x >= crew.x + crew.width && t.x + t.w <= margo.x, `${t.id} runs under a column`);
+    });
+
+    await check(`${viewport.width}: every room's card and every crew card fits without scrolling, every control 44px`, async () => {
+      const picks = await game(page, () => [...window.coldManifest.sim.layout.rooms.map((room) => room.id)]);
+      const scrolls = [];
+      const small = new Set();
+      const sizeUp = async (label) => {
+        await settled(page);
+        const over = await game(page, () => { const s = document.querySelector('#status'); return s.scrollHeight - s.clientHeight; });
+        if (over > 2) scrolls.push(`${label} by ${over}px`);
+        for (const id of await page.$$eval('.ship .btn', (nodes) => nodes.map((n) => ({ id: n.id, r: n.getBoundingClientRect() })).filter(({ r }) => r.width > 0 && (r.width < 44 || r.height < 44)).map(({ id, r }) => `${id} ${Math.round(r.width)}x${Math.round(r.height)}`))) small.add(id);
+      };
+      for (const id of picks) {
+        await openRoom(page, id);
+        await sizeUp(id);
+      }
+      await openHelm(page);
+      for (const id of await game(page, () => Object.values(window.coldManifest.sim.state.crew).filter((m) => m.owner === 'player').map((m) => m.id))) {
+        await page.tap(`#crew-${id}`);
+        await sizeUp(id);
+        await page.tap(`#crew-${id}`);
+      }
+      assert.deepEqual(scrolls, []);
+      assert.deepEqual([...small], []);
+    });
+
+    await check(`${viewport.width}: a long-press on a button says what it does and does not press it`, async () => {
+      await openHelm(page);
+      await settled(page);
+      const box = await page.locator('#btn-pause').boundingBox();
+      const was = await paused(page);
+      const before = await counts(page);
+      await touch(page, [{ x: box.x + box.width / 2, y: box.y + box.height / 2 }], { holdMs: 650 });
+      await sleep(80);
+      assert.equal(await paused(page), was, 'the long-press paused the clock');
+      assert.equal((await counts(page)).infos, before.infos + 1);
+      assert.match(await infoText(page), /Stops the clock/);
+      const tip = await page.locator('#ship-info').boundingBox();
+      assert.ok(tip.x >= 0 && tip.y >= 0 && tip.x + tip.width <= viewport.width && tip.y + tip.height <= viewport.height, `the note runs off the screen: ${JSON.stringify(tip)}`);
+      // A tap on a control puts it away.
+      await page.tap('#btn-pause');
+      await page.waitForFunction((w) => window.coldManifest.clock.paused !== w, was, { timeout: 2000 });
+      assert.equal(await infoText(page), null);
+      await page.tap('#btn-pause');
+    });
+
+    await check(`${viewport.width}: a long-press on a crew card says who they are and does not pick them`, async () => {
+      const box = await page.locator('#crew-ilse').boundingBox();
+      await touch(page, [{ x: box.x + box.width / 2, y: box.y + box.height / 2 }], { holdMs: 650 });
+      await sleep(80);
+      assert.equal(await selectedCrew(page), null, 'the long-press picked her');
+      assert.match(await infoText(page), /Tap to pick them/);
+    });
+
+    await check(`${viewport.width}: a long-press on a greyed-out button says why`, async () => {
+      // Next is greyed out while nothing can be skipped; its title says why.
+      const disabled = await page.$eval('#btn-skip', (n) => ({ disabled: n.disabled, title: n.title }));
+      const box = await page.locator('#btn-skip').boundingBox();
+      await touch(page, [{ x: box.x + box.width / 2, y: box.y + box.height / 2 }], { holdMs: 650 });
+      await sleep(80);
+      const text = await infoText(page);
+      assert.ok(text.startsWith(disabled.title.trim()), `${text} (disabled: ${disabled.disabled})`);
+    });
+
+    await check(`${viewport.width}: a frame costs little with four rooms burning and a party aboard`, async () => {
+      await openHelm(page);
+      for (const id of ['cargo', 'engines', 'medbay', 'weapons']) await game(page, (room) => window.coldManifest.sim.enqueue({ type: 'debug.room', room, set: { fire: 0.7 } }), id);
+      await game(page, () => window.coldManifest.sim.enqueue({ type: 'debug.boarding', encounter: 'raider-skiff' }));
+      await page.waitForSelector('#btn-board-admit', { state: 'visible', timeout: 3000 });
+      await page.tap('#btn-board-admit');
+      await page.waitForFunction(() => Object.values(window.coldManifest.sim.state.crew).some((m) => m.party), null, { timeout: 5000 });
+      const cost = await frameCost(page, 3000);
+      const fires = await game(page, () => Object.values(window.coldManifest.sim.state.rooms).filter((r) => r.fire > 0).length);
+      console.log(`        frame cost over ${cost.n} frames: median ${cost.median.toFixed(2)} ms, 90th ${cost.p90.toFixed(2)} ms (${fires} rooms burning)`);
+      assert.ok(fires >= 3, `only ${fires} rooms burning`);
+      // The budget is a 60 Hz frame (16.7 ms); the browser needs the rest of it to paint.
+      assert.ok(cost.median < 8, `median ${cost.median} ms a frame`);
+      assert.ok(cost.p90 < 16, `90th percentile ${cost.p90} ms a frame`);
+      if (process.env.E2E_SHOTS) await page.screenshot({ path: `${process.env.E2E_SHOTS}/h10-busy-${viewport.width}.png` });
+    });
+
+    await check(`${viewport.width}: no page errors`, async () => assert.deepEqual(errors, []));
+    await context.close();
+  }
+}
+
 // E2E_ONLY=boarding (or a comma list of suite names) runs just those suites, for chasing one failure.
 const only = process.env.E2E_ONLY?.split(',');
-const suites = { touch: touchTests, desktop: desktopTests, voice: voiceTests, hit: hitTests, dark: darkTests, hold: holdTests, guns: gunTests, watch: watchTests, margo: margoTests, chart: chartTests, loop: loopTests, scope: scopeTests, boarded: boardedTests };
+const suites = { touch: touchTests, desktop: desktopTests, voice: voiceTests, hit: hitTests, dark: darkTests, hold: holdTests, guns: gunTests, watch: watchTests, margo: margoTests, chart: chartTests, loop: loopTests, scope: scopeTests, boarded: boardedTests, sizes: sizeTests };
 try {
   for (const [name, run] of Object.entries(suites)) if (!only || only.includes(name)) await run(browser);
 } finally {

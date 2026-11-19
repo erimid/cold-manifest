@@ -15,15 +15,16 @@
 //   dragstart  { x, y, startX, startY, dx, dy, ... }  the pointer moved past the tap threshold
 //   drag       (same)                                 each move while dragging
 //   dragend    (same, plus cancelled)
-//   info       { x, y, pointerType, source }          long-press, or right-click: the touch
-//                                                     stand-in for right-click and hover info
+//   info       { x, y, pointerType, source, control? } long-press, or right-click: the touch
+//                                                     stand-in for right-click and hover info; on a DOM control
+//                                                     (H.10) `control` is the element, and it is not pressed
 //   hover      { x, y }                               mouse only; nothing may depend on it
 //   gesture    {}                                     any touch, click or key: the moment sound may start
 //   press      { control }                            a DOM control was pressed
 //   key        { action, code, shift }                     a mapped key from keymap.js
 // Canvas coordinates are CSS pixels from the canvas's top-left corner.
 
-import { createGestureTracker, TAP_SLOP } from './gesture.js';
+import { createGestureTracker, LONG_PRESS_MS, TAP_SLOP } from './gesture.js';
 import { KEYMAP } from './keymap.js';
 
 export function createInput({ canvas, keymap = KEYMAP, root = window } = {}) {
@@ -37,9 +38,10 @@ export function createInput({ canvas, keymap = KEYMAP, root = window } = {}) {
     for (const fn of [...(listeners.get(type) ?? [])]) fn(payload);
   }
 
+  // The canvas draws in page coordinates wherever it sits (H.10: it covers only Margo's monitor), so a point on
+  // it is simply where the pointer is on the page.
   function canvasPoint(event) {
-    const rect = canvas.getBoundingClientRect();
-    return { x: event.clientX - rect.left, y: event.clientY - rect.top };
+    return { x: event.clientX, y: event.clientY };
   }
 
   /** The nearest DOM control (an element given to press()) at or above `node`. */
@@ -86,9 +88,25 @@ export function createInput({ canvas, keymap = KEYMAP, root = window } = {}) {
     const control = controlAt(event.target);
 
     if (control) {
+      if (event.pointerType === 'mouse' && event.button === 2) {
+        emit('info', { x: event.clientX, y: event.clientY, pointerType: 'mouse', source: 'right-click', control });
+        return;
+      }
       if (event.pointerType === 'mouse' && event.button !== 0) return;
-      press = { zone: 'ui', pointerId: event.pointerId, pointerType: event.pointerType, control, startX: event.clientX, startY: event.clientY };
+      press = { zone: 'ui', pointerId: event.pointerId, pointerType: event.pointerType, control, startX: event.clientX, startY: event.clientY, longPressed: false };
       if (!control.disabled) control.classList.add('is-pressed');
+      // A long-press on a control asks what it is (H.10): touch has no hover to show its title. Disabled ones too,
+      // since why it is greyed out is the question. It does not press it.
+      if (event.pointerType !== 'mouse' && listeners.get('info')?.size) {
+        const held = press;
+        longPressTimer = setTimeout(() => {
+          longPressTimer = null;
+          if (press !== held) return;
+          held.longPressed = true;
+          control.classList.remove('is-pressed');
+          emit('info', { x: held.startX, y: held.startY, pointerType: held.pointerType, source: 'long-press', control });
+        }, LONG_PRESS_MS);
+      }
       return;
     }
 
@@ -119,7 +137,14 @@ export function createInput({ canvas, keymap = KEYMAP, root = window } = {}) {
       if (event.pointerType === 'mouse' && event.target === canvas) emit('hover', canvasPoint(event));
       return;
     }
-    if (press.pointerId !== event.pointerId || press.zone !== 'canvas') return;
+    if (press.pointerId !== event.pointerId) return;
+    if (press.zone === 'ui') {
+      // A finger that wanders (scrolling the crew column) is not holding the control.
+      const moved = Math.hypot(event.clientX - press.startX, event.clientY - press.startY);
+      if (moved > (TAP_SLOP[press.pointerType] ?? TAP_SLOP.mouse)) clearLongPress();
+      return;
+    }
+    if (press.zone !== 'canvas') return;
     const events = tracker.move({ pointerId: event.pointerId, ...canvasPoint(event) });
     if (events.length) clearLongPress();
     forward(events);
@@ -138,7 +163,7 @@ export function createInput({ canvas, keymap = KEYMAP, root = window } = {}) {
     }
 
     endPress();
-    if (current.zone !== 'ui' || current.control.disabled) return;
+    if (current.zone !== 'ui' || current.control.disabled || current.longPressed) return;
     // A control fires only if the pointer barely moved and was released on the same control.
     const moved = Math.hypot(event.clientX - current.startX, event.clientY - current.startY);
     const slop = (TAP_SLOP[current.pointerType] ?? TAP_SLOP.mouse) * 2;

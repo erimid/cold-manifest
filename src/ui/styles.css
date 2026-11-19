@@ -36,6 +36,8 @@ body {
   -webkit-tap-highlight-color: transparent;
   user-select: none;
   -webkit-user-select: none;
+  /* A long-press is ours (H.10: it says what a control is for), not Safari's link and image menu. */
+  -webkit-touch-callout: none;
   touch-action: manipulation;
 }
 
@@ -790,6 +792,7 @@ body {
 
 .ship > .ship-info {
   position: fixed;
+  z-index: 10; /* over the picked thing's card, the situation cards and the chart */
   pointer-events: none;
 }
 
@@ -1701,15 +1704,22 @@ body {
 
 .station__row {
   align-items: center;
+  flex-wrap: wrap;
+  row-gap: 3px;
 }
 
+/* The row's name on a line of its own over its buttons (H.10): side by side, a station's rows wrapped to two lines
+   each on the 1024x768 iPad and the card had to scroll. */
 .station__rowname {
-  min-width: 4.6em;
-  font-size: 0.7em;
+  flex: 0 0 100%;
+  font-size: 0.66em;
+  line-height: 1.2;
 }
 
 .ship--people > .status .station__row .btn--small {
-  padding: 6px 9px;
+  flex: 1 1 auto;
+  padding: 6px 6px;
+  letter-spacing: 0.04em;
 }
 
 .station__row .btn.is-blocked {
