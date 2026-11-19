@@ -1822,7 +1822,16 @@ async function loopTests(browser) {
       await page.touchscreen.tap(pick.x, pick.y);
       const took = await page.waitForFunction((n) => /^Send Vesna/.test(document.querySelector(`#sit-send-${n}`)?.textContent ?? ''), leak, { timeout: 2000 }).then(() => true, () => false);
       if (took) break;
-      assert.ok(tries < 4, `a tap on Vesna picks her (${await game(page, () => JSON.stringify((({ alive, room, task }) => ({ alive, room, task }))(window.coldManifest.sim.state.crew.vesna)))})`);
+      assert.ok(tries < 4, `a tap on Vesna picks her (${await game(page, (at) => {
+        const { sim, shipView } = window.coldManifest;
+        const under = document.elementFromPoint(at.x, at.y);
+        const view = document.getElementById('view').getBoundingClientRect();
+        return JSON.stringify({
+          ...(({ alive, room, task }) => ({ alive, room, task }))(sim.state.crew.vesna),
+          at, picked: shipView.debug.selectedCrew, open: shipView.debug.situationOpen, taps: shipView.debug.counts.canvasTaps,
+          under: under && `${under.tagName}#${under.id}.${under.className}`, view: [view.x, view.y, view.width, view.height].map(Math.round),
+        });
+      }, { x: pick.x, y: pick.y })})`);
     }
     await page.tap(`#sit-send-${leak}`);
     await page.waitForFunction((n) => document.querySelector(`#sit-${n}`)?.dataset.state === 'attended', leak, { timeout: 45000 });
