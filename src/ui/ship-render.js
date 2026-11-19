@@ -80,7 +80,7 @@ const CREW_COLOURS = ['#5ec8ff', '#ffd166', '#ef7bbf', '#8be28b', '#c9a0ff', '#f
 
 /** A renderer for `layout`, our own ship. */
 export function createShipRenderer(layout) {
-  let cache = null; // { canvas, key }
+  let cache = null; // { canvas, key, x, y, w, h }
   let liftCar = null; // where the lift car was last drawn, in tiles: the top of the car
   let staticFrames = null; // a few tiles of screen static, made once
   /** Screen static, as a canvas pattern: a few frames to flick between. Seeded, like everything else. */
@@ -671,18 +671,28 @@ export function createShipRenderer(layout) {
     ctx.restore();
   }
 
+  /**
+   * The parts of the ship that never move, drawn once to an offscreen canvas only as big as the ship (H.10, D-256)
+   * and redrawn when the view changes. Returns the canvas and where it goes, in CSS pixels.
+   */
   function staticLayer(view, width, height, dpr) {
     const key = `${view.scale}|${view.ox}|${view.oy}|${width}|${height}|${dpr}`;
-    if (cache?.key === key) return cache.canvas;
+    if (cache?.key === key) return cache;
+    const { bounds } = layout;
+    const reach = 3; // tiles round the hull for nozzles, labels and the hull's own stroke
+    const x = Math.max(0, Math.floor(view.ox + (bounds.x - reach) * view.scale));
+    const y = Math.max(0, Math.floor(view.oy + (bounds.y - reach) * view.scale));
+    const w = Math.max(1, Math.min(width, Math.ceil(view.ox + (bounds.x + bounds.w + reach) * view.scale)) - x);
+    const h = Math.max(1, Math.min(height, Math.ceil(view.oy + (bounds.y + bounds.h + reach) * view.scale)) - y);
     const canvas = cache?.canvas ?? document.createElement('canvas');
-    canvas.width = Math.round(width * dpr);
-    canvas.height = Math.round(height * dpr);
+    canvas.width = Math.round(w * dpr);
+    canvas.height = Math.round(h * dpr);
     const ctx = canvas.getContext('2d');
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, width, height);
+    ctx.setTransform(dpr, 0, 0, dpr, -x * dpr, -y * dpr);
+    ctx.clearRect(x, y, w, h);
     drawStatic(ctx, view);
-    cache = { canvas, key };
-    return canvas;
+    cache = { canvas, key, x, y, w, h };
+    return cache;
   }
 
   // ---------- the live layer ----------
@@ -1305,7 +1315,8 @@ export function createShipRenderer(layout) {
    */
   function draw(ctx, { view, width, height, dpr, state, time, alpha = 1, selected, selectedCrew = null, selectedCrate = null, showCrawlways = false, reduceFlicker = false, clear = true, charges = [], rooms = null }) {
     if (clear) ctx.clearRect(0, 0, width, height);
-    ctx.drawImage(staticLayer(view, width, height, dpr), 0, 0, width, height);
+    const layer = staticLayer(view, width, height, dpr);
+    ctx.drawImage(layer.canvas, layer.x, layer.y, layer.w, layer.h);
     const s = view.scale;
 
     /** Rooms whose people cannot be seen: nobody aboard can watch them. */

@@ -48,6 +48,7 @@ import { el } from './dom.js';
 import { createIntercom } from './intercom.js';
 import { AUTO_PAUSE } from './settings.js';
 import { createShipRenderer } from './ship-render.js';
+import { controlInfo } from './help.js';
 import { drawBody, skinOf } from './crew-art.js';
 import { crewCardView, heldStations, roomStation } from './people.js';
 import { createSituationCards } from './situations.js';
@@ -93,12 +94,15 @@ const seconds = (ticks) => `${Math.max(0, Math.ceil(ticks * TICK_SECONDS))}s`;
 const TYPE_SPEED = 45;
 const BLIP_EVERY = 3;
 
+/** How far the canvas reaches past the monitor's edge, in CSS pixels: room for its bezel stroke and a jolt. */
+const CANVAS_MARGIN = 10;
+
 export function createShipView({ canvas, root, input, sim, clock, tempo = null, onBack, audio = null, settings = null, debug = false, crewReplies = {} }) {
   const { layout } = sim;
   const intercom = createIntercom(crewReplies);
   const renderer = createShipRenderer(layout);
   const ctx = canvas.getContext('2d');
-  let size = { w: 0, h: 0, dpr: 1 };
+  let size = { x: 0, y: 0, w: 0, h: 0, dpr: 1 }; // the canvas: where it sits on the page, in CSS pixels
   let view = { scale: 1, ox: 0, oy: 0 };
   let selected = null; // { kind: 'room' | 'door', id }
   let selectedCrew = null; // a crew id; while set, tapping a room sends them there
@@ -183,19 +187,22 @@ export function createShipView({ canvas, root, input, sim, clock, tempo = null, 
    * (a room's actions, a crew member, a contact, or with nothing picked the helm) and the scope.
    */
   function measure() {
-    const w = canvas.clientWidth;
-    const h = canvas.clientHeight;
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     const slot = nodes.monitor.getBoundingClientRect();
     const box = { x: Math.round(slot.left), y: Math.round(slot.top), w: Math.round(slot.width), h: Math.round(slot.height) };
-    if (w === size.w && h === size.h && dpr === size.dpr && box.x === monitor.x && box.y === monitor.y && box.w === monitor.w && box.h === monitor.h) return;
-    if (w !== size.w || h !== size.h || dpr !== size.dpr) {
-      canvas.width = Math.round(w * dpr);
-      canvas.height = Math.round(h * dpr);
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    }
-    size = { w, h, dpr };
+    if (dpr === size.dpr && box.x === monitor.x && box.y === monitor.y && box.w === monitor.w && box.h === monitor.h) return;
     monitor = { ...box, h: Math.max(160, box.h) };
+    // The canvas covers only the monitor, not the whole screen (H.10, D-256): everything it draws is on the glass,
+    // and on a Retina iPad a full-screen canvas is twice the pixels to clear and fill every frame. Its drawing
+    // coordinates stay the screen's, so a point on it is where it is on the page.
+    const area = { x: monitor.x - CANVAS_MARGIN, y: monitor.y - CANVAS_MARGIN, w: monitor.w + 2 * CANVAS_MARGIN, h: monitor.h + 2 * CANVAS_MARGIN };
+    if (area.w !== size.w || area.h !== size.h || dpr !== size.dpr) {
+      canvas.width = Math.round(area.w * dpr);
+      canvas.height = Math.round(area.h * dpr);
+    }
+    Object.assign(canvas.style, { left: `${area.x}px`, top: `${area.y}px`, width: `${area.w}px`, height: `${area.h}px` });
+    ctx.setTransform(dpr, 0, 0, dpr, -area.x * dpr, -area.y * dpr);
+    size = { ...area, dpr };
     // The chart and the settings sheet take the whole monitor when they are up (D-106).
     const whole = { left: `${monitor.x}px`, top: `${monitor.y}px`, width: `${monitor.w}px`, height: `${monitor.h}px` };
     if (chart) Object.assign(chart.node.style, whole);
@@ -1045,12 +1052,12 @@ export function createShipView({ canvas, root, input, sim, clock, tempo = null, 
         ctx.fillText(words, at.x, at.y + 2 - rise, Math.max(60, v.scale * shipLayout.room(impact.room).w + 30));
       }
     }
-    // A hit on our ship: the edges of the screen flash red for a moment.
+    // A hit on our ship: the edges of Margo's monitor flash red for a moment.
     const struck = shake ? 1 - ((now - shake.tick) * TICK_SECONDS) / FLASH_SECONDS : 0;
     if (struck > 0) {
       ctx.strokeStyle = `rgba(214, 64, 52, ${0.6 * struck})`;
       ctx.lineWidth = 10;
-      ctx.strokeRect(5, 5, size.w - 10, size.h - 10);
+      ctx.strokeRect(monitor.x + 5, monitor.y + 5, monitor.w - 10, monitor.h - 10);
     }
     ctx.textAlign = 'start';
     ctx.textBaseline = 'alphabetic';
@@ -1610,13 +1617,26 @@ export function createShipView({ canvas, root, input, sim, clock, tempo = null, 
     }
   }
 
-  function onInfo({ x, y, pointerType }) {
+  function onInfo({ x, y, pointerType, control = null }) {
     counts.infos += 1;
+    if (control) {
+      // A long-press on a button or a crew card (H.10, D-257): what it is for, or why it is greyed out.
+      nodes.info.textContent = controlInfo({ id: control.id, title: control.title, label: control.getAttribute('aria-label') || control.textContent, disabled: control.disabled });
+      nodes.info.hidden = false;
+      const box = control.getBoundingClientRect();
+      const left = Math.max(8, Math.min(box.left, window.innerWidth - 308));
+      nodes.info.style.left = `${left}px`;
+      // Over the control if there is room, so the finger does not cover it; under it if not.
+      nodes.info.style.top = '0px';
+      const high = nodes.info.offsetHeight;
+      nodes.info.style.top = `${box.top - high - 8 >= 8 ? box.top - high - 8 : Math.min(window.innerHeight - high - 8, box.bottom + 8)}px`;
+      return;
+    }
     const onScope = scopeBox ? scopeHit(scopeBox, scopeView(sim), x, y, pointerType) : null;
     const text = onScope ? describeScope(onScope) : (describe(pickTarget(allTargets(), x, y, pointerType)) ?? 'Open space. Cold, and a long way from anywhere.');
     nodes.info.textContent = text;
     nodes.info.hidden = false;
-    nodes.info.style.left = `${Math.max(8, Math.min(x + 14, size.w - 300))}px`;
+    nodes.info.style.left = `${Math.max(8, Math.min(x + 14, window.innerWidth - 300))}px`;
     nodes.info.style.top = `${Math.max(8, y - 56)}px`;
   }
 
@@ -1805,7 +1825,7 @@ export function createShipView({ canvas, root, input, sim, clock, tempo = null, 
       const last = sim.state.ai.log.at(-1);
       typed = { n: last?.n ?? 0, start: -1e9, shown: -1 };
       canvas.hidden = false;
-      size = { w: 0, h: 0, dpr: 1 }; // force a measure
+      size = { x: 0, y: 0, w: 0, h: 0, dpr: 0 }; // force a measure
       monitor = { x: -1, y: -1, w: 0, h: 0 };
       measure();
       subscriptions = [
@@ -1813,6 +1833,7 @@ export function createShipView({ canvas, root, input, sim, clock, tempo = null, 
         input.on('info', onInfo),
         input.on('key', onKey),
         input.on('dragstart', () => (nodes.info.hidden = true)),
+        input.on('press', () => (nodes.info.hidden = true)),
         // Our crew answer every order over the intercom (D-094).
         sim.events.on('crew.ordered', (event) => hear(event, event.room)),
         // They can say no (S2.10): their own words on the intercom, and the reason, naming what they remember, in the panel.
@@ -1842,15 +1863,15 @@ export function createShipView({ canvas, root, input, sim, clock, tempo = null, 
       updateCalls();
       measure();
       const jolt = shakeOffset(clock.alpha);
-      ctx.clearRect(0, 0, size.w, size.h);
+      ctx.clearRect(size.x, size.y, size.w, size.h);
       drawBezel();
       ctx.save();
       ctx.translate(jolt.x, jolt.y);
       renderer.draw(ctx, {
         clear: false,
         view,
-        width: size.w,
-        height: size.h,
+        width: size.x + size.w,
+        height: size.y + size.h,
         dpr: size.dpr,
         state: sim.state,
         // Game time, so flames and alarms hold still while paused.
