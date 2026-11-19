@@ -1897,8 +1897,13 @@ async function loopTests(browser) {
     await page.tap(`#sit-dismiss-${fear}`);
     await page.waitForSelector(`#sit-${fear}`, { state: 'detached', timeout: 3000 });
     assert.equal(await game(page, (id) => window.coldManifest.sim.state.crew[id].regard.captain, shaky.id), -2);
+    // A tap on a card picks that hand, or lets go of them if they were picked already (Vesna may still be, from above).
+    await game(page, () => window.coldManifest.shipView.debug.pick(null));
     await page.tap(`#crew-${shaky.id}`);
-    await page.waitForFunction(() => /Captain\s*cool/.test(document.querySelector('#status').textContent), null, { timeout: 3000 });
+    await page.waitForFunction(() => /Captain\s*cool/.test(document.querySelector('#status').textContent), null, { timeout: 3000 }).catch(async (err) => {
+      await dump(page, 'captain cool', { shaky });
+      throw err;
+    });
     assert.match(await page.textContent('#crew-memory'), /Remembers being told to keep the fear down\./);
     // An ordinary order, and the answer on the intercom is short and says why.
     await game(page, ({ id, room }) => window.coldManifest.sim.enqueue({ type: 'crew.move', crew: id, room: room === 'cargo' ? 'quarters' : 'cargo', ship: 'us' }), shaky);
