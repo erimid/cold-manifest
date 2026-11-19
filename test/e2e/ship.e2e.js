@@ -2015,11 +2015,12 @@ async function scopeTests(browser) {
     const tapAt = (x, y) => (name === 'iPad' ? page.touchscreen.tap(x, y) : page.mouse.click(x, y));
     await openShip(page, press(page), '&debug=1');
 
-    await check(`${name}: the scope stands in the corner of the monitor, clear of the ship, and a tap on the dial brings her round`, async () => {
+    await check(`${name}: the scope stands on the monitor under the ship, clear of it, and a tap on the dial brings her round`, async () => {
       const { view, helm } = await scope(page);
       assert.ok(view.box.w >= 240 && view.box.h >= 200, JSON.stringify(view.box));
       const rooms = (await game(page, () => window.coldManifest.shipView.debug.targets())).filter((t) => t.kind === 'room');
-      for (const room of rooms) assert.ok(room.x + room.w <= view.box.x, `${room.id} runs under the scope`);
+      // The ship runs across the top of the monitor (H.9); the scope sits under it, beside the picked thing's card.
+      for (const room of rooms) assert.ok(room.y + room.h <= view.box.y, `${room.id} runs under the scope`);
       assert.equal(view.marks.length, 0);
       assert.equal(helm.heading, 90);
       // Straight down the dial is a heading of 180.
@@ -2073,8 +2074,8 @@ async function scopeTests(browser) {
         assert.equal(await page.isDisabled('#btn-hail-transponder'), true, 'and have stopped listening');
       }
       // Back to the ship's own panel for the flare (Escape on a keyboard, a tap on open space by hand).
-      const { view } = await scope(page);
-      await tapAt(view.box.x - 20, view.box.y + view.box.h - 6);
+      const glass = await page.locator('#monitor').boundingBox();
+      await tapAt(glass.x + 6, glass.y + 30);
       assert.equal(await selected(page), null);
       assert.match(await page.textContent('#btn-flare'), /Flare \(2\)/);
       await press(page)('#btn-flare');
