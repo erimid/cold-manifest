@@ -102,6 +102,18 @@ const crewTarget = async (page, id) => {
   return t;
 };
 const paused = (page) => game(page, () => window.coldManifest.clock.paused);
+/** Open a room's card (H.9: its actions and its station's switches live there), with nobody picked to send. */
+const openRoom = async (page, id) => {
+  await game(page, (rid) => window.coldManifest.shipView.debug.pick({ kind: 'room', id: rid }), id);
+  await page.waitForSelector('#status-title', { timeout: 2000 });
+};
+/** Nothing picked: the helm's card, with the signature, the reactor's load, Go dark, Burn, Flare and Brace. */
+/** A tap on bare glass at the edge of Margo's monitor, beside the ship's tail: lets go of whatever was picked. */
+const tapGlass = async (page) => {
+  const glass = await page.locator('#monitor').boundingBox();
+  await page.touchscreen.tap(glass.x + 6, glass.y + 30);
+};
+const openHelm = (page) => game(page, () => window.coldManifest.shipView.debug.pick(null));
 /** The debug "Perfect lock": every room of theirs made out, and no shot goes wide for want of a lock. */
 const infoText = (page) => game(page, () => window.coldManifest.shipView.debug.infoText);
 const doorIs = (page, id, state, openness) =>
@@ -216,15 +228,21 @@ async function touchTests(browser) {
     assert.ok(b - a >= 5 && b - a <= 11, `expected about 8 ticks in 0.4s, got ${b - a}`);
   });
 
-  await check('the whole ship fits on screen between the bars', async () => {
+  await check('the whole ship fits on the monitor, between the crew and Margo (H.9)', async () => {
     const all = await game(page, () => window.coldManifest.shipView.debug.targets());
-    const top = (await page.locator('.shipbar').boundingBox()).y;
-    const dock = (await page.locator('.shipdock').boundingBox()).y;
+    const top = (await page.locator('.shipbar').boundingBox());
+    const crew = await page.locator('#crewbar').boundingBox();
+    const margo = await page.locator('#aibox').boundingBox();
+    const card = await page.locator('#status').boundingBox();
     for (const t of all.filter((x) => x.kind !== 'crew')) {
-      assert.ok(t.x >= 0 && t.x + t.w <= 1080, `${t.id} is off the side`);
-      assert.ok(t.y >= top && t.y + t.h <= dock, `${t.id} runs under a bar`);
+      assert.ok(t.x >= crew.x + crew.width && t.x + t.w <= margo.x, `${t.id} runs under a column`);
+      assert.ok(t.y >= top.y + top.height && t.y + t.h <= card.y, `${t.id} runs under a bar or the card`);
     }
     assert.equal(all.filter((t) => t.kind === 'room').length, 17);
+    // The ship takes most of the monitor's width.
+    const rooms = all.filter((t) => t.kind === 'room');
+    const span = Math.max(...rooms.map((t) => t.x + t.w)) - Math.min(...rooms.map((t) => t.x));
+    assert.ok(span > (margo.x - crew.x - crew.width) * 0.75, `the ship is ${span} px across`);
   });
 
   await check('tap a room to see its status', async () => {
@@ -343,45 +361,59 @@ async function touchTests(browser) {
     assert.equal(await game(page, () => JSON.stringify(window.coldManifest.sim.state.doors)), hash);
   });
 
-  await check('the switch panel starts folded to a strip of lamps, and Switches opens it (H.4)', async () => {
-    assert.equal(await page.isVisible('#breaker-board'), false);
-    assert.equal(await page.isVisible('#breakers-folded'), true);
-    assert.equal(await page.locator('#power-mini-engines .pip--on').count(), 1);
-    assert.equal(await page.locator('#power-mini-weapons .pip--on').count(), 0, 'the guns start stood down');
-    await page.tap('#btn-breakers');
-    await page.waitForSelector('#breaker-board', { state: 'visible', timeout: 2000 });
-    assert.equal(await page.isVisible('#breakers-folded'), false);
-    assert.match(await page.textContent('#station-life_support'), /Air plant/, 'each station is named');
+  await check('no bottom panels: crew down one side, Margo down the other, actions on the room (H.9)', async () => {
+    assert.equal(await page.locator('#breaker-board, .shipdock, #power').count(), 0, 'the dock and the switch panel are gone');
+    assert.equal(await page.locator('#crewbar .crewcard').count(), 6, 'a card for each of the crew');
+    assert.match(await page.textContent('#crew-ilse'), /Ilse/);
+    assert.match(await page.textContent('#crew-ilse'), /Pilot/);
+    assert.equal(await page.isVisible('#ailog'), true, "Margo's transcript is always up");
+    assert.match(await page.textContent('#margo-holding'), /Holding \d+ stations?/);
+    await openRoom(page, 'life_support');
+    assert.match(await page.textContent('#status'), /Air plant/, "a room's card names its station");
+    await openRoom(page, 'sensors');
     assert.match(await page.textContent('#station-sensors'), /Margo\s*1\.0/, 'and says who has it and how well');
-    assert.equal(await page.locator('#breaker-board .pip, #btn-power-shields-plus').count(), 0, 'no bars to route');
-    for (const id of await page.$$eval('#breaker-board .btn', (list) => list.filter((b) => b.offsetParent !== null).map((b) => b.id))) {
+    for (const id of await page.$$eval('#status .btn, #crewbar .btn, #aibox .btn, .shipbar .btn', (list) => list.filter((b) => b.offsetParent !== null).map((b) => b.id))) {
       const box = await page.locator(`#${id}`).boundingBox();
       assert.ok(box.width >= 44 && box.height >= 44, `${id} is ${box.width} by ${box.height}`);
     }
-    if (process.env.E2E_SHOTS) await page.screenshot({ path: `${process.env.E2E_SHOTS}/h4-switches-ipad.png` });
+    if (process.env.E2E_SHOTS) await page.screenshot({ path: `${process.env.E2E_SHOTS}/h9-people-ipad.png` });
   });
 
-  await check('stations: a tap stands one to or down, and the reactor load follows', async () => {
-    const load = () => game(page, () => Number(document.querySelector('#power-summary').textContent.match(/load (\d+)%/)[1]));
+  await check("Margo's channel: a station she holds opens its room's card", async () => {
+    await openHelm(page);
+    const held = await page.$$eval('#margo-held .btn', (list) => list.map((b) => b.id));
+    assert.ok(held.includes('btn-held-sensors'), `she holds ${held.join(', ')}`);
+    await page.tap('#btn-held-sensors');
+    await page.waitForFunction(() => window.coldManifest.shipView.debug.selected?.id === 'sensors', null, { timeout: 2000 });
+    assert.equal(await page.textContent('#status-title'), 'Sensors');
+  });
+
+  await check('stations: a tap on its room stands one to or down, and the reactor load follows', async () => {
+    const load = async () => {
+      await openHelm(page);
+      return game(page, () => Number(document.querySelector('#power-summary').textContent.match(/load (\d+)%/)[1]));
+    };
+    await openHelm(page);
     assert.match(await page.textContent('#power-summary'), /Steady · load \d+%/);
     const before = await load();
+    await openRoom(page, 'sensors');
     await page.tap('#btn-stand-sensors');
     await downIs(page, 'sensors', true);
     await page.waitForFunction(() => /Stood down/.test(document.querySelector('#station-sensors').textContent));
     assert.ok((await load()) < before, 'a station stood down is load off the reactor');
+    await openRoom(page, 'sensors');
     await page.tap('#btn-stand-sensors');
     await downIs(page, 'sensors', false);
+    await openRoom(page, 'shields');
     await page.tap('#btn-stand-shields');
     await downIs(page, 'shields', false);
     await page.tap('#btn-stand-shields');
     await downIs(page, 'shields', true);
   });
 
-  await check("Margo's row: pick a station, hand it to her or keep it for the crew, and tell her how to run it (H.5)", async () => {
+  await check("Margo's switches on a station's room: hand it to her or keep it for the crew, and tell her how to run it (H.5)", async () => {
     const station = (id) => game(page, (key) => window.coldManifest.sim.state.stations[key], id);
-    assert.equal(await page.isVisible('#switch-margo'), false, 'no row until a station is picked');
-    await page.tap('#btn-station-sensors');
-    await page.waitForFunction(() => /Sensors/.test(document.querySelector('#margo-station').textContent));
+    await openRoom(page, 'sensors');
     assert.match(await page.textContent('#margo-note'), /Left to her/);
     await page.tap('#btn-cover-crew');
     await page.waitForFunction(() => window.coldManifest.sim.state.stations.sensors.cover === 'crew', null, { timeout: 2000 });
@@ -396,25 +428,27 @@ async function touchTests(browser) {
     await page.waitForFunction(() => window.coldManifest.sim.state.stations.sensors.order === null, null, { timeout: 2000 });
     assert.equal((await station('sensors')).cover, 'fill');
     // The reactor takes no orders on how to run it, and cannot be left dark.
-    await page.tap('#btn-station-reactor');
-    await page.waitForFunction(() => document.querySelector('#btn-manner-quiet').hidden);
+    await openRoom(page, 'reactor');
+    assert.equal(await page.locator('#btn-manner-quiet').count(), 0);
     assert.equal(await page.locator('#btn-cover-crew.is-blocked').count(), 1);
-    // Picked again, the row folds away and the panel is its old height.
-    await page.tap('#btn-station-reactor');
-    await page.waitForFunction(() => document.querySelector('#switch-margo').hidden);
   });
 
-  await check('the big switches: reactor output, lights by deck and the lift', async () => {
+  await check('the big switches, on their rooms: reactor output, lights by deck and the lift', async () => {
+    await openRoom(page, 'reactor');
     await page.tap('#btn-output-low');
     await page.waitForFunction(() => window.coldManifest.sim.state.power.output === 'low', null, { timeout: 2000 });
+    await openHelm(page);
     assert.match(await page.textContent('#power-summary'), /^Low/);
+    await openRoom(page, 'reactor');
     await page.tap('#btn-output-steady');
     await page.waitForFunction(() => window.coldManifest.sim.state.power.output === 'steady', null, { timeout: 2000 });
-    await page.tap('#btn-deck-hold');
+    await openRoom(page, 'hold');
+    await page.tap('#btn-deck-lights');
     await page.waitForFunction(() => !window.coldManifest.sim.state.rooms.hold.lightsOn, null, { timeout: 2000 });
     assert.equal((await room(page, 'reactor')).lightsOn, true, 'only that deck');
-    await page.tap('#btn-deck-hold');
+    await page.tap('#btn-deck-lights');
     await page.waitForFunction(() => window.coldManifest.sim.state.rooms.hold.lightsOn, null, { timeout: 2000 });
+    await openRoom(page, 'lift');
     await page.tap('#btn-lift');
     await page.waitForFunction(() => window.coldManifest.sim.state.power.lift === false, null, { timeout: 2000 });
     await page.tap('#btn-lift');
@@ -422,6 +456,7 @@ async function touchTests(browser) {
   });
 
   await check('switches thrown while paused wait for resume', async () => {
+    await openRoom(page, 'engines');
     await page.tap('#btn-pause');
     await page.tap('#btn-stand-engines');
     await sleep(200);
@@ -434,6 +469,7 @@ async function touchTests(browser) {
   });
 
   await check('doors: with door control stood down a tap does nothing and the panel says why', async () => {
+    await openRoom(page, 'door_control');
     await page.tap('#btn-stand-doors');
     await downIs(page, 'doors', true);
     const before = await door(page, 'd_ai_core');
@@ -442,6 +478,7 @@ async function touchTests(browser) {
     await sleep(300);
     assert.deepEqual(await door(page, 'd_ai_core'), before);
     assert.match(await page.textContent('#status'), /by hand/);
+    await openRoom(page, 'door_control');
     await page.tap('#btn-stand-doors');
     await downIs(page, 'doors', false);
     await page.touchscreen.tap(t.mx, t.my);
@@ -463,14 +500,16 @@ async function touchTests(browser) {
     assert.equal((await door(page, 'd_medbay_quarters')).state, 'closed', 'and shut the door behind them');
   });
 
-  await check('intercom: every order gets a reply in the crew member\'s own words (S2.9)', async () => {
+  await check("intercom: every order gets a reply in the crew member's own words, in Margo's channel (S2.9, H.9)", async () => {
+    const lines = await page.locator('#ailog li').count();
     const t = await target(page, 'quarters');
     await page.touchscreen.tap(t.mx, t.my);
     await page.waitForSelector('#intercom', { state: 'visible', timeout: 2000 });
     assert.match(await page.textContent('#intercom'), /Okoro/i);
     assert.ok((await page.textContent('#intercom-text')).length > 3);
+    assert.ok((await page.locator('#ailog li').count()) > lines, 'the reply is a new line in the transcript');
     await page.waitForFunction(() => window.coldManifest.sim.state.crew.okoro.room === 'quarters' && !window.coldManifest.sim.state.crew.okoro.path.length, null, { timeout: 8000 });
-    await page.waitForSelector('#intercom', { state: 'hidden', timeout: 6000 });
+    assert.match(await page.textContent('#intercom'), /Okoro/i, 'and stays there to be read back');
   });
 
   await check('crew: the crew bar selects too, and the suit button works', async () => {
@@ -568,7 +607,7 @@ async function touchTests(browser) {
   });
 
   await check('tapping open space clears the selection', async () => {
-    await page.touchscreen.tap(40, 200);
+    await tapGlass(page);
     assert.equal(await selected(page), null);
   });
 
@@ -653,8 +692,11 @@ async function desktopTests(browser) {
     assert.equal(await game(page, () => window.coldManifest.machine.state), 'ship', 'escape let go of the crew member, it did not leave the screen');
   });
 
-  await check('keys: the Q row no longer routes power, P opens the switch panel and G calls everyone to stations', async () => {
-    assert.equal(await page.isVisible('#breaker-board'), false);
+  await check("keys: the Q row no longer routes power, P shows the helm's card and G calls everyone to stations", async () => {
+    await openRoom(page, 'medbay');
+    await page.keyboard.press('KeyP');
+    await page.waitForFunction(() => window.coldManifest.shipView.debug.selected === null, null, { timeout: 2000 });
+    assert.match(await page.textContent('#status'), /What we give off/i);
     const before = await game(page, () => JSON.stringify(window.coldManifest.sim.state.stations));
     await page.keyboard.press('KeyQ');
     await page.keyboard.press('Shift+KeyY');
@@ -675,8 +717,7 @@ async function desktopTests(browser) {
     await page.click('#btn-dbg-damage');
     await page.waitForFunction(() => window.coldManifest.sim.state.systems.reactor.damage === 1, null, { timeout: 2000 });
     assert.match(await page.textContent('#status'), /Output\s*steady · 7 of 8 bars/);
-    await page.keyboard.press('KeyP');
-    await page.waitForSelector('#breaker-board', { state: 'visible', timeout: 2000 });
+    // The outputs are on the reactor's own card now (H.9).
     assert.match(await page.getAttribute('#btn-output-hard', 'title'), /damage/);
     await page.click('#btn-dbg-repair');
     await page.waitForFunction(() => window.coldManifest.sim.state.systems.reactor.damage === 0, null, { timeout: 2000 });
@@ -772,7 +813,7 @@ async function voiceTests(browser) {
     await page.waitForFunction(() => window.coldManifest.audio.loops.includes('hum'), null, { timeout: 3000 });
   });
 
-  await check('the AI greets the captain, typed out, and the line lands in her log', async () => {
+  await check("the AI greets the captain, typed out, in her channel's transcript", async () => {
     await page.waitForFunction(() => window.coldManifest.sim.state.ai.log.length === 1, null, { timeout: 3000 });
     const line = await game(page, () => window.coldManifest.sim.state.ai.log[0]);
     assert.equal(line.category, 'greeting');
@@ -780,9 +821,7 @@ async function voiceTests(browser) {
     assert.ok(line.text.startsWith(early), 'the box shows the start of the line while it types');
     await page.waitForFunction((text) => document.querySelector('#ai-text').textContent === text, line.text, { timeout: 4000 });
     assert.ok((await game(page, () => window.coldManifest.audio.stats.played.blip ?? 0)) > 0, 'her voice blips as it types');
-    await page.tap('#btn-log');
     assert.match(await page.textContent('#ailog'), new RegExp(`Day 1 0800\\s+${line.text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
-    await page.tap('#btn-log');
     assert.equal(await page.isHidden('#sheet'), true);
   });
 
@@ -791,6 +830,7 @@ async function voiceTests(browser) {
     await game(page, () => window.coldManifest.sim.enqueue({ type: 'debug.room', room: 'weapons', set: { fire: 0.3 } }));
     await page.waitForFunction(() => window.coldManifest.clock.paused, null, { timeout: 2000 });
     assert.equal(await page.textContent('#pause-note'), 'Fire in Weapons');
+    assert.match(await page.textContent('#ailog'), /Paused: Fire in Weapons/, 'and the channel says so too');
     const at = await tick(page);
     await sleep(300);
     assert.equal(await tick(page), at, 'and nothing moves until the captain is ready');
@@ -826,11 +866,11 @@ async function voiceTests(browser) {
     assert.ok((await game(page, () => window.coldManifest.audio.stats.played.click ?? 0)) > before, 'buttons click again');
   });
 
-  await check('the ship still fits between the bars with the text box in place', async () => {
+  await check("the ship still fits beside Margo's channel", async () => {
     const all = await game(page, () => window.coldManifest.shipView.debug.targets());
     const top = (await page.locator('.shipbar').boundingBox());
-    const dock = (await page.locator('#aibox').boundingBox()).y;
-    for (const t of all.filter((x) => x.kind === 'room')) assert.ok(t.y >= top.y + top.height && t.y + t.h <= dock, `${t.id} runs under a bar`);
+    const channel = (await page.locator('#aibox').boundingBox()).x;
+    for (const t of all.filter((x) => x.kind === 'room')) assert.ok(t.y >= top.y + top.height && t.x + t.w <= channel, `${t.id} runs under a bar or the channel`);
   });
 
   await check('every control is at least 44px tall and wide, sheets included', async () => {
@@ -979,7 +1019,7 @@ async function darkTests(browser) {
   });
 
   await check('sensors off as well: an empty dark room goes to static, and a breach in it stays unknown', async () => {
-    if (!(await page.isVisible('#breaker-board'))) await page.tap('#btn-breakers');
+    await openRoom(page, 'sensors');
     if (!(await down(page, 'sensors'))) await page.tap('#btn-stand-sensors');
     await downIs(page, 'sensors', true);
     await page.waitForFunction(() => window.coldManifest.sim.state.seen.brig.live === false, null, { timeout: 3000 });
@@ -1002,7 +1042,9 @@ async function darkTests(browser) {
       setTimeout(() => reject(new Error('no breach.found in 4s')), 4000);
     }));
     found.catch(() => {});
+    await openRoom(page, 'sensors');
     await page.tap('#btn-stand-sensors');
+    await openRoom(page, 'brig');
     assert.equal((await found).room, 'brig');
     await page.waitForFunction(() => window.coldManifest.sim.state.seen.brig.live === true, null, { timeout: 2000 });
     await page.waitForFunction(() => !/No eyes in here/.test(document.querySelector('#status').textContent), null, { timeout: 2000 });
@@ -1010,7 +1052,7 @@ async function darkTests(browser) {
   });
 
   await check('Lights up puts the lamps back', async () => {
-    await page.touchscreen.tap(40, 200); // open space lets go of the room
+    await tapGlass(page); // open space lets go of the room
     await page.waitForSelector('#btn-dark', { timeout: 2000 });
     await page.tap('#btn-dark');
     await page.waitForFunction(() => Object.values(window.coldManifest.sim.state.rooms).filter((r) => !r.jettisoned).every((r) => r.lightsOn), null, { timeout: 2000 });
@@ -1093,12 +1135,13 @@ async function holdTests(browser) {
   });
 
   await check('the Brace button counts the capacitor and braces whenever it is full, no fight needed (H.3)', async () => {
-    await page.touchscreen.tap(40, 200); // open space: the ship's own panel
+    await tapGlass(page); // open space: the ship's own panel
     await page.waitForSelector('#btn-brace', { state: 'visible', timeout: 2000 });
     assert.equal(await page.textContent('#brace-note'), 'Shields dark');
-    if (!(await page.isVisible('#breaker-board'))) await page.tap('#btn-breakers');
+    await openRoom(page, 'shields');
     await page.tap('#btn-stand-shields');
     await downIs(page, 'shields', false);
+    await openHelm(page);
     await page.waitForFunction(() => /^\d+%$/.test(document.querySelector('#brace-note').textContent), null, { timeout: 2000 });
     await page.waitForFunction(() => window.coldManifest.sim.state.shield.charge >= 1, null, { timeout: 12000 });
     await page.tap('#btn-brace');
@@ -1154,7 +1197,7 @@ async function margoTests(browser) {
     await page.waitForSelector('#objection', { state: 'visible', timeout: 2000 });
     assert.equal(await page.textContent('#btn-override'), "Captain's override");
     assert.match(await page.textContent('#ai-name'), /refuses · holding your order \d+s/);
-    assert.equal(await page.isVisible('#btn-log'), false, 'her two answers take the place of Log and Settings');
+    assert.match(await page.textContent('#aibox'), /Stand down/, 'her two answers are reply chips in her channel');
     await page.waitForFunction(() => /Okoro/.test(document.querySelector('#ai-text').textContent) && /Quarters and mess/.test(document.querySelector('#ai-text').textContent), null, { timeout: 6000 });
     assert.deepEqual(await door(page, 'airlock_dorsal'), { state: 'closed', openness: 0 });
     for (const id of ['#btn-override', '#btn-stand-down']) {
@@ -1163,9 +1206,9 @@ async function margoTests(browser) {
     }
     const fit = await game(page, () => {
       const v = window.coldManifest.shipView.debug.view;
-      return { top: v.oy, bottom: document.querySelector('.shipdock').getBoundingClientRect().top };
+      return { top: v.oy, scale: v.scale };
     });
-    assert.ok(fit.top > 0 && fit.bottom > 300, 'the ship still has its room');
+    assert.ok(fit.top > 0 && fit.scale > 12, 'the ship keeps its size');
     if (shots) await page.screenshot({ path: `${shots}/s2-10-refuses-ipad.png` });
   });
 
@@ -1174,7 +1217,6 @@ async function margoTests(browser) {
     await holding(null);
     assert.deepEqual(await ai(page), { trust: 53, refusals: 1, held: null });
     await page.waitForSelector('#objection', { state: 'hidden', timeout: 2000 });
-    assert.equal(await page.isVisible('#btn-log'), true);
     assert.equal(await page.textContent('#ai-name'), 'M.A.R.G.O.');
     assert.deepEqual(await door(page, 'airlock_dorsal'), { state: 'closed', openness: 0 });
   });
@@ -1855,8 +1897,13 @@ async function loopTests(browser) {
     await page.tap(`#sit-dismiss-${fear}`);
     await page.waitForSelector(`#sit-${fear}`, { state: 'detached', timeout: 3000 });
     assert.equal(await game(page, (id) => window.coldManifest.sim.state.crew[id].regard.captain, shaky.id), -2);
+    // A tap on a card picks that hand, or lets go of them if they were picked already (Vesna may still be, from above).
+    await game(page, () => window.coldManifest.shipView.debug.pick(null));
     await page.tap(`#crew-${shaky.id}`);
-    await page.waitForFunction(() => /Captain\s*cool/.test(document.querySelector('#status').textContent), null, { timeout: 3000 });
+    await page.waitForFunction(() => /Captain\s*cool/.test(document.querySelector('#status').textContent), null, { timeout: 3000 }).catch(async (err) => {
+      await dump(page, 'captain cool', { shaky });
+      throw err;
+    });
     assert.match(await page.textContent('#crew-memory'), /Remembers being told to keep the fear down\./);
     // An ordinary order, and the answer on the intercom is short and says why.
     await game(page, ({ id, room }) => window.coldManifest.sim.enqueue({ type: 'crew.move', crew: id, room: room === 'cargo' ? 'quarters' : 'cargo', ship: 'us' }), shaky);
@@ -1973,11 +2020,12 @@ async function scopeTests(browser) {
     const tapAt = (x, y) => (name === 'iPad' ? page.touchscreen.tap(x, y) : page.mouse.click(x, y));
     await openShip(page, press(page), '&debug=1');
 
-    await check(`${name}: the scope stands in the corner of the monitor, clear of the ship, and a tap on the dial brings her round`, async () => {
+    await check(`${name}: the scope stands on the monitor under the ship, clear of it, and a tap on the dial brings her round`, async () => {
       const { view, helm } = await scope(page);
       assert.ok(view.box.w >= 240 && view.box.h >= 200, JSON.stringify(view.box));
       const rooms = (await game(page, () => window.coldManifest.shipView.debug.targets())).filter((t) => t.kind === 'room');
-      for (const room of rooms) assert.ok(room.x + room.w <= view.box.x, `${room.id} runs under the scope`);
+      // The ship runs across the top of the monitor (H.9); the scope sits under it, beside the picked thing's card.
+      for (const room of rooms) assert.ok(room.y + room.h <= view.box.y, `${room.id} runs under the scope`);
       assert.equal(view.marks.length, 0);
       assert.equal(helm.heading, 90);
       // Straight down the dial is a heading of 180.
@@ -2031,8 +2079,8 @@ async function scopeTests(browser) {
         assert.equal(await page.isDisabled('#btn-hail-transponder'), true, 'and have stopped listening');
       }
       // Back to the ship's own panel for the flare (Escape on a keyboard, a tap on open space by hand).
-      const { view } = await scope(page);
-      await tapAt(view.box.x - 20, view.box.y + view.box.h - 6);
+      const glass = await page.locator('#monitor').boundingBox();
+      await tapAt(glass.x + 6, glass.y + 30);
       assert.equal(await selected(page), null);
       assert.match(await page.textContent('#btn-flare'), /Flare \(2\)/);
       await press(page)('#btn-flare');
@@ -2185,7 +2233,7 @@ async function gunTests(browser) {
   });
 
   await check('a drone carrier: its drones show on the scope, and point defence shoots them down', async () => {
-    await page.touchscreen.tap(40, 200);
+    await tapGlass(page);
     await sim(() => window.coldManifest.sim.enqueue({ type: 'debug.contact', encounter: 'drone-carrier', state: 'closing', range: 16, bearing: 200 }));
     await page.waitForFunction(() => window.coldManifest.sim.state.scope.drones.length > 0, null, { timeout: 20000 });
     assert.ok((await sim(() => window.coldManifest.sim.state.scope.incoming ?? null)) === null, 'the drones are state, drawn from the scope view');
@@ -2233,7 +2281,6 @@ async function watchTests(browser) {
 
   await check('a new run keeps two watches: the watch on deck walks to its posts and the watch below turns in', async () => {
     assert.equal(await game(page, () => window.coldManifest.sim.state.roster.watches), 2);
-    await page.tap('#btn-breakers');
     assert.match(await page.textContent('#watch-note'), /First watch · \d+ h( \d+ min)? left/);
     await page.waitForFunction(() => {
       const s = window.coldManifest.sim.state;
@@ -2252,8 +2299,10 @@ async function watchTests(browser) {
     await page.tap('#btn-muster');
     // Everyone with a post walks to it: the gunner ends up on the guns' station, though they are stood down.
     await page.waitForFunction(() => window.coldManifest.sim.state.crew.pruitt.room === 'weapons' && window.coldManifest.sim.state.crew.halloran.room === 'door_control', null, { timeout: 45000 });
+    await openRoom(page, 'door_control');
     await page.waitForFunction(() => /Halloran/.test(document.querySelector('#station-doors').textContent), null, { timeout: 4000 });
-    if (process.env.E2E_SHOTS) await page.screenshot({ path: `${process.env.E2E_SHOTS}/h4-switches-ipad.png` });
+    await page.waitForFunction(() => /On door control/.test(document.querySelector('#crew-halloran').textContent), null, { timeout: 4000 });
+    if (process.env.E2E_SHOTS) await page.screenshot({ path: `${process.env.E2E_SHOTS}/h9-watch-ipad.png` });
   });
 
   await check('the crew panel: Post unfolds the stations, a tap posts them there and they walk to it; Change watch moves them', async () => {
@@ -2269,7 +2318,11 @@ async function watchTests(browser) {
     await page.waitForFunction(() => window.coldManifest.sim.state.crew.vesna.post === 'sensors', null, { timeout: 2000 });
     assert.match(await page.textContent('#status'), /Post\s*Sensors/);
     await page.waitForFunction(() => window.coldManifest.sim.state.crew.vesna.room === 'sensors' && !window.coldManifest.sim.state.crew.vesna.path.length, null, { timeout: 45000 }).catch(async (e) => { console.log('DIAG', JSON.stringify(await game(page, () => { const c = window.coldManifest; const v = c.sim.state.crew.vesna; return { v: { room: v.room, task: v.task, asleep: v.asleep, path: v.path, goal: v.goal, post: v.post, watch: v.watch, x: v.x, y: v.y }, paused: c.sim.state.paused, tick: c.sim.state.tick, machine: c.machine.state, aboard: c.sim.state.run?.events?.aboard, roster: c.sim.state.roster }; }))); throw e; });
+    await page.waitForFunction(() => /On sensors/.test(document.querySelector('#crew-vesna').textContent), null, { timeout: 4000 });
+    await openRoom(page, 'sensors');
     await page.waitForFunction(() => /Vesna/.test(document.querySelector('#station-sensors').textContent), null, { timeout: 4000 });
+    await game(page, () => window.coldManifest.shipView.debug.pick(null));
+    await page.tap('#crew-vesna');
     const was = await game(page, () => window.coldManifest.sim.state.crew.vesna.watch);
     await page.tap('#btn-watch');
     await page.waitForFunction((w) => window.coldManifest.sim.state.crew.vesna.watch !== w, was, { timeout: 2000 });
